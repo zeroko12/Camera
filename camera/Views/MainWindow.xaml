@@ -41,7 +41,7 @@
             <TextBox Width="100" Text="{Binding Cam.Fps}" />
             <Button Command="{Binding Set}">应用</Button>
             <TextBlock VerticalAlignment="Center">是否保存:</TextBlock>
-            <RadioButton VerticalAlignment="Center" IsChecked="{Binding isSave}" />
+            <CheckBox VerticalAlignment="Center" IsChecked="{Binding isSave}" />
         </WrapPanel>
     </Grid>
 </Window>

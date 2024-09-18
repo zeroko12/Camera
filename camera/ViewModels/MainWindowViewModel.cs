@@ -23,11 +23,12 @@ namespace camera.ViewModels
             set
             {
                 SetProperty(ref _isSave, value);
+                OnIsSaveChanged();
             }
         }
         private void OnIsSaveChanged()
         {
-            if (_isSave)
+            if (isSave)
             {
                 foreach (var camera in Cameras)
                 {

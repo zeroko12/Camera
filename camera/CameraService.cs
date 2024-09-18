@@ -337,8 +337,6 @@ namespace camera
         {
             _videoWriter?.Release();
             _videoWriter?.Dispose();
-            if (!isSave)
-                return;
             //压缩视频
             string absolutePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, filePath);
             string directory = Path.GetDirectoryName(absolutePath);
