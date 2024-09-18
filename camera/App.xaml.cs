@@ -1,5 +1,6 @@
 ﻿using camera.Views;
 using Prism.Ioc;
+using System.Diagnostics;
 using System.Windows;
 
 namespace camera
@@ -17,6 +18,12 @@ namespace camera
         protected override void RegisterTypes(IContainerRegistry containerRegistry)
         {
 
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            Debug.WriteLine("程序退出");
+            base.OnExit(e);
         }
     }
 }
