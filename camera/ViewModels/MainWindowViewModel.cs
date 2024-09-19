@@ -26,6 +26,13 @@ namespace camera.ViewModels
                 OnIsSaveChanged();
             }
         }
+
+        private bool _ConsoleStatus = false;
+        public bool ConsoleStatus
+        {
+            get { return _ConsoleStatus; }
+            set { SetProperty(ref _ConsoleStatus, value); }
+        }
         private void OnIsSaveChanged()
         {
             if (isSave)
@@ -94,6 +101,24 @@ namespace camera.ViewModels
         void ExecuteSet()
         {
             Cam.ChangeCameraInfo();
+        }
+
+        private DelegateCommand _ShowConsole;
+        public DelegateCommand ShowConsole =>
+            _ShowConsole ?? (_ShowConsole = new DelegateCommand(ExecuteShowConsole));
+        void ExecuteShowConsole()
+        {
+            if (ConsoleStatus)
+            {
+                Debug.WriteLine("关闭控制台");
+                ConsoleStatus = false;
+            }
+            else
+            {
+                Debug.WriteLine("打开控制台");
+                ConsoleStatus = true;
+            }
+
         }
 
         ~MainWindowViewModel()
