@@ -17,16 +17,24 @@
     ResizeMode="NoResize"
     SizeChanged="Window_SizeChanged"
     WindowStyle="None">
-    <!--<Window.Style>
+    <!--
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        SizeChanged="Window_SizeChanged"
+        WindowStyle="None">
+    -->
+
+    <!-- <Window.Style>
         <Style TargetType="Window">
             <Setter Property="WindowChrome.WindowChrome">
                 <Setter.Value>
                     <WindowChrome
-                        CaptionHeight="30"
+                        CaptionHeight="0"
                         CornerRadius="5"
                         GlassFrameThickness="-1"
                         NonClientFrameEdges="None"
-                        UseAeroCaptionButtons="True" />
+                        UseAeroCaptionButtons="False"/>
                 </Setter.Value>
             </Setter>
         </Style>
@@ -40,55 +48,125 @@
             <ColumnDefinition />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <!-- <Image Source="{Binding Cam.Frame, Converter={StaticResource MatToImageSourceConverter}}" /> -->
-        <Border Margin="10" Effect="{StaticResource EffectShadow3}">
-            <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
-                <ItemsControl ItemsSource="{Binding Cameras}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <UniformGrid Columns="{c:Binding 'Math.Ceiling(Math.Sqrt(Cameras.Count))'}" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <hc:ImageBlock Margin="5" Source="{Binding Frame, Converter={StaticResource MatToImageSourceConverter}}" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition />
+        </Grid.RowDefinitions>
+        <!--  自定义标题栏  -->
+        <Grid
+            Grid.Row="0"
+            Margin="10,0,3,0"
+            Background="#40000000"
+            MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <TextBlock
+                Margin="10,0,0,0"
+                VerticalAlignment="Center"
+                Foreground="White"
+                Text="监控摄像头" />
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                <!--<Button
+                    Width="30"
+                    Height="30"
+                    Click="MinimizeButton_Click"
+                    Content="—" />
+                <Button
+                    Width="30"
+                    Height="30"
+                    Click="MaximizeRestoreButton_Click"
+                    Content="□" />
+                <Button
+                    Width="30"
+                    Height="30"
+                    Click="CloseButton_Click"
+                    Content="×" />-->
+                <Button
+                    Width="30"
+                    Margin="5"
+                    Padding="16,8"
+                    hc:IconElement.Geometry="{StaticResource WindowMinGeometry}"
+                    Click="MinimizeButton_Click"
+                    IsEnabled="True"
+                    Style="{StaticResource ButtonDashedDanger.Small}" />
+                <Button
+                    Width="30"
+                    Margin="5"
+                    Padding="16,8"
+                    hc:IconElement.Geometry="{StaticResource WindowMaxGeometry}"
+                    Click="MaximizeRestoreButton_Click"
+                    IsEnabled="True"
+                    Style="{StaticResource ButtonDashedWarning.Small}" />
+                <Button
+                    Width="30"
+                    Margin="5"
+                    Padding="16,8"
+                    hc:IconElement.Geometry="{StaticResource DeleteGeometry}"
+                    Click="CloseButton_Click"
+                    IsEnabled="True"
+                    Style="{StaticResource ButtonDashedDanger.Small}" />
+            </StackPanel>
+        </Grid>
+        <Grid
+            x:Name="MainContentGrid"
+            Grid.Row="1"
+            MouseEnter="MainContentGrid_MouseEnter"
+            MouseLeave="MainContentGrid_MouseLeave">
+            <!-- <Image Source="{Binding Cam.Frame, Converter={StaticResource MatToImageSourceConverter}}" /> -->
+            <Border
+                x:Name="MainBorder"
+                Margin="10,2,2,10"
+                Effect="{StaticResource EffectShadow3}">
+                <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
+                    <ItemsControl ItemsSource="{Binding Cameras}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="{c:Binding 'Math.Ceiling(Math.Sqrt(Cameras.Count))'}" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <hc:ImageBlock Margin="5" Source="{Binding Frame, Converter={StaticResource MatToImageSourceConverter}}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
             </Border>
-        </Border>
 
-        <!--<materialDesign:PackIcon
-            Grid.Column="0"
-            Margin="10"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Center"
-            Kind="GamepadCircleRight">
-            <i:Interaction.Triggers>
-                <i:EventTrigger EventName="Clicked">
-                    <i:InvokeCommandAction Command="{Binding ShowConsole}" />
-                </i:EventTrigger>
-            </i:Interaction.Triggers>
-        </materialDesign:PackIcon>-->
-        <!--<Button
-            Width="30"
-            Margin="20"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Center"
-            hc:IconElement.Geometry="{StaticResource LeftGeometry}"
-            Command="{Binding ShowConsole}"
-            IsEnabled="True"
-            Style="{StaticResource ButtonDashedWarning}" />-->
+            <!--<materialDesign:PackIcon
+    Grid.Column="0"
+    Margin="10"
+    HorizontalAlignment="Right"
+    VerticalAlignment="Center"
+    Kind="GamepadCircleRight">
+    <i:Interaction.Triggers>
+        <i:EventTrigger EventName="Clicked">
+            <i:InvokeCommandAction Command="{Binding ShowConsole}" />
+        </i:EventTrigger>
+    </i:Interaction.Triggers>
+</materialDesign:PackIcon>-->
+            <!--<Button
+    Width="30"
+    Margin="20"
+    HorizontalAlignment="Right"
+    VerticalAlignment="Center"
+    hc:IconElement.Geometry="{StaticResource LeftGeometry}"
+    Command="{Binding ShowConsole}"
+    IsEnabled="True"
+    Style="{StaticResource ButtonDashedWarning}" />-->
 
-        <ToggleButton
-            Width="30"
-            Margin="20"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Center"
-            hc:IconSwitchElement.Geometry="{StaticResource RightGeometry}"
-            hc:IconSwitchElement.GeometrySelected="{StaticResource LeftGeometry}"
-            Command="{Binding ShowConsole}"
-            Style="{StaticResource ToggleButtonIcon}" />
+            <ToggleButton
+                x:Name="ConsoleToggleButton"
+                Width="30"
+                Margin="20"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                hc:IconSwitchElement.Geometry="{StaticResource RightGeometry}"
+                hc:IconSwitchElement.GeometrySelected="{StaticResource LeftGeometry}"
+                Command="{Binding ShowConsole}"
+                Style="{StaticResource ToggleButtonIcon}"
+                Visibility="Collapsed" />
+
+        </Grid>
+
 
         <!--<WrapPanel Grid.Row="1">
             <TextBlock>宽:</TextBlock>
@@ -104,6 +182,7 @@
 
         <hc:TransitioningContentControl
             x:Name="MyTransitioningContentControl"
+            Grid.RowSpan="2"
             Grid.Column="1"
             TransitionMode="Left2RightWithFade"
             Visibility="{c:Binding ConsoleStatus,
