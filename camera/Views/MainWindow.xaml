@@ -86,7 +86,7 @@
                     hc:IconElement.Geometry="{StaticResource WindowMinGeometry}"
                     Click="MinimizeButton_Click"
                     IsEnabled="True"
-                    Style="{StaticResource ButtonDashedDanger.Small}" />
+                    Style="{StaticResource ButtonDashedWarning.Small}" />
                 <Button
                     Width="30"
                     Margin="5"
@@ -94,7 +94,7 @@
                     hc:IconElement.Geometry="{StaticResource WindowMaxGeometry}"
                     Click="MaximizeRestoreButton_Click"
                     IsEnabled="True"
-                    Style="{StaticResource ButtonDashedWarning.Small}" />
+                    Style="{StaticResource ButtonDashedSuccess.Small}" />
                 <Button
                     Width="30"
                     Margin="5"
