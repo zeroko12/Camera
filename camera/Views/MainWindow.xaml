@@ -52,59 +52,6 @@
             <RowDefinition Height="Auto" />
             <RowDefinition />
         </Grid.RowDefinitions>
-        <!--  自定义标题栏  -->
-        <Grid
-            Grid.Row="0"
-            Margin="10,0,3,0"
-            Background="#40000000"
-            MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
-            <TextBlock
-                Margin="10,0,0,0"
-                VerticalAlignment="Center"
-                Foreground="White"
-                Text="监控摄像头" />
-            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
-                <!--<Button
-                    Width="30"
-                    Height="30"
-                    Click="MinimizeButton_Click"
-                    Content="—" />
-                <Button
-                    Width="30"
-                    Height="30"
-                    Click="MaximizeRestoreButton_Click"
-                    Content="□" />
-                <Button
-                    Width="30"
-                    Height="30"
-                    Click="CloseButton_Click"
-                    Content="×" />-->
-                <Button
-                    Width="30"
-                    Margin="5"
-                    Padding="16,8"
-                    hc:IconElement.Geometry="{StaticResource WindowMinGeometry}"
-                    Click="MinimizeButton_Click"
-                    IsEnabled="True"
-                    Style="{StaticResource ButtonDashedWarning.Small}" />
-                <Button
-                    Width="30"
-                    Margin="5"
-                    Padding="16,8"
-                    hc:IconElement.Geometry="{StaticResource WindowMaxGeometry}"
-                    Click="MaximizeRestoreButton_Click"
-                    IsEnabled="True"
-                    Style="{StaticResource ButtonDashedSuccess.Small}" />
-                <Button
-                    Width="30"
-                    Margin="5"
-                    Padding="16,8"
-                    hc:IconElement.Geometry="{StaticResource DeleteGeometry}"
-                    Click="CloseButton_Click"
-                    IsEnabled="True"
-                    Style="{StaticResource ButtonDashedDanger.Small}" />
-            </StackPanel>
-        </Grid>
         <Grid
             x:Name="MainContentGrid"
             Grid.Row="1"
@@ -164,6 +111,64 @@
                 Command="{Binding ShowConsole}"
                 Style="{StaticResource ToggleButtonIcon}"
                 Visibility="Collapsed" />
+
+            <!--  自定义标题栏  -->
+            <Grid
+                x:Name="TitleBar"
+                Grid.Row="0"
+                Height="30"
+                Margin="10,0,0,10"
+                VerticalAlignment="Top"
+                Background="#40000000"
+                MouseEnter="TitleBar_MouseEnter"
+                MouseLeave="TitleBar_MouseLeave"
+                MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <TextBlock
+                    Margin="10,0,0,0"
+                    VerticalAlignment="Center"
+                    Foreground="White"
+                    Text="监控摄像头" />
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                    <!--<Button
+              Width="30"
+              Height="30"
+              Click="MinimizeButton_Click"
+              Content="—" />
+          <Button
+              Width="30"
+              Height="30"
+              Click="MaximizeRestoreButton_Click"
+              Content="□" />
+          <Button
+              Width="30"
+              Height="30"
+              Click="CloseButton_Click"
+              Content="×" />-->
+                    <Button
+                        Width="25"
+                        Margin="5,0,5,0"
+                        hc:IconElement.Geometry="{StaticResource WindowMinGeometry}"
+                        hc:IconElement.Height="16"
+                        hc:IconElement.Width="16"
+                        Click="MinimizeButton_Click"
+                        IsEnabled="True"
+                        Style="{StaticResource ButtonDashedWarning.Small}" />
+                    <Button
+                        Width="25"
+                        Margin="5,0,5,0"
+                        hc:IconElement.Geometry="{StaticResource WindowMaxGeometry}"
+                        Click="MaximizeRestoreButton_Click"
+                        IsEnabled="True"
+                        Style="{StaticResource ButtonDashedSuccess.Small}" />
+                    <Button
+                        Width="25"
+                        Margin="5,0,5,0"
+                        hc:IconElement.Geometry="{StaticResource DeleteGeometry}"
+                        Click="CloseButton_Click"
+                        IsEnabled="True"
+                        Style="{StaticResource ButtonDashedDanger.Small}" />
+                </StackPanel>
+            </Grid>
 
         </Grid>
 
