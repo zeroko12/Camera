@@ -14,8 +14,7 @@
     prism:ViewModelLocator.AutoWireViewModel="True"
     AllowsTransparency="True"
     Background="Transparent"
-    ResizeMode="NoResize"
-    SizeChanged="Window_SizeChanged"
+    ResizeMode="CanResize"
     WindowStyle="None">
     <!--
         AllowsTransparency="True"
@@ -61,6 +60,7 @@
             <Border
                 x:Name="MainBorder"
                 Margin="10,2,2,10"
+                BorderThickness="1"
                 Effect="{StaticResource EffectShadow3}">
                 <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
                     <ItemsControl ItemsSource="{Binding Cameras}">
@@ -111,6 +111,15 @@
                 Command="{Binding ShowConsole}"
                 Style="{StaticResource ToggleButtonIcon}"
                 Visibility="Collapsed" />
+
+            <ResizeGrip
+                x:Name="WindowResizeGrip"
+                Margin="10,2,2,10"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Cursor="SizeNWSE"
+                MouseLeftButtonDown="ResizeGrip_MouseLeftButtonDown"
+                Opacity="0" />
 
             <!--  自定义标题栏  -->
             <Grid

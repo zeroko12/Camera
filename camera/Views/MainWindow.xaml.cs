@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
@@ -30,12 +33,58 @@ namespace camera.Views
         private bool isMouseOverTitleBar = false;
         private bool IsMouseOverContentGrid = false;
 
+
+        #region 拖拽修改窗口大小相关
+        private void ResizeGrip_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount == 2)
+            {
+                ToggleMaximize();
+            }
+            else
+            {
+                ResizeWindow(ResizeDirection.BottomRight);
+            }
+        }
+
+        private void ToggleMaximize()
+        {
+            if (WindowState == WindowState.Maximized)
+                WindowState = WindowState.Normal;
+            else
+                WindowState = WindowState.Maximized;
+        }
+
+        private void ResizeWindow(ResizeDirection direction)
+        {
+            WindowInteropHelper helper = new WindowInteropHelper(this);
+            SendMessage(helper.Handle, 0x112, (IntPtr)(61440 + direction), IntPtr.Zero);
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        enum ResizeDirection
+        {
+            Left = 1,
+            Right = 2,
+            Top = 3,
+            TopLeft = 4,
+            TopRight = 5,
+            Bottom = 6,
+            BottomLeft = 7,
+            BottomRight = 8,
+        }
+
+        #endregion
+
         private void MainContentGrid_MouseEnter(object sender, MouseEventArgs e)
         {
             Debug.WriteLine("鼠标进入摄像头显示");
             ConsoleToggleButton.Visibility = Visibility.Visible;
             ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.3)));
             IsMouseOverContentGrid = true;
+            WindowResizeGrip.Opacity = 50;
         }
 
         private void MainContentGrid_MouseLeave(object sender, MouseEventArgs e)
@@ -45,6 +94,7 @@ namespace camera.Views
             animation.Completed += (s, _) => ConsoleToggleButton.Visibility = Visibility.Collapsed;
             ConsoleToggleButton.BeginAnimation(OpacityProperty, animation);
             IsMouseOverContentGrid = false;
+            WindowResizeGrip.Opacity = 0;
         }
 
         private void ShowTitleBar()
