@@ -208,9 +208,11 @@
                         <ScrollViewer>
                             <StackPanel>
                                 <Expander
+                                    Width="125"
                                     Margin="2"
                                     ExpandDirection="Down"
-                                    Header="录像相关">
+                                    Header="录像相关"
+                                    IsExpanded="True">
                                     <Border
                                         Background="{DynamicResource RegionBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
@@ -218,19 +220,29 @@
                                         CornerRadius="0,4,4,0">
                                         <StackPanel>
                                             <hc:ButtonGroup Margin="5">
-                                                <RadioButton Content="录像关" IsChecked="True" />
-                                                <RadioButton Content="录像开" />
-
+                                                <RadioButton
+                                                    Command="{Binding SetSave}"
+                                                    CommandParameter="False"
+                                                    Content="录像关"
+                                                    IsChecked="True" />
+                                                <RadioButton
+                                                    Command="{Binding SetSave}"
+                                                    CommandParameter="True"
+                                                    Content="录像开" />
                                             </hc:ButtonGroup>
-                                            <UniformGrid Columns="2">
+                                            <UniformGrid Columns="                                                         2">
                                                 <!--<TextBlock
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="Black">
+                                                    HorizontalAlignment="
+                                                        Center"
+                                                    VerticalAlignment="
+                                                        Center"
+                                                    Foreground="
+                                                        Black">
                                                     录像
                                                 </TextBlock>
                                                 -->
-                                                <!--<CheckBox HorizontalAlignment="Center" IsChecked="{Binding isSave}" />-->
+                                                <!--<CheckBox HorizontalAlignment="
+                                                        Center" IsChecked="{Binding isSave}" />-->
                                                 <!--
                                                 <ToggleButton
                                                     HorizontalAlignment="left"
@@ -266,7 +278,7 @@
                                                     VerticalAlignment="Center"
                                                     FontSize="12"
                                                     Foreground="Black">
-                                                    保存质量
+                                                    压缩程度
                                                 </TextBlock>
 
                                                 <hc:NumericUpDown
@@ -275,8 +287,8 @@
                                                     Maximum="51"
                                                     Minimum="0"
                                                     Style="{StaticResource NumericUpDownPlus}"
-                                                    ToolTip="保存质量"
-                                                    Value="1" />
+                                                    ToolTip="当前值越大,保存文件越小"
+                                                    Value="{Binding Quality}" />
 
                                                 <TextBlock
                                                     HorizontalAlignment="Center"
@@ -290,8 +302,13 @@
                                                     Maximum="99"
                                                     Minimum="1"
                                                     Style="{StaticResource NumericUpDownPlus}"
-                                                    ToolTip="保存质量"
-                                                    Value="10" />
+                                                    ToolTip="分钟"
+                                                    Value="{Binding SaveInterval}" />
+                                                <!--<hc:TimePicker Style="{StaticResource TimePickerPlus.Small}">
+                                                    <hc:TimePicker.Clock>
+                                                        <hc:ListClock />
+                                                    </hc:TimePicker.Clock>
+                                                </hc:TimePicker>-->
                                             </UniformGrid>
                                             <Button Margin="5" Content="查看回放" />
 

@@ -1,5 +1,6 @@
 ﻿using Prism.Commands;
 using Prism.Mvvm;
+using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Windows;
@@ -27,12 +28,6 @@ namespace camera.ViewModels
             }
         }
 
-        private bool _ConsoleStatus = false;
-        public bool ConsoleStatus
-        {
-            get { return _ConsoleStatus; }
-            set { SetProperty(ref _ConsoleStatus, value); }
-        }
         private void OnIsSaveChanged()
         {
             if (isSave)
@@ -48,6 +43,45 @@ namespace camera.ViewModels
                 {
                     camera.isSave = false;
                 }
+            }
+        }
+
+        private int _Quality = 30;
+        public int Quality
+        {
+            get { return _Quality; }
+            set { SetProperty(ref _Quality, value); OnQualityChanged(); }
+        }
+
+        private void OnQualityChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.Quality = Quality;
+            }
+        }
+
+        private bool _ConsoleStatus = false;
+        public bool ConsoleStatus
+        {
+            get { return _ConsoleStatus; }
+            set { SetProperty(ref _ConsoleStatus, value); }
+        }
+
+
+
+        private int _SaveInterval = 1;
+        public int SaveInterval
+        {
+            get { return _SaveInterval; }
+            set { SetProperty(ref _SaveInterval, value); OnSaveIntervalChanged(); }
+        }
+
+        private void OnSaveIntervalChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.SaveInterval = TimeSpan.FromMinutes(SaveInterval);
             }
         }
 
@@ -121,6 +155,26 @@ namespace camera.ViewModels
 
         }
 
+
+        private DelegateCommand<string> _SetSave;
+        public DelegateCommand<string> SetSave =>
+            _SetSave ?? (_SetSave = new DelegateCommand<string>(ExecuteSetSave));
+
+        void ExecuteSetSave(string saveModeString)
+        {
+            if (bool.TryParse(saveModeString, out bool saveMode))
+            {
+                if (isSave != saveMode)
+                {
+                    isSave = saveMode;
+                    Debug.WriteLine($"设置是否保存为{saveMode}");
+                }
+            }
+            else
+            {
+                Debug.WriteLine($"无效的保存模式值: {saveModeString}");
+            }
+        }
         ~MainWindowViewModel()
         {
             MessageBox.Show("析构窗口");

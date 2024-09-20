@@ -1,4 +1,5 @@
-﻿using OpenCvSharp;
+﻿using MaterialDesignThemes.Wpf;
+using OpenCvSharp;
 using OpenCvSharp.Flann;
 using OpenCvSharp.WpfExtensions;
 using Prism.Mvvm;
@@ -27,12 +28,18 @@ namespace camera
         double WidthOrigin;
         double HeightOrigin;
         bool isCapture = false;//是否退出捕获线程
-        int Quality = 26;//控制压缩视频的质量
 
         private Mat _BufferFrame = new();
 
         private object _lockObject = new object();
 
+
+        private int _Quality = 30;
+        public int Quality
+        {
+            get { return _Quality; }
+            set { SetProperty(ref _Quality, value); }
+        }
 
         private bool _isSave = false;//是否保存
         public bool isSave
@@ -103,9 +110,12 @@ namespace camera
 
         private VideoWriter _videoWriter;
         private DateTime _lastSaveTime;
-        private TimeSpan _saveInterval = TimeSpan.FromMinutes(1); // 默认5分钟保存一次
+
         private string _saveDirectory = "SavedVideos"; // 保存视频的目录
         //此处还应该区分视频保存的目录
+
+
+        private TimeSpan _saveInterval = TimeSpan.FromMinutes(1); // 默认5分钟保存一次
 
         public TimeSpan SaveInterval
         {
@@ -199,6 +209,8 @@ namespace camera
                         if (!cap.Read(tempFrame))
                         {
                             Debug.WriteLine("无法读取帧");
+                            MessageBox.Show("无法读取帧,请检查是否被其他程序占用!");
+                            //结束自身
                             continue;
                         }
                         if (tempFrame.Empty())
@@ -265,7 +277,8 @@ namespace camera
             originFileName = $"{Index}_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
             fileName = "TEMP_" + originFileName;
             filePath = Path.Combine(_saveDirectory, fileName);
-
+            //开始计时
+            _lastSaveTime = DateTime.Now;
             //_videoWriter = new VideoWriter(filePath, FourCC.MP4V, Fps, new OpenCvSharp.Size(Width, Height));
             _videoWriter = new VideoWriter(filePath, FourCC.XVID, Fps, new OpenCvSharp.Size(Width, Height));
         }
@@ -293,6 +306,23 @@ namespace camera
         {
             if (!File.Exists(absolutePath))
                 return;
+            if (string.IsNullOrEmpty(OutputPath))
+                return;
+            string directoryPath = Path.GetDirectoryName(OutputPath);
+            if (!Directory.Exists(directoryPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(directoryPath);
+                    Debug.WriteLine($"目录已创建：{directoryPath}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"创建目录时发生错误：{ex.Message}");
+                    return;
+                }
+            }
+            //根据OutputPath解析最终存放路径
             var arguments = $"-i \"{absolutePath}\" -c:v libx264 -preset slow -crf {Quality} -an \"{OutputPath}\"";
 
             var processStartInfo = new ProcessStartInfo
@@ -303,7 +333,7 @@ namespace camera
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WorkingDirectory = Path.GetDirectoryName(OutputPath)
+                WorkingDirectory = directoryPath
             };
 
             using (Process process = new Process { StartInfo = processStartInfo })
@@ -320,7 +350,8 @@ namespace camera
                 {
                     if (File.Exists(OutputPath))
                     {
-                        File.Delete(absolutePath);
+                        //File.Delete(absolutePath);
+                        DeleteFilesInPathWithStartStr(absolutePath, "TEMP_");
                         Debug.WriteLine($"删除{absolutePath}");
                     }
                     else
@@ -331,16 +362,61 @@ namespace camera
             }
         }
 
+        private void DeleteFilesInPathWithStartStr(string path, string startStr)
+        {
+            string directoryPath = Path.GetDirectoryName(path);
+            if (!Directory.Exists(directoryPath))
+                return;
 
+            string[] files = Directory.GetFiles(directoryPath);
+            foreach (string file in files)
+            {
+                string fileName = Path.GetFileName(file);
+                if (fileName.StartsWith(startStr, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        File.Delete(file);
+                        Debug.WriteLine($"已删除文件：{file}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"删除文件 {file} 时出错：{ex.Message}");
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 将 `编号_日期_时间.mp4` 转换为拼接好的文件保存的绝对路径路径,directory/编号/日期/时间.mp4 
+        /// </summary>
+        private string FileName2FullPath(string directory, string fileName)
+        {
+            string[] fileNameSplit = fileName.Split('_');
+            string date = fileNameSplit[1];
+            string time = fileNameSplit[2];
+            string fullPath = Path.Combine(directory, Index.ToString(), date, time);
+            return fullPath;
+        }
 
         private void CloseVideoWriter()
         {
-            _videoWriter?.Release();
-            _videoWriter?.Dispose();
+            try
+            {
+                _videoWriter?.Release();
+                _videoWriter?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex);
+            }
             //压缩视频
+            if (filePath == "" || originFileName == "")
+                return;
             string absolutePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, filePath);
             string directory = Path.GetDirectoryName(absolutePath);
-            string outputPath = Path.Combine(directory, originFileName);
+            string outputPath = FileName2FullPath(directory, originFileName);
+
             Debug.WriteLine("绝对路径:" + absolutePath);
             Task.Run(() => StartFFmpegProcess(absolutePath, outputPath));
         }
