@@ -87,7 +87,7 @@ namespace camera.ViewModels
             }
             else
             {
-                Debug.WriteLine($"成功检测到 {Cameras.Count} 个摄像头");
+                MessageBox.Show($"成功检测到 {Cameras.Count} 个摄像头");
             }
 
         }

@@ -15,12 +15,13 @@ namespace camera.Views
     /// </summary>
     public partial class MainWindow : Window
     {
-        private const double AspectRatio = 12.0 / 9.0;
+        private double AspectRatio = 12.0 / 9.0;
         private const double TitleBarHeight = 30; // 设置一个合适的标题栏高度
 
         public MainWindow()
         {
             InitializeComponent();
+            AspectRatio = this.Width / this.Height;
             InitializeTitleBar();
         }
 
@@ -33,6 +34,7 @@ namespace camera.Views
         private bool isMouseOverTitleBar = false;
         private bool IsMouseOverContentGrid = false;
 
+        private Point lastMousePosition;
 
         #region 拖拽修改窗口大小相关
         private void ResizeGrip_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -43,8 +45,51 @@ namespace camera.Views
             }
             else
             {
-                ResizeWindow(ResizeDirection.BottomRight);
+                lastMousePosition = e.GetPosition(this);
+                this.MouseMove += ResizeWindow_MouseMove;
+                this.MouseLeftButtonUp += ResizeWindow_MouseLeftButtonUp;
+                this.CaptureMouse();
             }
+        }
+
+        private void ResizeWindow_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (e.LeftButton == MouseButtonState.Pressed)
+            {
+                Point currentPosition = e.GetPosition(this);
+                double deltaX = currentPosition.X - lastMousePosition.X;
+                double deltaY = currentPosition.Y - lastMousePosition.Y;
+
+                ResizeWindow(deltaX, deltaY);
+
+                lastMousePosition = currentPosition;
+            }
+        }
+
+        private void ResizeWindow_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            this.MouseMove -= ResizeWindow_MouseMove;
+            this.MouseLeftButtonUp -= ResizeWindow_MouseLeftButtonUp;
+            this.ReleaseMouseCapture();
+        }
+
+        private void ResizeWindow(double deltaX, double deltaY)
+        {
+            double newWidth = Math.Max(MinWidth, this.Width + deltaX);
+            double newHeight = Math.Max(MinHeight, this.Height + deltaY);
+
+            // 保持宽高比
+            if (newWidth / newHeight > AspectRatio)
+            {
+                newWidth = newHeight * AspectRatio;
+            }
+            else
+            {
+                newHeight = newWidth / AspectRatio;
+            }
+
+            this.Width = newWidth;
+            this.Height = newHeight;
         }
 
         private void ToggleMaximize()
@@ -58,7 +103,44 @@ namespace camera.Views
         private void ResizeWindow(ResizeDirection direction)
         {
             WindowInteropHelper helper = new WindowInteropHelper(this);
+            var hwnd = helper.Handle;
+
+            // 获取当前窗口的大小
+            var currentWidth = this.Width;
+            var currentHeight = this.Height;
+
+            // 设置比例因子（例如，1.1 表示增加 10%）
+            double scaleFactor = 64 / 48;
+
+            // 根据方向计算新的宽度和高度
+            double newWidth = currentWidth;
+            double newHeight = currentHeight;
+
+            switch (direction)
+            {
+                case ResizeDirection.Left:
+                case ResizeDirection.Right:
+                    newWidth *= scaleFactor; // 只调整宽度
+                    break;
+                case ResizeDirection.Top:
+                case ResizeDirection.Bottom:
+                    newHeight *= scaleFactor; // 只调整高度
+                    break;
+                case ResizeDirection.TopLeft:
+                case ResizeDirection.BottomRight:
+                    newWidth *= scaleFactor;
+                    newHeight *= scaleFactor; // 同时调整宽度和高度
+                    break;
+                case ResizeDirection.TopRight:
+                case ResizeDirection.BottomLeft:
+                    newWidth *= scaleFactor;
+                    newHeight *= scaleFactor; // 同时调整宽度和高度
+                    break;
+            }
             SendMessage(helper.Handle, 0x112, (IntPtr)(61440 + direction), IntPtr.Zero);
+            // 设置新的宽度和高度
+            this.Width = newWidth;
+            this.Height = newHeight;
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]

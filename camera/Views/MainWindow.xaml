@@ -9,8 +9,8 @@
     xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
     xmlns:prism="http://prismlibrary.com/"
     Title="{Binding Title}"
-    Width="525"
-    Height="350"
+    Width="900"
+    Height="480"
     prism:ViewModelLocator.AutoWireViewModel="True"
     AllowsTransparency="True"
     Background="Transparent"
@@ -40,7 +40,6 @@
     </Window.Style>-->
     <Window.Resources>
         <local:MatToImageSourceConverter x:Key="MatToImageSourceConverter" />
-
     </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
@@ -57,6 +56,7 @@
             MouseEnter="MainContentGrid_MouseEnter"
             MouseLeave="MainContentGrid_MouseLeave">
             <!-- <Image Source="{Binding Cam.Frame, Converter={StaticResource MatToImageSourceConverter}}" /> -->
+
             <Border
                 x:Name="MainBorder"
                 Margin="10,2,2,10"
@@ -128,7 +128,7 @@
                 Height="30"
                 Margin="10,0,0,10"
                 VerticalAlignment="Top"
-                Background="#40000000"
+                Background="#90000000"
                 MouseEnter="TitleBar_MouseEnter"
                 MouseLeave="TitleBar_MouseLeave"
                 MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
@@ -153,6 +153,7 @@
               Height="30"
               Click="CloseButton_Click"
               Content="×" />-->
+
                     <Button
                         Width="25"
                         Margin="5,0,5,0"
@@ -204,11 +205,135 @@
             <Border Margin="10" Effect="{StaticResource EffectShadow3}">
                 <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
                     <StackPanel Margin="5">
-                        <UniformGrid Columns="2">
-                            <TextBlock Foreground="Black">是否保存:</TextBlock>
-                            <CheckBox HorizontalAlignment="Center" IsChecked="{Binding isSave}" />
-                        </UniformGrid>
+                        <ScrollViewer>
+                            <StackPanel>
+                                <Expander
+                                    Margin="2"
+                                    ExpandDirection="Down"
+                                    Header="录像相关">
+                                    <Border
+                                        Background="{DynamicResource RegionBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="0,1,1,1"
+                                        CornerRadius="0,4,4,0">
+                                        <StackPanel>
+                                            <hc:ButtonGroup Margin="5">
+                                                <RadioButton Content="录像关" IsChecked="True" />
+                                                <RadioButton Content="录像开" />
+
+                                            </hc:ButtonGroup>
+                                            <UniformGrid Columns="2">
+                                                <!--<TextBlock
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="Black">
+                                                    录像
+                                                </TextBlock>
+                                                -->
+                                                <!--<CheckBox HorizontalAlignment="Center" IsChecked="{Binding isSave}" />-->
+                                                <!--
+                                                <ToggleButton
+                                                    HorizontalAlignment="left"
+                                                    BorderThickness="0"
+                                                    IsChecked="False"
+                                                    IsEnabled="True"
+                                                    Style="{StaticResource ToggleButtonFlip}"
+                                                    ToolTip="录像功能">
+                                                    <hc:StatusSwitchElement.CheckedElement>
+                                                        <Border Background="{DynamicResource SuccessBrush}">
+                                                            <TextBlock
+                                                                HorizontalAlignment="Center"
+                                                                VerticalAlignment="Center"
+                                                                Foreground="{DynamicResource TextIconBrush}"
+                                                                Text="开" />
+                                                        </Border>
+                                                    </hc:StatusSwitchElement.CheckedElement>
+                                                    <Border Background="gray">
+                                                        <TextBlock
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center"
+                                                            Foreground="{DynamicResource TextIconBrush}"
+                                                            Text="关" />
+                                                    </Border>
+                                                -->
+                                                <!--<hc:Poptip.Instance>
+        <hc:Poptip Content="录像功能" PlacementType="Bottom" />
+    </hc:Poptip.Instance>-->
+                                                <!--
+                                                </ToggleButton>-->
+                                                <TextBlock
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="12"
+                                                    Foreground="Black">
+                                                    保存质量
+                                                </TextBlock>
+
+                                                <hc:NumericUpDown
+                                                    Name="NumericUpDownCustomVerify"
+                                                    Margin="5"
+                                                    Maximum="51"
+                                                    Minimum="0"
+                                                    Style="{StaticResource NumericUpDownPlus}"
+                                                    ToolTip="保存质量"
+                                                    Value="1" />
+
+                                                <TextBlock
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="Black">
+                                                    保存间隔
+                                                </TextBlock>
+
+                                                <hc:NumericUpDown
+                                                    Margin="5"
+                                                    Maximum="99"
+                                                    Minimum="1"
+                                                    Style="{StaticResource NumericUpDownPlus}"
+                                                    ToolTip="保存质量"
+                                                    Value="10" />
+                                            </UniformGrid>
+                                            <Button Margin="5" Content="查看回放" />
+
+
+                                            <!--<TextBlock Foreground="Black">保存质量:</TextBlock>-->
+
+
+                                        </StackPanel>
+
+                                    </Border>
+                                </Expander>
+                            </StackPanel>
+
+
+
+
+
+
+
+
+                        </ScrollViewer>
+
                     </StackPanel>
+                    <!--<TabControl TabStripPlacement="Left">
+                        <TabControl.Resources>
+                            <ResourceDictionary>
+                                <ResourceDictionary.MergedDictionaries>
+                                    <materialDesign:BundledTheme
+                                        BaseTheme="Light"
+                                        PrimaryColor="DeepPurple"
+                                        SecondaryColor="Lime" />
+                                    <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign2.Defaults.xaml" />
+                                </ResourceDictionary.MergedDictionaries>
+                            </ResourceDictionary>
+                        </TabControl.Resources>
+                        <TabItem Header="TAB 1">
+                            <TextBlock Margin="8" Text="Left placement" />
+                        </TabItem>
+                        <TabItem Header="TAB 2">
+                            <TextBlock Margin="8" Text="Left placement" />
+                        </TabItem>
+                    </TabControl>-->
                 </Border>
             </Border>
         </hc:TransitioningContentControl>
