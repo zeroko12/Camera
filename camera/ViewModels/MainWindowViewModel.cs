@@ -18,7 +18,7 @@ namespace camera.ViewModels
             set { SetProperty(ref _title, value); }
         }
 
-        private bool _isSave;
+        private bool _isSave = false;
         public bool isSave
         {
             get { return _isSave; }
@@ -56,7 +56,17 @@ namespace camera.ViewModels
                 if (_overwriteOldFiles != value)
                 {
                     SetProperty(ref _overwriteOldFiles, value);
+                    OnSaveModeChanged();
                 }
+            }
+        }
+
+
+        void OnSaveModeChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.OverwriteOldFiles = OverwriteOldFiles;
             }
         }
 
@@ -147,6 +157,7 @@ namespace camera.ViewModels
                     break;
                 }
                 Cameras.Add(camera);
+                camera.DiskSpaceLow += Camera_DiskSpaceLow;
                 index++;
             }
             isSave = false;
@@ -162,6 +173,14 @@ namespace camera.ViewModels
 
         }
 
+        private void Camera_DiskSpaceLow(object sender, string message)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                isSave = false;
+                MessageBox.Show(message, "磁盘空间警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+            });
+        }
 
 
         private DelegateCommand _Set;
@@ -191,56 +210,7 @@ namespace camera.ViewModels
 
         }
 
-        private DelegateCommand _SetSaveMode;
-        public DelegateCommand SetSaveMode =>
-            _SetSaveMode ?? (_SetSaveMode = new DelegateCommand(ExecuteSetSaveMode));
 
-        void ExecuteSetSaveMode()
-        {
-            // 交换SaveModeCheck中的两个元素的值
-            OverwriteOldFiles = !OverwriteOldFiles;
-            OnSaveModeChanged();
-        }
-
-        void OnSaveModeChanged()
-        {
-            if (OverwriteOldFiles)
-            {
-                foreach (var camera in Cameras)
-                {
-                    camera.OverwriteOldFiles = true;
-                }
-                //Debug.WriteLine("保存模式设置为覆盖旧文件");
-            }
-            else
-            {
-                foreach (var camera in Cameras)
-                {
-                    camera.OverwriteOldFiles = false;
-                }
-                //Debug.WriteLine("保存模式设置为停止录像");
-            }
-        }
-
-        private DelegateCommand<string> _SetSave;
-        public DelegateCommand<string> SetSave =>
-            _SetSave ?? (_SetSave = new DelegateCommand<string>(ExecuteSetSave));
-
-        void ExecuteSetSave(string saveModeString)
-        {
-            if (bool.TryParse(saveModeString, out bool saveMode))
-            {
-                if (isSave != saveMode)
-                {
-                    isSave = saveMode;
-                    Debug.WriteLine($"设置是否保存为{saveMode}");
-                }
-            }
-            else
-            {
-                Debug.WriteLine($"无效的保存模式值: {saveModeString}");
-            }
-        }
         ~MainWindowViewModel()
         {
             MessageBox.Show("析构窗口");

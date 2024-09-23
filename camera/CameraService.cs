@@ -106,6 +106,7 @@ namespace camera
             set { SetProperty(ref _Name, value); }
         }
 
+
         //记录摄像机的编号
         private int _Index = -1;
         public int Index
@@ -154,7 +155,7 @@ namespace camera
                 if (_overwriteOldFiles != value)
                 {
                     SetProperty(ref _overwriteOldFiles, value);
-                    Debug.WriteLine($"设置{Index}保存模式");
+                    Debug.WriteLine($"设置{Index}保存模式为{OverwriteOldFiles}");
                 }
             }
         }
@@ -163,6 +164,8 @@ namespace camera
 
         public delegate void FrameChangedEventHandler(Mat frame);
         public event FrameChangedEventHandler FrameChanged;
+
+        public event EventHandler<string> DiskSpaceLow;//空间不足提醒
 
         #endregion
 
@@ -495,9 +498,10 @@ namespace camera
                     else
                     {
                         // 丢弃当前帧并停止保存
-                        isSave = false;
+                        //isSave = false;
                         _videoWriter?.Dispose();
-                        MessageBox.Show("磁盘空间不足,停止保存视频");
+                        // 触发事件而不是直接显示消息框
+                        DiskSpaceLow?.Invoke(this, "磁盘空间不足,停止保存视频");
 
                         return;
                     }

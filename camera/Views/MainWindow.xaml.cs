@@ -241,5 +241,10 @@ namespace camera.Views
             //Debug.WriteLine("鼠标离开标题栏");
             HideTitleBar();
         }
+
+        private void ToggleButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Topmost = !this.Topmost;
+        }
     }
 }

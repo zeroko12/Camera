@@ -136,7 +136,7 @@
                     Margin="10,0,0,0"
                     VerticalAlignment="Center"
                     Foreground="White"
-                    Text="监控摄像头" />
+                    Text="季华恒一离子注入机监控" />
                 <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                     <!--<Button
               Width="30"
@@ -220,59 +220,10 @@
                                         CornerRadius="0,4,4,0">
                                         <StackPanel>
                                             <hc:ButtonGroup Margin="5">
-                                                <RadioButton
-                                                    Command="{Binding SetSave}"
-                                                    CommandParameter="False"
-                                                    Content="录像关"
-                                                    IsChecked="True" />
-                                                <RadioButton
-                                                    Command="{Binding SetSave}"
-                                                    CommandParameter="True"
-                                                    Content="录像开" />
+                                                <RadioButton Content="录像关" IsChecked="{c:Binding !isSave}" />
+                                                <RadioButton Content="录像开" IsChecked="{c:Binding isSave}" />
                                             </hc:ButtonGroup>
                                             <UniformGrid Columns="                                                         2">
-                                                <!--<TextBlock
-                                                    HorizontalAlignment="
-                                                        Center"
-                                                    VerticalAlignment="
-                                                        Center"
-                                                    Foreground="
-                                                        Black">
-                                                    录像
-                                                </TextBlock>
-                                                -->
-                                                <!--<CheckBox HorizontalAlignment="
-                                                        Center" IsChecked="{Binding isSave}" />-->
-                                                <!--
-                                                <ToggleButton
-                                                    HorizontalAlignment="left"
-                                                    BorderThickness="0"
-                                                    IsChecked="False"
-                                                    IsEnabled="True"
-                                                    Style="{StaticResource ToggleButtonFlip}"
-                                                    ToolTip="录像功能">
-                                                    <hc:StatusSwitchElement.CheckedElement>
-                                                        <Border Background="{DynamicResource SuccessBrush}">
-                                                            <TextBlock
-                                                                HorizontalAlignment="Center"
-                                                                VerticalAlignment="Center"
-                                                                Foreground="{DynamicResource TextIconBrush}"
-                                                                Text="开" />
-                                                        </Border>
-                                                    </hc:StatusSwitchElement.CheckedElement>
-                                                    <Border Background="gray">
-                                                        <TextBlock
-                                                            HorizontalAlignment="Center"
-                                                            VerticalAlignment="Center"
-                                                            Foreground="{DynamicResource TextIconBrush}"
-                                                            Text="关" />
-                                                    </Border>
-                                                -->
-                                                <!--<hc:Poptip.Instance>
-        <hc:Poptip Content="录像功能" PlacementType="Bottom" />
-    </hc:Poptip.Instance>-->
-                                                <!--
-                                                </ToggleButton>-->
                                                 <TextBlock
                                                     HorizontalAlignment="Center"
                                                     VerticalAlignment="Center"
@@ -304,11 +255,6 @@
                                                     Style="{StaticResource NumericUpDownPlus}"
                                                     ToolTip="分钟"
                                                     Value="{Binding SaveInterval}" />
-                                                <!--<hc:TimePicker Style="{StaticResource TimePickerPlus.Small}">
-                                                    <hc:TimePicker.Clock>
-                                                        <hc:ListClock />
-                                                    </hc:TimePicker.Clock>
-                                                </hc:TimePicker>-->
                                             </UniformGrid>
                                             <Button Margin="5" Content="查看回放" />
                                             <hc:Divider Margin="0" Content="空间策略" />
@@ -335,41 +281,59 @@
                                                     M
                                                 </TextBlock>
                                             </StackPanel>
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition />
-                                                </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition />
-                                                    <RowDefinition />
-                                                </Grid.RowDefinitions>
-                                                <RadioButton
-                                                    Margin="4"
-                                                    Command="{Binding SetSaveMode}"
-                                                    IsChecked="True" />
-                                                <TextBlock
-                                                    Grid.Column="1"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="Black"
-                                                    Text="覆盖旧文件" />
-                                                <RadioButton
-                                                    Grid.Row="1"
-                                                    Margin="4"
-                                                    Command="{Binding SetSaveMode}" />
-                                                <TextBlock
-                                                    Grid.Row="1"
-                                                    Grid.Column="1"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="Black"
-                                                    Text="停止录像   " />
-                                            </Grid>
+                                            <hc:ButtonGroup Margin="4" Orientation="Vertical">
+                                                <RadioButton Content="覆盖旧文件" IsChecked="{c:Binding OverwriteOldFiles}" />
+                                                <RadioButton Content="停止录像" IsChecked="{c:Binding !OverwriteOldFiles}" />
+                                            </hc:ButtonGroup>
 
                                             <!--<TextBlock Foreground="Black">保存质量:</TextBlock>-->
 
 
+                                        </StackPanel>
+
+                                    </Border>
+                                </Expander>
+
+                                <Expander
+                                    Width="125"
+                                    Margin="2"
+                                    ExpandDirection="Down"
+                                    Header="其他设置"
+                                    IsExpanded="True">
+                                    <Border
+                                        Background="{DynamicResource RegionBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="0,1,1,1"
+                                        CornerRadius="0,4,4,0">
+                                        <StackPanel>
+                                            <UniformGrid Columns="2">
+
+                                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center">是否置顶</TextBlock>
+                                                <ToggleButton
+                                                    HorizontalAlignment="Center"
+                                                    Click="ToggleButton_Click"
+                                                    ToolTip="窗口置顶">
+                                                    <materialDesign:PackIcon Kind="Pin" RenderTransformOrigin=".5,.5">
+                                                        <materialDesign:PackIcon.RenderTransform>
+                                                            <RotateTransform Angle="45" />
+                                                        </materialDesign:PackIcon.RenderTransform>
+                                                    </materialDesign:PackIcon>
+                                                    <materialDesign:ToggleButtonAssist.OnContent>
+                                                        <materialDesign:PackIcon Kind="Pin" />
+                                                    </materialDesign:ToggleButtonAssist.OnContent>
+                                                    <ToggleButton.Resources>
+                                                        <ResourceDictionary>
+                                                            <ResourceDictionary.MergedDictionaries>
+                                                                <materialDesign:BundledTheme
+                                                                    BaseTheme="Light"
+                                                                    PrimaryColor="BlueGrey"
+                                                                    SecondaryColor="Lime" />
+                                                                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign2.Defaults.xaml" />
+                                                            </ResourceDictionary.MergedDictionaries>
+                                                        </ResourceDictionary>
+                                                    </ToggleButton.Resources>
+                                                </ToggleButton>
+                                            </UniformGrid>
                                         </StackPanel>
 
                                     </Border>

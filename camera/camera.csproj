@@ -4,7 +4,11 @@
     <TargetFramework>net6.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <ApplicationIcon>jh.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Content Include="jh.ico" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CalcBinding6" Version="1.1.0" />
     <PackageReference Include="HandyControl" Version="3.5.1" />
