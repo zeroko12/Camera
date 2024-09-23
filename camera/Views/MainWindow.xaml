@@ -324,7 +324,7 @@
                                                 <hc:NumericUpDown
                                                     Width="78"
                                                     Margin="2"
-                                                    Maximum="10240"
+                                                    Maximum="1024000"
                                                     Minimum="1"
                                                     Style="{StaticResource NumericUpDownPlus}"
                                                     Value="{Binding DiskSpaceThreshold}" />

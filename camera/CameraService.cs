@@ -47,8 +47,14 @@ namespace camera
             get { return _isSave; }
             set
             {
-                SetProperty(ref _isSave, value);
-                OnIsSaveChanged();
+                //防止递归
+                if (isSave != value)
+                {
+
+                    SetProperty(ref _isSave, value);
+                    OnIsSaveChanged();
+                }
+
             }
         }
 
@@ -295,6 +301,8 @@ namespace camera
         string fileName = "";
         string filePath = "";
         string originFileName = "";
+
+        public long availableSpace { get; set; }
         private void InitializeVideoWriter()
         {
             if (!isSave)
@@ -303,7 +311,7 @@ namespace camera
             {
                 Directory.CreateDirectory(_saveDirectory);
             }
-
+            availableSpace = CalcDiskSpaceEnough();//初始化时设置可用空间
             originFileName = $"{Index}_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
             fileName = "TEMP_" + originFileName;
             filePath = Path.Combine(_saveDirectory, fileName);
@@ -319,6 +327,7 @@ namespace camera
             {
                 InitializeVideoWriter();
             }
+
             _videoWriter.Write(frame);
 
             if (DateTime.Now - _lastSaveTime >= SaveInterval)
@@ -326,6 +335,49 @@ namespace camera
                 CloseVideoWriter();
                 InitializeVideoWriter();
                 _lastSaveTime = DateTime.Now;
+            }
+        }
+
+
+        private long CalcDiskSpaceEnough()
+        {
+            string drive = Path.GetPathRoot(AppDomain.CurrentDomain.BaseDirectory);
+            DriveInfo driveInfo = new DriveInfo(drive);
+            long availableSpace = driveInfo.AvailableFreeSpace / (1024 * 1024); // 转换为MB
+            Debug.WriteLine("可用空间:" + availableSpace);
+            return availableSpace;
+        }
+
+        private void DeleteOldestFile()
+        {
+            string directory = Path.Combine(_saveDirectory, Index.ToString());
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            var oldestFile = Directory.GetFiles(directory, "*.mp4", SearchOption.AllDirectories)
+                .OrderBy(f => new FileInfo(f).CreationTime)
+                .FirstOrDefault();
+
+            if (oldestFile != null)
+            {
+                try
+                {
+                    File.Delete(oldestFile);
+                    Debug.WriteLine($"已删除最旧的文件: {oldestFile}");
+                    //若文件夹为空,删除文件夹
+                    var deleteDirectory = Path.GetDirectoryName(oldestFile);
+                    if (Directory.GetFiles(deleteDirectory).Length == 0)
+                    {
+                        Directory.Delete(deleteDirectory);
+                        Console.WriteLine($"目录 '{deleteDirectory}' 已被删除。");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"删除文件时出错: {ex.Message}");
+                }
             }
         }
 
@@ -433,6 +485,23 @@ namespace camera
         {
             try
             {
+                // 检查磁盘空间
+                if (availableSpace <= DiskThreshold && isSave)//空间告罄,并且保存开启的清况下
+                {
+                    if (OverwriteOldFiles)
+                    {
+                        DeleteOldestFile();
+                    }
+                    else
+                    {
+                        // 丢弃当前帧并停止保存
+                        isSave = false;
+                        _videoWriter?.Dispose();
+                        MessageBox.Show("磁盘空间不足,停止保存视频");
+
+                        return;
+                    }
+                }
                 _videoWriter?.Release();
                 _videoWriter?.Dispose();
             }
