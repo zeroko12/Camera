@@ -1,4 +1,5 @@
-﻿using Prism.Commands;
+﻿using MaterialDesignColors;
+using Prism.Commands;
 using Prism.Mvvm;
 using System;
 using System.Collections.ObjectModel;
@@ -44,6 +45,41 @@ namespace camera.ViewModels
                     camera.isSave = false;
                 }
             }
+        }
+
+        private bool _overwriteOldFiles = true;
+        public bool OverwriteOldFiles
+        {
+            get { return _overwriteOldFiles; }
+            set
+            {
+                if (_overwriteOldFiles != value)
+                {
+                    SetProperty(ref _overwriteOldFiles, value);
+                }
+            }
+        }
+
+
+
+        private int _DiskSpaceThreshold = 1024;
+        public int DiskSpaceThreshold
+        {
+            get { return _DiskSpaceThreshold; }
+            set
+            {
+                SetProperty(ref _DiskSpaceThreshold, value);
+                OnDiskSpaceThresholdChanged();
+            }
+        }
+
+        void OnDiskSpaceThresholdChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.DiskThreshold = DiskSpaceThreshold;
+            }
+            //Debug.WriteLine("修改空间阈值");
         }
 
         private int _Quality = 30;
@@ -155,6 +191,36 @@ namespace camera.ViewModels
 
         }
 
+        private DelegateCommand _SetSaveMode;
+        public DelegateCommand SetSaveMode =>
+            _SetSaveMode ?? (_SetSaveMode = new DelegateCommand(ExecuteSetSaveMode));
+
+        void ExecuteSetSaveMode()
+        {
+            // 交换SaveModeCheck中的两个元素的值
+            OverwriteOldFiles = !OverwriteOldFiles;
+            OnSaveModeChanged();
+        }
+
+        void OnSaveModeChanged()
+        {
+            if (OverwriteOldFiles)
+            {
+                foreach (var camera in Cameras)
+                {
+                    camera.OverwriteOldFiles = true;
+                }
+                //Debug.WriteLine("保存模式设置为覆盖旧文件");
+            }
+            else
+            {
+                foreach (var camera in Cameras)
+                {
+                    camera.OverwriteOldFiles = false;
+                }
+                //Debug.WriteLine("保存模式设置为停止录像");
+            }
+        }
 
         private DelegateCommand<string> _SetSave;
         public DelegateCommand<string> SetSave =>

@@ -311,7 +311,61 @@
                                                 </hc:TimePicker>-->
                                             </UniformGrid>
                                             <Button Margin="5" Content="查看回放" />
+                                            <hc:Divider Margin="0" Content="空间策略" />
+                                            <StackPanel Orientation="Horizontal" ToolTip="当前磁盘空间少于此MB数时">
+                                                <TextBlock
+                                                    Margin="2,0,0,0"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="Black">
+                                                    少于
+                                                </TextBlock>
 
+                                                <hc:NumericUpDown
+                                                    Width="78"
+                                                    Margin="2"
+                                                    Maximum="10240"
+                                                    Minimum="1"
+                                                    Style="{StaticResource NumericUpDownPlus}"
+                                                    Value="{Binding DiskSpaceThreshold}" />
+                                                <TextBlock
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="Black">
+                                                    M
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition />
+                                                    <RowDefinition />
+                                                </Grid.RowDefinitions>
+                                                <RadioButton
+                                                    Margin="4"
+                                                    Command="{Binding SetSaveMode}"
+                                                    IsChecked="True" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="Black"
+                                                    Text="覆盖旧文件" />
+                                                <RadioButton
+                                                    Grid.Row="1"
+                                                    Margin="4"
+                                                    Command="{Binding SetSaveMode}" />
+                                                <TextBlock
+                                                    Grid.Row="1"
+                                                    Grid.Column="1"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="Black"
+                                                    Text="停止录像   " />
+                                            </Grid>
 
                                             <!--<TextBlock Foreground="Black">保存质量:</TextBlock>-->
 

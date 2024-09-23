@@ -123,6 +123,36 @@ namespace camera
             set { SetProperty(ref _saveInterval, value); }
         }
 
+
+        private long _diskThreshold = 1024;
+        public long DiskThreshold
+        {
+            get { return _diskThreshold; }
+            set
+            {
+                if (_diskThreshold != value)
+                {
+                    SetProperty(ref _diskThreshold, value);
+                    Debug.WriteLine($"设置{Index}磁盘阈值:{DiskThreshold}");
+                }
+            }
+        }
+
+        //记录保存策略是否为覆盖旧文件
+        private bool _overwriteOldFiles = true;
+        public bool OverwriteOldFiles
+        {
+            get { return _overwriteOldFiles; }
+            set
+            {
+                if (_overwriteOldFiles != value)
+                {
+                    SetProperty(ref _overwriteOldFiles, value);
+                    Debug.WriteLine($"设置{Index}保存模式");
+                }
+            }
+        }
+
         #region 委托与事件
 
         public delegate void FrameChangedEventHandler(Mat frame);

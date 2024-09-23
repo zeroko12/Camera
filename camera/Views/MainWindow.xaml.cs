@@ -162,7 +162,7 @@ namespace camera.Views
 
         private void MainContentGrid_MouseEnter(object sender, MouseEventArgs e)
         {
-            Debug.WriteLine("鼠标进入摄像头显示");
+            //Debug.WriteLine("鼠标进入摄像头显示");
             ConsoleToggleButton.Visibility = Visibility.Visible;
             ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.3)));
             IsMouseOverContentGrid = true;
@@ -171,7 +171,7 @@ namespace camera.Views
 
         private void MainContentGrid_MouseLeave(object sender, MouseEventArgs e)
         {
-            Debug.WriteLine("鼠标离开摄像头显示");
+            //Debug.WriteLine("鼠标离开摄像头显示");
             var animation = new DoubleAnimation(1, 0, TimeSpan.FromSeconds(0.3));
             animation.Completed += (s, _) => ConsoleToggleButton.Visibility = Visibility.Collapsed;
             ConsoleToggleButton.BeginAnimation(OpacityProperty, animation);
@@ -182,13 +182,13 @@ namespace camera.Views
         private void ShowTitleBar()
         {
             TitleBar.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.3)));
-            Debug.WriteLine("标题栏显示");
+            //Debug.WriteLine("标题栏显示");
         }
 
         private void HideTitleBar()
         {
             TitleBar.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromSeconds(0.3)));
-            Debug.WriteLine("标题栏隐藏");
+            //Debug.WriteLine("标题栏隐藏");
         }
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -230,7 +230,7 @@ namespace camera.Views
         {
             isMouseOverTitleBar = true;
             //ShowTitleBar();
-            Debug.WriteLine("鼠标进入标题栏");
+            //Debug.WriteLine("鼠标进入标题栏");
             ShowTitleBar();
         }
 
@@ -238,7 +238,7 @@ namespace camera.Views
         {
             isMouseOverTitleBar = false;
             //HideTitleBarIfNeeded();
-            Debug.WriteLine("鼠标离开标题栏");
+            //Debug.WriteLine("鼠标离开标题栏");
             HideTitleBar();
         }
     }
