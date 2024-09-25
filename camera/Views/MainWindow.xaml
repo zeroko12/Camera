@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:c="clr-namespace:CalcBinding;assembly=CalcBinding"
     xmlns:hc="https://handyorg.github.io/handycontrol"
+    xmlns:hk="clr-namespace:FastHotKeyForWPF;assembly=FastHotKeyForWPF"
     xmlns:i="http://schemas.microsoft.com/xaml/behaviors"
     xmlns:local="clr-namespace:camera"
     xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
@@ -53,6 +54,7 @@
         <Grid
             x:Name="MainContentGrid"
             Grid.Row="1"
+            Background="Transparent"
             MouseEnter="MainContentGrid_MouseEnter"
             MouseLeave="MainContentGrid_MouseLeave">
             <!-- <Image Source="{Binding Cam.Frame, Converter={StaticResource MatToImageSourceConverter}}" /> -->
@@ -61,7 +63,8 @@
                 x:Name="MainBorder"
                 Margin="10,2,2,10"
                 BorderThickness="1"
-                Effect="{StaticResource EffectShadow3}">
+                Effect="{StaticResource EffectShadow3}"
+                Opacity="{Binding Opacity}">
                 <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
                     <ItemsControl ItemsSource="{Binding Cameras}">
                         <ItemsControl.ItemsPanel>
@@ -77,6 +80,17 @@
                     </ItemsControl>
                 </Border>
             </Border>
+
+            <TextBlock
+                x:Name="Instructions"
+                Margin="20"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                FontSize="10"
+                Foreground="White"
+                Visibility="Hidden">
+                穿透模式
+            </TextBlock>
 
             <!--<materialDesign:PackIcon
     Grid.Column="0"
@@ -257,7 +271,14 @@
                                                     Value="{Binding SaveInterval}" />
                                             </UniformGrid>
                                             <Button Margin="5" Content="查看回放" />
-                                            <hc:Divider Margin="0" Content="空间策略" />
+                                            <!--<hc:Divider HorizontalContentAlignment="Left" Content="空间策略" />-->
+                                            <Separator />
+                                            <TextBlock
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="11">
+                                                空间策略
+                                            </TextBlock>
                                             <StackPanel Orientation="Horizontal" ToolTip="当前磁盘空间少于此MB数时">
                                                 <TextBlock
                                                     Margin="2,0,0,0"
@@ -281,6 +302,7 @@
                                                     M
                                                 </TextBlock>
                                             </StackPanel>
+                                            <Separator />
                                             <hc:ButtonGroup Margin="4" Orientation="Vertical">
                                                 <RadioButton Content="覆盖旧文件" IsChecked="{c:Binding OverwriteOldFiles}" />
                                                 <RadioButton Content="停止录像" IsChecked="{c:Binding !OverwriteOldFiles}" />
@@ -334,6 +356,40 @@
                                                     </ToggleButton.Resources>
                                                 </ToggleButton>
                                             </UniformGrid>
+                                            <Separator />
+                                            <TextBlock
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="11">
+                                                透明度调节
+                                            </TextBlock>
+                                            <Slider
+                                                x:Name="OpacitySlider"
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="1.0"
+                                                Minimum="0.1"
+                                                TickFrequency="0.1"
+                                                ToolTip="窗口几乎透明--窗口不透明"
+                                                Value="{Binding Opacity}" />
+                                            <Separator />
+                                            <TextBlock
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="11">
+                                                穿透模式快捷键
+                                            </TextBlock>
+                                            <hk:HotKeyBox
+                                                Width="120"
+                                                Height="14"
+                                                Margin="0,4,0,4"
+                                                ActualBackground="LightGray"
+                                                CurrentKeyA="0x0002"
+                                                CurrentKeyB="F1"
+                                                FontSize="8"
+                                                Handler="GlobalDo"
+                                                HoverBorderBrush="#326cf3"
+                                                HoverTextColor="#326cf3"
+                                                ToolTip="穿透模式快捷键" />
                                         </StackPanel>
 
                                     </Border>

@@ -29,6 +29,13 @@ namespace camera.ViewModels
             }
         }
 
+        private double _Opacity = 1.0;
+        public double Opacity
+        {
+            get { return _Opacity ; }
+            set { SetProperty(ref _Opacity , value); }
+        }
+
         private void OnIsSaveChanged()
         {
             if (isSave)

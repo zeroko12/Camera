@@ -1,10 +1,14 @@
-﻿using System;
+﻿using FastHotKeyForWPF;
+using ImTools;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
@@ -18,13 +22,183 @@ namespace camera.Views
         private double AspectRatio = 12.0 / 9.0;
         private const double TitleBarHeight = 30; // 设置一个合适的标题栏高度
 
+        public bool CanClickThrough { get; set; } = false;
         public MainWindow()
         {
             InitializeComponent();
             AspectRatio = this.Width / this.Height;
             InitializeTitleBar();
+
+            Loaded += MainWindow_Loaded;
+
+            // 移除以下行
+            //this.KeyDown += MainWindow_KeyDown;
+            //this.KeyUp += MainWindow_KeyUp;
         }
 
+        #region 快捷键相关
+
+        private void MainWindow_KeyDown(object sender, KeyEventArgs e)
+        {
+            if ((e.Key == Key.LeftCtrl || e.Key == Key.RightCtrl) && !isHotKeyPressed)
+            {
+                isHotKeyPressed = true;
+                HotKeyPressedAction();
+            }
+        }
+
+        private void MainWindow_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.LeftCtrl || e.Key == Key.RightCtrl)
+            {
+                isHotKeyPressed = false;
+                HotKeyReleasedAction();
+            }
+        }
+
+        private void HotKeyPressedAction()
+        {
+            // 在这里执行按下快捷键时的操作
+            Debug.WriteLine("热键被按下！");
+            // 例如：启用鼠标穿透
+            StartClickThrough();
+        }
+
+        private void HotKeyReleasedAction()
+        {
+            // 在这里执行释放快捷键时的操作
+            Debug.WriteLine("热键被释放！");
+            // 例如：禁用鼠标穿透
+            StopClickThrough();
+        }
+
+
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            GlobalHotKey.Awake();
+            //GlobalHotKey.Add(ModelKeys.CTRL, NormalKeys.F1, GlobalDo);
+            base.OnSourceInitialized(e);
+        }
+
+
+        protected override void OnClosed(EventArgs e)
+        {
+            GlobalHotKey.Destroy();
+            base.OnClosed(e);
+        }
+
+
+        bool isAutoChangeOpacity = false;
+
+        private void GlobalDo(object sender, HotKeyEventArgs e)
+        {
+            Debug.WriteLine("按下全局快捷键");
+            string keyName = "";
+            //解析快捷键文本 
+            //if (KeyHelper.UintToKeys.TryGetValue(e.RegisterInfo.ModelKey, out Key foundKey1))
+            //{
+            //    keyName += foundKey1.ToString();
+            //    keyName += " + ";
+            //}
+            //if (KeyHelper.UintToKey.TryGetValue(e.RegisterInfo.NormalKey, out Key foundKey2))
+            //{
+            //    keyName += foundKey2.ToString();
+            //}
+
+            //Debug.WriteLine(KeyHelper.ValueToUint(sender));
+
+
+            List<ModelKeys> result = KeyHelper.UintParse(e.RegisterInfo.ModelKey);
+            foreach (ModelKeys key in result)
+            {
+                keyName += key.ToString() + " + ";
+            }
+            keyName += e.RegisterInfo.NormalKey.ToString();
+
+            Debug.WriteLine(keyName);
+
+            // KeyHelper.UintSum(e.RegisterInfo.ModelKey);
+            if (!CanClickThrough)
+            {
+                if (OpacitySlider.Value > 0.9)
+                {
+                    isAutoChangeOpacity = true;
+                    OpacitySlider.Value = 0.5;
+                }
+                StartClickThrough();
+                CanClickThrough = !CanClickThrough;
+                Instructions.Text = "穿透模式(" + keyName + ")";
+                Instructions.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                if (isAutoChangeOpacity)
+                {
+                    isAutoChangeOpacity = false;
+                    OpacitySlider.Value = 1.0;
+                }
+                StopClickThrough();
+                CanClickThrough = !CanClickThrough;
+                Instructions.Visibility = Visibility.Hidden;
+            }
+        }
+
+        private void GlobalDo2(object sender, HotKeyEventArgs e)
+        {
+            this.Topmost = !this.Topmost;
+        }
+
+        #endregion
+
+        #region 穿透相关
+        private const int GWL_EXSTYLE = -20;
+        private const int WS_EX_TRANSPARENT = 0x00000020;
+        private const int WS_EX_LAYERED = 0x00080000;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll")]
+        private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            // 设置窗口样式为透明
+            int exStyle = GetWindowLong(new WindowInteropHelper(this).Handle, GWL_EXSTYLE);
+            SetWindowLong(new WindowInteropHelper(this).Handle, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
+            //StartClickThrough();
+        }
+
+        // 启用鼠标穿透效果
+        private void EnableClickThrough(IntPtr hwnd)
+        {
+            int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT); // 启用鼠标穿透
+        }
+
+        // 禁用鼠标穿透效果
+        private void DisableClickThrough(IntPtr hwnd)
+        {
+            int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT); // 取消鼠标穿透
+        }
+
+        // 在需要时启用穿透效果
+        private void StartClickThrough()
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            EnableClickThrough(hwnd);
+        }
+
+        // 在需要时禁用穿透效果
+        private void StopClickThrough()
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            DisableClickThrough(hwnd);
+        }
+
+
+        #endregion
         private void InitializeTitleBar()
         {
             // 设置标题栏初始状态为透明
@@ -35,6 +209,8 @@ namespace camera.Views
         private bool IsMouseOverContentGrid = false;
 
         private Point lastMousePosition;
+
+        public bool isHotKeyPressed { get; private set; } = false;
 
         #region 拖拽修改窗口大小相关
         private void ResizeGrip_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -246,5 +422,17 @@ namespace camera.Views
         {
             this.Topmost = !this.Topmost;
         }
+
+        //private void MainBorder_MouseEnter(object sender, MouseEventArgs e)
+        //{
+        //    StartClickThrough();
+        //    Debug.WriteLine("启用穿透");
+        //}
+
+        //private void MainBorder_MouseLeave(object sender, MouseEventArgs e)
+        //{
+        //    StopClickThrough();
+        //    Debug.WriteLine("禁用穿透");
+        //}
     }
 }
