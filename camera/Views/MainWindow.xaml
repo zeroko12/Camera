@@ -92,6 +92,16 @@
                 穿透模式
             </TextBlock>
 
+            <TextBlock
+                Margin="20"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                FontSize="8"
+                Foreground="Red"
+                Visibility="{Binding isSave, Converter={StaticResource Boolean2VisibilityConverter}}">
+                录像中
+            </TextBlock>
+
             <!--<materialDesign:PackIcon
     Grid.Column="0"
     Margin="10"
@@ -334,6 +344,7 @@
                                                 <ToggleButton
                                                     HorizontalAlignment="Center"
                                                     Click="ToggleButton_Click"
+                                                    IsChecked="True"
                                                     ToolTip="窗口置顶">
                                                     <materialDesign:PackIcon Kind="Pin" RenderTransformOrigin=".5,.5">
                                                         <materialDesign:PackIcon.RenderTransform>

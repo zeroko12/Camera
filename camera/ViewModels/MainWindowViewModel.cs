@@ -32,8 +32,8 @@ namespace camera.ViewModels
         private double _Opacity = 1.0;
         public double Opacity
         {
-            get { return _Opacity ; }
-            set { SetProperty(ref _Opacity , value); }
+            get { return _Opacity; }
+            set { SetProperty(ref _Opacity, value); }
         }
 
         private void OnIsSaveChanged()
@@ -123,7 +123,7 @@ namespace camera.ViewModels
 
 
 
-        private int _SaveInterval = 1;
+        private int _SaveInterval = 5;
         public int SaveInterval
         {
             get { return _SaveInterval; }
@@ -176,7 +176,10 @@ namespace camera.ViewModels
             else
             {
                 MessageBox.Show($"成功检测到 {Cameras.Count} 个摄像头");
+                //默认开启录像
+                isSave = true;
             }
+
 
         }
 

@@ -34,6 +34,9 @@ namespace camera.Views
             // 移除以下行
             //this.KeyDown += MainWindow_KeyDown;
             //this.KeyUp += MainWindow_KeyUp;
+
+            //默认置顶
+            this.Topmost = true;
         }
 
         #region 快捷键相关
