@@ -123,7 +123,7 @@ namespace camera.ViewModels
 
 
 
-        private int _SaveInterval = 5;
+        private int _SaveInterval = 1;
         public int SaveInterval
         {
             get { return _SaveInterval; }

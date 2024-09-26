@@ -408,7 +408,7 @@ namespace camera
                 }
             }
             //根据OutputPath解析最终存放路径
-            var arguments = $"-i \"{absolutePath}\" -c:v libx264 -preset slow -crf {Quality} -an \"{OutputPath}\"";
+            var arguments = $"-i \"{absolutePath}\" -c:v libx264 -preset slow -threads 2 -crf {Quality} -an \"{OutputPath}\"";
 
             var processStartInfo = new ProcessStartInfo
             {
