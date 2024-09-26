@@ -186,6 +186,9 @@ namespace camera
 
         private void ShowVideoInfo()
         {
+            cap.Set(VideoCaptureProperties.Fps, 25.0);
+            cap.Set(VideoCaptureProperties.FrameWidth, 320);
+            cap.Set(VideoCaptureProperties.FrameHeight, 240);
             FpsOrigin = cap.Get(VideoCaptureProperties.Fps);
             WidthOrigin = cap.Get(VideoCaptureProperties.FrameWidth);
             HeightOrigin = cap.Get(VideoCaptureProperties.FrameHeight);
@@ -207,6 +210,7 @@ namespace camera
             try
             {
                 cap = new VideoCapture(index);
+                cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
                 if (!cap.IsOpened())
                     return false;
                 this.Index = index;
@@ -321,7 +325,7 @@ namespace camera
             //开始计时
             _lastSaveTime = DateTime.Now;
             //_videoWriter = new VideoWriter(filePath, FourCC.MP4V, Fps, new OpenCvSharp.Size(Width, Height));
-            _videoWriter = new VideoWriter(filePath, FourCC.XVID, Fps, new OpenCvSharp.Size(Width, Height));
+            _videoWriter = new VideoWriter(filePath, FourCC.HEVC, Fps, new OpenCvSharp.Size(Width, Height));
         }
 
         private void SaveFrame(Mat frame)
