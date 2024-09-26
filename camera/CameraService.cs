@@ -310,6 +310,9 @@ namespace camera
         string originFileName = "";
 
         public long availableSpace { get; set; }
+        private Process _ffmpegProcess;
+        private bool _isProcessingVideo = false;
+
         private void InitializeVideoWriter()
         {
             if (!isSave)
@@ -320,22 +323,53 @@ namespace camera
             }
             availableSpace = CalcDiskSpaceEnough();//初始化时设置可用空间
             originFileName = $"{Index}_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
-            fileName = "TEMP_" + originFileName;
+            fileName = originFileName; // 不再需要 "TEMP_" 前缀
             filePath = Path.Combine(_saveDirectory, fileName);
             //开始计时
             _lastSaveTime = DateTime.Now;
-            //_videoWriter = new VideoWriter(filePath, FourCC.MP4V, Fps, new OpenCvSharp.Size(Width, Height));
-            _videoWriter = new VideoWriter(filePath, FourCC.MJPG, Fps, new OpenCvSharp.Size(Width, Height));
+
+            // 初始化 FFmpeg 进程
+            _ffmpegProcess = new Process();
+            _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
+            _ffmpegProcess.StartInfo.Arguments = $"-y -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{filePath}\"";
+            _ffmpegProcess.StartInfo.UseShellExecute = false;
+            _ffmpegProcess.StartInfo.RedirectStandardInput = true;
+            _ffmpegProcess.StartInfo.RedirectStandardError = true;
+            _ffmpegProcess.StartInfo.CreateNoWindow = true;
+
+            _ffmpegProcess.Start();
+            _isProcessingVideo = true;
+
+            // 启动一个任务来读取错误输出
+            Task.Run(() =>
+            {
+                string error = _ffmpegProcess.StandardError.ReadToEnd();
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Debug.WriteLine($"FFmpeg 错误: {error}");
+                }
+            });
         }
 
         private void SaveFrame(Mat frame)
         {
-            if (_videoWriter == null || !_videoWriter.IsOpened())
+            if (!_isProcessingVideo)
             {
                 InitializeVideoWriter();
             }
 
-            _videoWriter.Write(frame);
+            try
+            {
+                // 将帧数据直接写入 FFmpeg 的标准输入
+                int frameSize = (int)frame.Total() * frame.ElemSize();
+                byte[] frameData = new byte[frameSize];
+                Marshal.Copy(frame.Data, frameData, 0, frameSize);
+                _ffmpegProcess.StandardInput.BaseStream.Write(frameData, 0, frameSize);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"写入帧数据时发生错误: {ex.Message}");
+            }
 
             if (DateTime.Now - _lastSaveTime >= SaveInterval)
             {
@@ -602,6 +636,7 @@ namespace camera
         public void StopCapture()
         {
             isCapture = false;//跳出循环的时候会压缩视频
+            CloseVideoWriter(); // 确保在停止捕获时关闭视频写入器
             cap.Release();
         }
 
