@@ -63,9 +63,13 @@ namespace camera
 
         private void OnIsSaveChanged()
         {
-            if (_isSave)
+            if (isSave)
             {
                 InitializeFFmpeg();
+            }
+            else
+            {
+                FinalizeFfmpeg();
             }
         }
 
@@ -347,8 +351,8 @@ namespace camera
             _ffmpegProcess = new Process();
             _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
             //_ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
-            _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v mpeg4 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
-            //_ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
+            //_ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v mpeg4 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
+            _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
             _ffmpegProcess.StartInfo.UseShellExecute = false;
             _ffmpegProcess.StartInfo.RedirectStandardInput = true;
             _ffmpegProcess.StartInfo.RedirectStandardError = true;
@@ -366,6 +370,24 @@ namespace camera
                     Debug.WriteLine($"FFmpeg 错误: {error}");
                 }
             });
+        }
+
+        private void FinalizeFfmpeg()
+        {
+            if (_ffmpegProcess != null && !_ffmpegProcess.HasExited)
+            {
+                // 关闭标准输入流，通知 FFmpeg 输入结束
+                _ffmpegProcess.StandardInput.Close();
+
+                // 等待进程结束，设置超时时间
+                if (!_ffmpegProcess.WaitForExit(5000))  // 等待5秒
+                {
+                    _ffmpegProcess.Kill();  // 如果进程没有及时结束，强制结束它
+                }
+
+                _ffmpegProcess.Dispose();
+                _ffmpegProcess = null;
+            }
         }
 
         private void SaveFrame(Mat frame)
@@ -440,67 +462,6 @@ namespace camera
         }
 
 
-        // 启动FFmpeg进程
-        //private void StartFFmpegProcess(string absolutePath, string OutputPath)
-        //{
-        //    if (!File.Exists(absolutePath))
-        //        return;
-        //    if (string.IsNullOrEmpty(OutputPath))
-        //        return;
-        //    string directoryPath = Path.GetDirectoryName(OutputPath);
-        //    if (!Directory.Exists(directoryPath))
-        //    {
-        //        try
-        //        {
-        //            Directory.CreateDirectory(directoryPath);
-        //            Debug.WriteLine($"目录已创建：{directoryPath}");
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            Debug.WriteLine($"创建目录时发生错误：{ex.Message}");
-        //            return;
-        //        }
-        //    }
-        //    //根据OutputPath解析最终存放路径
-        //    var arguments = $"-i \"{absolutePath}\" -c:v libx264 -preset slow -threads 2 -crf {Quality} -an \"{OutputPath}\"";
-
-        //    var processStartInfo = new ProcessStartInfo
-        //    {
-        //        FileName = _ffmpegPath,
-        //        Arguments = arguments,
-        //        RedirectStandardOutput = true,
-        //        RedirectStandardError = true,
-        //        UseShellExecute = false,
-        //        CreateNoWindow = true,
-        //        WorkingDirectory = directoryPath
-        //    };
-
-        //    using (Process process = new Process { StartInfo = processStartInfo })
-        //    {
-        //        process.Start();
-        //        string error = process.StandardError.ReadToEnd();
-        //        process.WaitForExit();
-
-        //        if (process.ExitCode != 0)
-        //        {
-        //            Debug.WriteLine($"FFmpeg 执行失败。错误：{error}");
-        //        }
-        //        else
-        //        {
-        //            if (File.Exists(OutputPath))
-        //            {
-        //                //File.Delete(absolutePath);
-        //                DeleteFilesInPathWithStartStr(absolutePath, "TEMP_");
-        //                Debug.WriteLine($"删除{absolutePath}");
-        //            }
-        //            else
-        //            {
-        //                Debug.WriteLine("临时输出文件未找到");
-        //            }
-        //        }
-        //    }
-        //}
-
         private void DeleteFilesInPathWithStartStr(string path, string startStr)
         {
             string directoryPath = Path.GetDirectoryName(path);
@@ -537,42 +498,6 @@ namespace camera
             string fullPath = Path.Combine(directory, Index.ToString(), date, time);
             return fullPath;
         }
-
-        //private void CloseVideoWriter()
-        //{
-        //    try
-        //    {
-        //        // 检查磁盘空间
-        //        if (availableSpace <= DiskThreshold && isSave)//空间告罄,并且保存开启的清况下
-        //        {
-        //            if (OverwriteOldFiles)
-        //            {
-        //                DeleteOldestFile();
-        //            }
-        //            else
-        //            {
-        //                // 丢弃当前帧并停止保存
-        //                //isSave = false;
-        //                // 触发事件而不是直接显示消息框
-        //                DiskSpaceLow?.Invoke(this, "磁盘空间不足,停止保存视频");
-
-        //                return;
-        //            }
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Debug.WriteLine(ex);
-        //    }
-        //    //压缩视频
-        //    //if (filePath == "" || originFileName == "")
-        //    //    return;
-        //    //string absolutePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, filePath);
-        //    //string directory = Path.GetDirectoryName(absolutePath);
-        //    //string outputPath = FileName2FullPath(directory, originFileName);
-
-        //    //Debug.WriteLine("绝对路径:" + absolutePath);
-        //}
 
         public void ChangeCameraInfo()
         {
