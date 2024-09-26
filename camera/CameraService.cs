@@ -325,7 +325,7 @@ namespace camera
             //开始计时
             _lastSaveTime = DateTime.Now;
             //_videoWriter = new VideoWriter(filePath, FourCC.MP4V, Fps, new OpenCvSharp.Size(Width, Height));
-            _videoWriter = new VideoWriter(filePath, FourCC.HEVC, Fps, new OpenCvSharp.Size(Width, Height));
+            _videoWriter = new VideoWriter(filePath, FourCC.MJPG, Fps, new OpenCvSharp.Size(Width, Height));
         }
 
         private void SaveFrame(Mat frame)
@@ -565,8 +565,8 @@ namespace camera
         {
             String nowStr = DateTime.Now.ToString();
             // 设置文本参数
-            double fontScale = 0.7;
-            int thickness = 2;
+            double fontScale = 0.3;
+            int thickness = 1;
             HersheyFonts font = HersheyFonts.HersheySimplex;
 
             // 计算文本大小
