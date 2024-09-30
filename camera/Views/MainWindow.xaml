@@ -346,6 +346,7 @@
 
                                                 <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center">是否置顶</TextBlock>
                                                 <ToggleButton
+                                                    x:Name="topMostButton"
                                                     HorizontalAlignment="Center"
                                                     Click="ToggleButton_Click"
                                                     IsChecked="True"

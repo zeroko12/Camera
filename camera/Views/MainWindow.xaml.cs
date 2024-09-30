@@ -467,6 +467,11 @@ namespace camera.Views
             HideTitleBar();
         }
 
+        /// <summary>
+        /// 置顶按钮绑定命令
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void ToggleButton_Click(object sender, RoutedEventArgs e)
         {
             this.Topmost = !this.Topmost;
@@ -488,7 +493,7 @@ namespace camera.Views
         {
             CanClickThrough = bool.Parse(ConfigurationManager.GetSetting("CanClickThrough") ?? "false");
             this.Topmost = bool.Parse(ConfigurationManager.GetSetting("Topmost") ?? "true");
-
+            topMostButton.IsChecked = this.Topmost;
             double width = double.Parse(ConfigurationManager.GetSetting("OriginWidth") ?? "900");
             double height = double.Parse(ConfigurationManager.GetSetting("OriginHeight") ?? "480");
             double left = double.Parse(ConfigurationManager.GetSetting("WindowLeft") ?? "100");
