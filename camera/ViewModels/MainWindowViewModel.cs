@@ -1,4 +1,5 @@
-﻿using MaterialDesignColors;
+﻿using ImTools;
+using MaterialDesignColors;
 using Prism.Commands;
 using Prism.Mvvm;
 using System;
@@ -156,6 +157,7 @@ namespace camera.ViewModels
         }
         public MainWindowViewModel()
         {
+            LoadSettings();
             init();
 
 
@@ -236,9 +238,35 @@ namespace camera.ViewModels
         }
 
 
-        ~MainWindowViewModel()
+        //~MainWindowViewModel()
+        //{
+        //    MessageBox.Show("析构窗口");
+        //}
+
+        #region 配置相关
+        private void LoadSettings()
         {
-            MessageBox.Show("析构窗口");
+            isSave = bool.Parse(ConfigurationManager.GetSetting("isSave") ?? "true");
+            Opacity = double.Parse(ConfigurationManager.GetSetting("Opacity") ?? "1.0");
+            Title = ConfigurationManager.GetSetting("Title") ?? "监控";
+            OverwriteOldFiles = bool.Parse(ConfigurationManager.GetSetting("OverwriteOldFiles") ?? "true");
+            DiskSpaceThreshold = int.Parse(ConfigurationManager.GetSetting("DiskSpaceThreshold") ?? "1024");
+            Quality = int.Parse(ConfigurationManager.GetSetting("Quality") ?? "30");
+            SaveInterval = int.Parse(ConfigurationManager.GetSetting("SaveInterval") ?? "1");
+
         }
+
+        private void SaveSettings()
+        {
+            ConfigurationManager.SaveSetting("isSave", isSave.ToString());
+            ConfigurationManager.SaveSetting("Opacity", Opacity.ToString());
+            ConfigurationManager.SaveSetting("Title", Title);
+            ConfigurationManager.SaveSetting("OverwriteOldFiles", OverwriteOldFiles.ToString());
+            ConfigurationManager.SaveSetting("DiskSpaceThreshold", this.DiskSpaceThreshold.ToString());
+            ConfigurationManager.SaveSetting("Quality", this.Quality.ToString());
+            ConfigurationManager.SaveSetting("SaveInterval", this.SaveInterval.ToString());
+        }
+
+        #endregion
     }
 }

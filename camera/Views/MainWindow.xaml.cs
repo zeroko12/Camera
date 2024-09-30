@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using System.Threading;
+using System.Configuration;
 
 namespace camera.Views
 {
@@ -35,8 +36,7 @@ namespace camera.Views
             }
 
             InitializeComponent();
-            AspectRatio = this.Width / this.Height;
-            Debug.WriteLine(AspectRatio);
+            LoadSettings();
             InitializeTitleBar();
 
             Loaded += MainWindow_Loaded;
@@ -117,6 +117,7 @@ namespace camera.Views
 
         protected override void OnClosed(EventArgs e)
         {
+            SaveSettings();
             base.OnClosed(e);
             GlobalHotKey.Destroy();
 
@@ -465,6 +466,7 @@ namespace camera.Views
         private void ToggleButton_Click(object sender, RoutedEventArgs e)
         {
             this.Topmost = !this.Topmost;
+            SaveSettings();
         }
 
         //private void MainBorder_MouseEnter(object sender, MouseEventArgs e)
@@ -478,5 +480,33 @@ namespace camera.Views
         //    StopClickThrough();
         //    Debug.WriteLine("禁用穿透");
         //}
+
+        private void LoadSettings()
+        {
+            AspectRatio = double.Parse(ConfigurationManager.GetSetting("AspectRatio") ?? "1.3333333333333333");
+            CanClickThrough = bool.Parse(ConfigurationManager.GetSetting("CanClickThrough") ?? "false");
+            this.Topmost = bool.Parse(ConfigurationManager.GetSetting("Topmost") ?? "true");
+
+            double width = double.Parse(ConfigurationManager.GetSetting("WindowWidth") ?? "450");
+            double height = double.Parse(ConfigurationManager.GetSetting("WindowHeight") ?? "240");
+            double left = double.Parse(ConfigurationManager.GetSetting("WindowLeft") ?? "100");
+            double top = double.Parse(ConfigurationManager.GetSetting("WindowTop") ?? "100");
+
+            this.Width = width;
+            this.Height = height;
+            this.Left = left;
+            this.Top = top;
+        }
+
+        private void SaveSettings()
+        {
+            ConfigurationManager.SaveSetting("AspectRatio", AspectRatio.ToString());
+            ConfigurationManager.SaveSetting("CanClickThrough", CanClickThrough.ToString());
+            ConfigurationManager.SaveSetting("Topmost", this.Topmost.ToString());
+            ConfigurationManager.SaveSetting("WindowWidth", this.Width.ToString());
+            ConfigurationManager.SaveSetting("WindowHeight", this.Height.ToString());
+            ConfigurationManager.SaveSetting("WindowLeft", this.Left.ToString());
+            ConfigurationManager.SaveSetting("WindowTop", this.Top.ToString());
+        }
     }
 }
