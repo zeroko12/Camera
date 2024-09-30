@@ -24,6 +24,9 @@ namespace camera.Views
         private double AspectRatio = 12.0 / 9.0;
         private const double TitleBarHeight = 30; // 设置一个合适的标题栏高度
 
+        private const double OriginWidth = 900; // 设置宽度
+        private const double OriginHeight = 480; // 设置高度
+
         public bool CanClickThrough { get; set; } = false;
         public MainWindow()
         {
@@ -487,8 +490,8 @@ namespace camera.Views
             CanClickThrough = bool.Parse(ConfigurationManager.GetSetting("CanClickThrough") ?? "false");
             this.Topmost = bool.Parse(ConfigurationManager.GetSetting("Topmost") ?? "true");
 
-            double width = double.Parse(ConfigurationManager.GetSetting("WindowWidth") ?? "450");
-            double height = double.Parse(ConfigurationManager.GetSetting("WindowHeight") ?? "240");
+            double width = double.Parse(ConfigurationManager.GetSetting("OriginWidth") ?? "900");
+            double height = double.Parse(ConfigurationManager.GetSetting("OriginHeight") ?? "480");
             double left = double.Parse(ConfigurationManager.GetSetting("WindowLeft") ?? "100");
             double top = double.Parse(ConfigurationManager.GetSetting("WindowTop") ?? "100");
 

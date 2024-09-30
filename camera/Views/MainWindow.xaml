@@ -39,6 +39,11 @@
             </Setter>
         </Style>
     </Window.Style>-->
+    <i:Interaction.Triggers>
+        <i:EventTrigger EventName="Closing">
+            <i:InvokeCommandAction Command="{Binding ClosingCommand}" />
+        </i:EventTrigger>
+    </i:Interaction.Triggers>
     <Window.Resources>
         <local:MatToImageSourceConverter x:Key="MatToImageSourceConverter" />
     </Window.Resources>

@@ -243,6 +243,16 @@ namespace camera.ViewModels
         //    MessageBox.Show("析构窗口");
         //}
 
+
+        private DelegateCommand _ClosingCommand;
+        public DelegateCommand ClosingCommand =>
+            _ClosingCommand ?? (_ClosingCommand = new DelegateCommand(ExecuteClosingCommand));
+
+        void ExecuteClosingCommand()
+        {
+            SaveSettings();
+        }
+
         #region 配置相关
         private void LoadSettings()
         {
