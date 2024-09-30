@@ -11,6 +11,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using System.Threading;
 
 namespace camera.Views
 {
@@ -25,6 +26,14 @@ namespace camera.Views
         public bool CanClickThrough { get; set; } = false;
         public MainWindow()
         {
+            // 检查是否已有实例在运行
+            if (!EnsureSingleInstance())
+            {
+                MessageBox.Show("程序已经在运行中。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                Application.Current.Shutdown();
+                return;
+            }
+
             InitializeComponent();
             AspectRatio = this.Width / this.Height;
             Debug.WriteLine(AspectRatio);
@@ -38,6 +47,26 @@ namespace camera.Views
 
             //默认置顶
             this.Topmost = true;
+        }
+
+        private static Mutex _mutex = null;
+
+        private bool EnsureSingleInstance()
+        {
+            bool createdNew;
+            string mutexName = "Global\\MyApplicationMutex";
+            _mutex = new Mutex(true, mutexName, out createdNew);
+
+            if (createdNew)
+            {
+                // 这是第一个实例
+                return true;
+            }
+            else
+            {
+                // 已经有一个实例在运行
+                return false;
+            }
         }
 
         #region 快捷键相关
@@ -88,8 +117,15 @@ namespace camera.Views
 
         protected override void OnClosed(EventArgs e)
         {
-            GlobalHotKey.Destroy();
             base.OnClosed(e);
+            GlobalHotKey.Destroy();
+
+            // 释放互斥体
+            if (_mutex != null)
+            {
+                _mutex.ReleaseMutex();
+                _mutex.Close();
+            }
         }
 
 
@@ -294,8 +330,7 @@ namespace camera.Views
             var currentHeight = this.Height;
 
             // 设置比例因子（例如，1.1 表示增加 10%）
-            // double scaleFactor = 64 / 48;
-            double scaleFactor = AspectRatio;
+            double scaleFactor = 1.0001;
 
             // 根据方向计算新的宽度和高度
             double newWidth = currentWidth;

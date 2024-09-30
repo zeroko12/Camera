@@ -4,7 +4,9 @@ using Prism.Mvvm;
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Threading;
 
 namespace camera.ViewModels
 {
@@ -154,8 +156,17 @@ namespace camera.ViewModels
         }
         public MainWindowViewModel()
         {
+            init();
 
+
+
+        }
+
+
+        void init()
+        {
             int index = 0;
+
             while (true)
             {
                 var camera = new CameraService();
@@ -167,8 +178,11 @@ namespace camera.ViewModels
                 camera.DiskSpaceLow += Camera_DiskSpaceLow;
                 index++;
             }
-            isSave = false;
 
+            Dispatcher.CurrentDispatcher.Invoke(() =>
+            {
+                isSave = false;
+            });
             if (Cameras.Count == 0)
             {
                 MessageBox.Show("未检测到可用的摄像头");
@@ -177,10 +191,11 @@ namespace camera.ViewModels
             {
                 //MessageBox.Show($"成功检测到 {Cameras.Count} 个摄像头");
                 //默认开启录像
-                isSave = true;
+                Dispatcher.CurrentDispatcher.Invoke(() =>
+                {
+                    isSave = true;
+                });
             }
-
-
         }
 
         private void Camera_DiskSpaceLow(object sender, string message)
