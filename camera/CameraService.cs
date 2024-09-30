@@ -120,7 +120,7 @@ namespace camera
 
         private DateTime _lastSaveTime;
 
-        private string _saveDirectory = "SavedVideos"; // 保存视频的目录
+        public string saveDirectory = "SavedVideos"; // 保存视频的目录
         //此处还应该区分视频保存的目录
 
 
@@ -318,13 +318,13 @@ namespace camera
         {
             if (!isSave)
                 return;
-            if (!Directory.Exists(_saveDirectory))
+            if (!Directory.Exists(saveDirectory))
             {
-                Directory.CreateDirectory(_saveDirectory);
+                Directory.CreateDirectory(saveDirectory);
             }
             availableSpace = CalcDiskSpaceEnough();//初始化时设置可用空间
             fileName = $"{Index}_{DateTime.Now:yyyyMMdd_HH-mm-ss}.mp4";
-            filePath = Path.Combine(_saveDirectory, fileName);
+            filePath = Path.Combine(saveDirectory, fileName);
             string directory = Path.GetDirectoryName(filePath);
             var TargetFile = FileName2FullPath(directory, fileName);//真正要保存的路径
             Debug.WriteLine($"目标保存路径为:{TargetFile}");
@@ -430,7 +430,7 @@ namespace camera
 
         private void DeleteOldestFile()
         {
-            string directory = Path.Combine(_saveDirectory, Index.ToString());
+            string directory = Path.Combine(saveDirectory, Index.ToString());
             if (!Directory.Exists(directory))
             {
                 return;

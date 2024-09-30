@@ -240,6 +240,23 @@ namespace camera.ViewModels
             SaveSettings();
         }
 
+        private DelegateCommand _ViewPlayback;
+        public DelegateCommand ViewPlayback =>
+            _ViewPlayback ?? (_ViewPlayback = new DelegateCommand(ExecuteViewPlayback));
+
+        void ExecuteViewPlayback()
+        {
+            if (Cameras.Count == 0)
+                MessageBox.Show("未连接上摄像头");
+
+            string saveDirectory = Cameras[0].saveDirectory;
+            if (!string.IsNullOrEmpty(saveDirectory))
+            {
+                Process.Start("explorer.exe", saveDirectory);
+            }
+        }
+
+
         #region 配置相关
         private void LoadSettings()
         {

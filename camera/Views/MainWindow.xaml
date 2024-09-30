@@ -284,7 +284,10 @@
                                                     ToolTip="分钟"
                                                     Value="{Binding SaveInterval}" />
                                             </UniformGrid>
-                                            <Button Margin="5" Content="查看回放" />
+                                            <Button
+                                                Margin="5"
+                                                Command="{Binding ViewPlayback}"
+                                                Content="查看回放" />
                                             <!--<hc:Divider HorizontalContentAlignment="Left" Content="空间策略" />-->
                                             <Separator />
                                             <TextBlock
