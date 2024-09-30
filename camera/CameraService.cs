@@ -254,7 +254,7 @@ namespace camera
                         if (!cap.Read(tempFrame))
                         {
                             Debug.WriteLine("无法读取帧");
-                            MessageBox.Show("无法读取帧,请检查是否被其他程序占用!");
+                            //MessageBox.Show("无法读取帧,请检查是否被其他程序占用!");
                             //结束自身
                             continue;
                         }

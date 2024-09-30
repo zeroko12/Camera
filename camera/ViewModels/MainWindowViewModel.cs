@@ -175,7 +175,7 @@ namespace camera.ViewModels
             }
             else
             {
-                MessageBox.Show($"成功检测到 {Cameras.Count} 个摄像头");
+                //MessageBox.Show($"成功检测到 {Cameras.Count} 个摄像头");
                 //默认开启录像
                 isSave = true;
             }

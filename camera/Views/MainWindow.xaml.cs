@@ -27,6 +27,7 @@ namespace camera.Views
         {
             InitializeComponent();
             AspectRatio = this.Width / this.Height;
+            Debug.WriteLine(AspectRatio);
             InitializeTitleBar();
 
             Loaded += MainWindow_Loaded;
@@ -252,21 +253,25 @@ namespace camera.Views
             this.ReleaseMouseCapture();
         }
 
+        private const double MinWindowWidth = 450; // 设置最小宽度
+        private const double MinWindowHeight = 240; // 设置最小高度
+
         private void ResizeWindow(double deltaX, double deltaY)
         {
-            double newWidth = Math.Max(MinWidth, this.Width + deltaX);
-            double newHeight = Math.Max(MinHeight, this.Height + deltaY);
+            double newWidth = Math.Max(MinWindowWidth, this.Width + deltaX);
+            double newHeight = Math.Max(MinWindowHeight, this.Height + deltaY);
 
             // 保持宽高比
             if (newWidth / newHeight > AspectRatio)
             {
-                newWidth = newHeight * AspectRatio;
+                newWidth = Math.Max(newHeight * AspectRatio, MinWindowWidth);
             }
             else
             {
-                newHeight = newWidth / AspectRatio;
+                newHeight = Math.Max(newWidth / AspectRatio, MinWindowHeight);
             }
 
+            // 直接应用新的尺寸，不需要额外的判断
             this.Width = newWidth;
             this.Height = newHeight;
         }
@@ -289,7 +294,8 @@ namespace camera.Views
             var currentHeight = this.Height;
 
             // 设置比例因子（例如，1.1 表示增加 10%）
-            double scaleFactor = 64 / 48;
+            // double scaleFactor = 64 / 48;
+            double scaleFactor = AspectRatio;
 
             // 根据方向计算新的宽度和高度
             double newWidth = currentWidth;
