@@ -21,11 +21,13 @@ namespace camera.Views
     /// </summary>
     public partial class MainWindow : Window
     {
-        private double AspectRatio = 12.0 / 9.0;
+
         private const double TitleBarHeight = 30; // 设置一个合适的标题栏高度
 
-        private const double OriginWidth = 900; // 设置宽度
-        private const double OriginHeight = 480; // 设置高度
+        private double OriginWidth = 900; // 设置宽度
+        private double OriginHeight = 480; // 设置高度
+
+        private double AspectRatio = 12.0 / 9.0;
 
         public bool CanClickThrough { get; set; } = false;
         public MainWindow()
@@ -41,15 +43,14 @@ namespace camera.Views
             InitializeComponent();
             LoadSettings();
             InitializeTitleBar();
+            AspectRatio = this.Width / this.Height;
 
             Loaded += MainWindow_Loaded;
 
-            // 移除以下行
+            // 移除以下行 
             //this.KeyDown += MainWindow_KeyDown;
             //this.KeyUp += MainWindow_KeyUp;
 
-            //默认置顶
-            this.Topmost = true;
         }
 
         private static Mutex _mutex = null;
@@ -293,8 +294,8 @@ namespace camera.Views
             this.ReleaseMouseCapture();
         }
 
-        private const double MinWindowWidth = 450; // 设置最小宽度
-        private const double MinWindowHeight = 240; // 设置最小高度
+        private double MinWindowWidth = 450; // 设置最小宽度
+        private double MinWindowHeight = 240; // 设置最小高度
 
         private void ResizeWindow(double deltaX, double deltaY)
         {
@@ -469,7 +470,6 @@ namespace camera.Views
         private void ToggleButton_Click(object sender, RoutedEventArgs e)
         {
             this.Topmost = !this.Topmost;
-            SaveSettings();
         }
 
         //private void MainBorder_MouseEnter(object sender, MouseEventArgs e)
@@ -486,7 +486,6 @@ namespace camera.Views
 
         private void LoadSettings()
         {
-            AspectRatio = double.Parse(ConfigurationManager.GetSetting("AspectRatio") ?? "1.3333333333333333");
             CanClickThrough = bool.Parse(ConfigurationManager.GetSetting("CanClickThrough") ?? "false");
             this.Topmost = bool.Parse(ConfigurationManager.GetSetting("Topmost") ?? "true");
 
@@ -494,7 +493,12 @@ namespace camera.Views
             double height = double.Parse(ConfigurationManager.GetSetting("OriginHeight") ?? "480");
             double left = double.Parse(ConfigurationManager.GetSetting("WindowLeft") ?? "100");
             double top = double.Parse(ConfigurationManager.GetSetting("WindowTop") ?? "100");
+            double MinWindowWidth = double.Parse(ConfigurationManager.GetSetting("MinWindowWidth") ?? "450");
+            double MinWindowHeight = double.Parse(ConfigurationManager.GetSetting("MinWindowHeight") ?? "240");
 
+
+            this.MinWindowHeight = MinWindowHeight;
+            this.MinWindowWidth = MinWindowWidth;
             this.Width = width;
             this.Height = height;
             this.Left = left;
@@ -503,13 +507,14 @@ namespace camera.Views
 
         private void SaveSettings()
         {
-            ConfigurationManager.SaveSetting("AspectRatio", AspectRatio.ToString());
             ConfigurationManager.SaveSetting("CanClickThrough", CanClickThrough.ToString());
             ConfigurationManager.SaveSetting("Topmost", this.Topmost.ToString());
             ConfigurationManager.SaveSetting("WindowWidth", this.Width.ToString());
             ConfigurationManager.SaveSetting("WindowHeight", this.Height.ToString());
             ConfigurationManager.SaveSetting("WindowLeft", this.Left.ToString());
             ConfigurationManager.SaveSetting("WindowTop", this.Top.ToString());
+            ConfigurationManager.SaveSetting("MinWindowWidth", this.MinWindowWidth.ToString());
+            ConfigurationManager.SaveSetting("MinWindowHeight", this.MinWindowHeight.ToString());
         }
     }
 }

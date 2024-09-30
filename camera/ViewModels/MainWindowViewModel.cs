@@ -157,9 +157,8 @@ namespace camera.ViewModels
         }
         public MainWindowViewModel()
         {
-            LoadSettings();
             init();
-
+            LoadSettings();
 
 
         }
@@ -181,22 +180,10 @@ namespace camera.ViewModels
                 index++;
             }
 
-            Dispatcher.CurrentDispatcher.Invoke(() =>
-            {
-                isSave = false;
-            });
             if (Cameras.Count == 0)
             {
                 MessageBox.Show("未检测到可用的摄像头");
-            }
-            else
-            {
-                //MessageBox.Show($"成功检测到 {Cameras.Count} 个摄像头");
-                //默认开启录像
-                Dispatcher.CurrentDispatcher.Invoke(() =>
-                {
-                    isSave = true;
-                });
+                Application.Current.Shutdown();//退出自身
             }
         }
 
