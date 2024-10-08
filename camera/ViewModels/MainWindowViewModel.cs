@@ -141,6 +141,56 @@ namespace camera.ViewModels
             }
         }
 
+
+        #region 后期处理相关
+
+        /// <summary>
+        /// 对比度
+        /// </summary>
+        private double contrast = 1.0;
+        public double Contrast
+        {
+            get { return contrast; }
+            set
+            {
+                SetProperty(ref contrast, value);
+                OnContrastChanged();
+            }
+        }
+
+        private void OnContrastChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.Contrast = Contrast;
+            }
+        }
+
+        /// <summary>
+        /// 亮度
+        /// </summary>
+        private double luminance = 0.0;
+        public double Luminance
+        {
+            get { return luminance; }
+            set
+            {
+                SetProperty(ref luminance, value);
+                OnLuminanceChanged();
+            }
+        }
+
+        private void OnLuminanceChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.Luminance = Luminance;
+            }
+        }
+
+        #endregion
+
+
         //摄像头集合
         private ObservableCollection<CameraService> _Cameras = new();
         public ObservableCollection<CameraService> Cameras

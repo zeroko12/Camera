@@ -285,8 +285,7 @@
                                     Width="125"
                                     Margin="2"
                                     ExpandDirection="Down"
-                                    Header="录像相关"
-                                    IsExpanded="True">
+                                    Header="录像相关">
                                     <Border
                                         Background="{DynamicResource RegionBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
@@ -455,6 +454,33 @@
                                                 HoverBorderBrush="#326cf3"
                                                 HoverTextColor="#326cf3"
                                                 ToolTip="穿透模式快捷键" />
+                                            <Separator />
+                                            <TextBlock
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="11">
+                                                亮度调节
+                                            </TextBlock>
+                                            <Slider
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="100.0"
+                                                Minimum="-100.0"
+                                                TickFrequency="0.1"
+                                                ToolTip="亮度暗--亮"
+                                                Value="{Binding Luminance}" />
+                                            <TextBlock
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="11">
+                                                对比度调节
+                                            </TextBlock>
+                                            <Slider
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="1"
+                                                Minimum="-1"
+                                                TickFrequency="0.1"
+                                                ToolTip="对比度低--高"
+                                                Value="{Binding Contrast}" />
                                         </StackPanel>
 
                                     </Border>

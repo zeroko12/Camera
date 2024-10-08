@@ -147,6 +147,31 @@ namespace camera
             }
         }
 
+        #region 后期处理相关
+
+        /// <summary>
+        /// 对比度
+        /// </summary>
+        private double contrast = 1.0;
+        public double Contrast
+        {
+            get { return contrast; }
+            set { SetProperty(ref contrast, value); }
+        }
+
+        /// <summary>
+        /// 亮度
+        /// </summary>
+        private double luminance = 0.0;
+        public double Luminance
+        {
+            get { return luminance; }
+            set { SetProperty(ref luminance, value); }
+        }
+
+        #endregion
+
+
         //记录保存策略是否为覆盖旧文件
         private bool _overwriteOldFiles = true;
         public bool OverwriteOldFiles
@@ -265,6 +290,8 @@ namespace camera
                         }
 
                         FrameChanged?.Invoke(tempFrame);
+                        //亮度和对比度设置
+                        Cv2.ConvertScaleAbs(tempFrame, tempFrame, Contrast, Luminance);
                         lock (_lockObject)
                         {
                             tempFrame.CopyTo(_BufferFrame);
