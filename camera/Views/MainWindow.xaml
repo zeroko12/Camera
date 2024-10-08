@@ -232,8 +232,9 @@
                                    FalseToVisibility=Hidden}">
             <Border Margin="10" Effect="{StaticResource EffectShadow3}">
                 <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
-                    <StackPanel Margin="5">
-                        <ScrollViewer>
+
+                    <Grid Margin="5">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
                                 <Expander
                                     Width="125"
@@ -251,7 +252,7 @@
                                                 <RadioButton Content="录像关" IsChecked="{c:Binding !isSave}" />
                                                 <RadioButton Content="录像开" IsChecked="{c:Binding isSave}" />
                                             </hc:ButtonGroup>
-                                            <UniformGrid Columns="                                                         2">
+                                            <UniformGrid Columns="2">
                                                 <TextBlock
                                                     HorizontalAlignment="Center"
                                                     VerticalAlignment="Center"
@@ -424,7 +425,8 @@
 
                         </ScrollViewer>
 
-                    </StackPanel>
+                    </Grid>
+
                     <!--<TabControl TabStripPlacement="Left">
                         <TabControl.Resources>
                             <ResourceDictionary>
