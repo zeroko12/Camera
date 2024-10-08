@@ -169,6 +169,13 @@ namespace camera
             set { SetProperty(ref luminance, value); }
         }
 
+        private bool _IsGrayHomogenization = false;
+        public bool IsGrayHomogenization
+        {
+            get { return _IsGrayHomogenization; }
+            set { SetProperty(ref _IsGrayHomogenization, value); }
+        }
+
         #endregion
 
 
@@ -256,6 +263,43 @@ namespace camera
             }
         }
 
+
+        // 自适应直方图均衡化
+        private Mat ApplyCLAHE(Mat input)
+        {
+            Mat output = new Mat();
+
+            // 转换到LAB颜色空间
+            Cv2.CvtColor(input, output, ColorConversionCodes.BGR2Lab);
+
+            // 分离通道
+            Mat[] channels = Cv2.Split(output);
+
+            // 对L通道应用CLAHE
+            var clahe = Cv2.CreateCLAHE(3.0, new OpenCvSharp.Size(8, 8));
+            Mat enhancedL = new Mat();
+            clahe.Apply(channels[0], enhancedL);
+
+            // 创建一个与原始L通道大小相同的Mat
+            Mat resizedL = new Mat();
+            Cv2.Resize(enhancedL, resizedL, channels[0].Size(), 0, 0, InterpolationFlags.Linear);
+
+            // 使用双线性插值混合原始L通道和增强后的L通道
+            Mat blendedL = new Mat();
+            Cv2.AddWeighted(channels[0], 0.5, resizedL, 0.5, 0, blendedL);
+
+            // 用混合后的L通道替换原始L通道
+            channels[0] = blendedL;
+
+            // 合并通道
+            Cv2.Merge(channels, output);
+
+            // 转换回BGR颜色空间
+            Cv2.CvtColor(output, output, ColorConversionCodes.Lab2BGR);
+
+            return output;
+        }
+
         /// <summary>
         /// 刷新Frame帧的线程,使用isCapture控制是否跳出循环,跳出循环时执行关闭写入并压缩覆盖
         /// </summary>
@@ -290,8 +334,12 @@ namespace camera
                         }
 
                         FrameChanged?.Invoke(tempFrame);
+                        //针对亮度通道的自适应直方图均衡化
+                        if (IsGrayHomogenization)
+                            tempFrame = ApplyCLAHE(tempFrame);
                         //亮度和对比度设置
                         Cv2.ConvertScaleAbs(tempFrame, tempFrame, Contrast, Luminance);
+
                         lock (_lockObject)
                         {
                             tempFrame.CopyTo(_BufferFrame);

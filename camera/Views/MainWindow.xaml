@@ -285,7 +285,8 @@
                                     Width="125"
                                     Margin="2"
                                     ExpandDirection="Down"
-                                    Header="录像相关">
+                                    Header="录像相关"
+                                    IsExpanded="False">
                                     <Border
                                         Background="{DynamicResource RegionBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
@@ -476,11 +477,41 @@
                                             </TextBlock>
                                             <Slider
                                                 IsSnapToTickEnabled="True"
-                                                Maximum="1"
-                                                Minimum="-1"
+                                                Maximum="4"
+                                                Minimum="0"
                                                 TickFrequency="0.1"
                                                 ToolTip="对比度低--高"
                                                 Value="{Binding Contrast}" />
+                                            <Separator />
+                                            <UniformGrid Columns="2">
+
+                                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center">夜间处理</TextBlock>
+                                                <ToggleButton
+                                                    HorizontalAlignment="Center"
+                                                    Click="ToggleButton_Click"
+                                                    IsChecked="{Binding IsGrayHomogenization}"
+                                                    ToolTip="是否开启自适应直方图均衡化">
+                                                    <materialDesign:PackIcon Kind="WhiteBalanceSunny" RenderTransformOrigin=".5,.5">
+                                                        <materialDesign:PackIcon.RenderTransform>
+                                                            <RotateTransform Angle="45" />
+                                                        </materialDesign:PackIcon.RenderTransform>
+                                                    </materialDesign:PackIcon>
+                                                    <materialDesign:ToggleButtonAssist.OnContent>
+                                                        <materialDesign:PackIcon Kind="WeatherNight" />
+                                                    </materialDesign:ToggleButtonAssist.OnContent>
+                                                    <ToggleButton.Resources>
+                                                        <ResourceDictionary>
+                                                            <ResourceDictionary.MergedDictionaries>
+                                                                <materialDesign:BundledTheme
+                                                                    BaseTheme="Light"
+                                                                    PrimaryColor="BlueGrey"
+                                                                    SecondaryColor="Lime" />
+                                                                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign2.Defaults.xaml" />
+                                                            </ResourceDictionary.MergedDictionaries>
+                                                        </ResourceDictionary>
+                                                    </ToggleButton.Resources>
+                                                </ToggleButton>
+                                            </UniformGrid>
                                         </StackPanel>
 
                                     </Border>

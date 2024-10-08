@@ -188,6 +188,25 @@ namespace camera.ViewModels
             }
         }
 
+        private bool _IsGrayHomogenization = false;
+        public bool IsGrayHomogenization
+        {
+            get { return _IsGrayHomogenization; }
+            set
+            {
+                SetProperty(ref _IsGrayHomogenization, value);
+                OnIsGrayHomogenizationChanged();
+            }
+        }
+
+        private void OnIsGrayHomogenizationChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.IsGrayHomogenization = IsGrayHomogenization;
+            }
+        }
+
         #endregion
 
 
