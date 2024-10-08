@@ -46,6 +46,35 @@
     </i:Interaction.Triggers>
     <Window.Resources>
         <local:MatToImageSourceConverter x:Key="MatToImageSourceConverter" />
+        <Storyboard x:Key="FlashStoryboard" RepeatBehavior="Forever">
+            <!--  瞬间切换到不透明  -->
+            <DoubleAnimation
+                Storyboard.TargetName="RecordEllipse"
+                Storyboard.TargetProperty="Opacity"
+                To="1"
+                Duration="0:0:0" />
+            <!--  等待一段时间  -->
+            <DoubleAnimation
+                BeginTime="0:0:0.5"
+                Storyboard.TargetName="RecordEllipse"
+                Storyboard.TargetProperty="Opacity"
+                To="1"
+                Duration="0:0:0" />
+            <!--  切回透明  -->
+            <DoubleAnimation
+                BeginTime="0:0:1.0"
+                Storyboard.TargetName="RecordEllipse"
+                Storyboard.TargetProperty="Opacity"
+                To="0"
+                Duration="0:0:0" />
+            <!--  等待一段时间  -->
+            <DoubleAnimation
+                BeginTime="0:0:1.5"
+                Storyboard.TargetName="RecordEllipse"
+                Storyboard.TargetProperty="Opacity"
+                To="0"
+                Duration="0:0:0" />
+        </Storyboard>
     </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
@@ -96,7 +125,7 @@
                 穿透模式
             </TextBlock>
 
-            <TextBlock
+            <!--<TextBlock
                 Margin="20"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Bottom"
@@ -104,7 +133,23 @@
                 Foreground="Red"
                 Visibility="{Binding isSave, Converter={StaticResource Boolean2VisibilityConverter}}">
                 录像中
-            </TextBlock>
+            </TextBlock>-->
+            <Ellipse
+                x:Name="RecordEllipse"
+                Width="8"
+                Height="8"
+                Margin="20,20,12,20"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Fill="Red"
+                ToolTip="录制中"
+                Visibility="{Binding isSave, Converter={StaticResource Boolean2VisibilityConverter}}">
+                <Ellipse.Triggers>
+                    <EventTrigger RoutedEvent="Window.Loaded">
+                        <BeginStoryboard Storyboard="{StaticResource FlashStoryboard}" />
+                    </EventTrigger>
+                </Ellipse.Triggers>
+            </Ellipse>
 
             <!--<materialDesign:PackIcon
     Grid.Column="0"
