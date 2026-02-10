@@ -20,7 +20,7 @@ using System.Windows.Threading;
 
 namespace camera
 {
-    public class CameraService : BindableBase
+    public class CameraService : BindableBase, IDisposable
     {
         VideoCapture cap;
         VideoWriter capWriter;
@@ -268,36 +268,62 @@ namespace camera
         private Mat ApplyCLAHE(Mat input)
         {
             Mat output = new Mat();
+            Mat[] channels = null;
+            Mat enhancedL = null;
+            Mat resizedL = null;
+            Mat blendedL = null;
+            CLAHE clahe = null;
 
-            // 转换到LAB颜色空间
-            Cv2.CvtColor(input, output, ColorConversionCodes.BGR2Lab);
+            try
+            {
+                // 转换到LAB颜色空间
+                Cv2.CvtColor(input, output, ColorConversionCodes.BGR2Lab);
 
-            // 分离通道
-            Mat[] channels = Cv2.Split(output);
+                // 分离通道
+                channels = Cv2.Split(output);
 
-            // 对L通道应用CLAHE
-            var clahe = Cv2.CreateCLAHE(3.0, new OpenCvSharp.Size(8, 8));
-            Mat enhancedL = new Mat();
-            clahe.Apply(channels[0], enhancedL);
+                // 对L通道应用CLAHE
+                clahe = Cv2.CreateCLAHE(3.0, new OpenCvSharp.Size(8, 8));
+                enhancedL = new Mat();
+                clahe.Apply(channels[0], enhancedL);
 
-            // 创建一个与原始L通道大小相同的Mat
-            Mat resizedL = new Mat();
-            Cv2.Resize(enhancedL, resizedL, channels[0].Size(), 0, 0, InterpolationFlags.Linear);
+                // 创建一个与原始L通道大小相同的Mat
+                resizedL = new Mat();
+                Cv2.Resize(enhancedL, resizedL, channels[0].Size(), 0, 0, InterpolationFlags.Linear);
 
-            // 使用双线性插值混合原始L通道和增强后的L通道
-            Mat blendedL = new Mat();
-            Cv2.AddWeighted(channels[0], 0.5, resizedL, 0.5, 0, blendedL);
+                // 使用双线性插值混合原始L通道和增强后的L通道
+                blendedL = new Mat();
+                Cv2.AddWeighted(channels[0], 0.5, resizedL, 0.5, 0, blendedL);
 
-            // 用混合后的L通道替换原始L通道
-            channels[0] = blendedL;
+                // 用混合后的L通道替换原始L通道
+                // 先释放原来的通道
+                channels[0].Dispose();
+                channels[0] = blendedL;
+                blendedL = null; // 避免被后续释放
 
-            // 合并通道
-            Cv2.Merge(channels, output);
+                // 合并通道
+                Cv2.Merge(channels, output);
 
-            // 转换回BGR颜色空间
-            Cv2.CvtColor(output, output, ColorConversionCodes.Lab2BGR);
+                // 转换回BGR颜色空间
+                Cv2.CvtColor(output, output, ColorConversionCodes.Lab2BGR);
 
-            return output;
+                return output;
+            }
+            finally
+            {
+                // 释放所有临时 Mat 对象
+                if (channels != null)
+                {
+                    foreach (var channel in channels)
+                    {
+                        channel?.Dispose();
+                    }
+                }
+                enhancedL?.Dispose();
+                resizedL?.Dispose();
+                blendedL?.Dispose();
+                clahe?.Dispose();
+            }
         }
 
         /// <summary>
@@ -317,44 +343,74 @@ namespace camera
                 while (isCapture)
                 {
                     stopwatch.Start();
+                    Mat tempFrame = null;
+                    Mat processedFrame = null;
+
                     try
                     {
-                        Mat tempFrame = new Mat();
+                        tempFrame = new Mat();
                         if (!cap.Read(tempFrame))
                         {
                             Debug.WriteLine("无法读取帧");
                             //MessageBox.Show("无法读取帧,请检查是否被其他程序占用!");
                             //结束自身
+                            tempFrame?.Dispose();
                             continue;
                         }
                         if (tempFrame.Empty())
                         {
                             Debug.WriteLine("帧为空");
+                            tempFrame?.Dispose();
                             continue;
                         }
 
                         FrameChanged?.Invoke(tempFrame);
+
+                        // 创建处理后的帧
+                        processedFrame = tempFrame.Clone();
+
                         //针对亮度通道的自适应直方图均衡化
                         if (IsGrayHomogenization)
-                            tempFrame = ApplyCLAHE(tempFrame);
+                        {
+                            Mat claheResult = ApplyCLAHE(processedFrame);
+                            processedFrame.Dispose();
+                            processedFrame = claheResult;
+                        }
                         //亮度和对比度设置
-                        Cv2.ConvertScaleAbs(tempFrame, tempFrame, Contrast, Luminance);
+                        Cv2.ConvertScaleAbs(processedFrame, processedFrame, Contrast, Luminance);
 
                         lock (_lockObject)
                         {
-                            tempFrame.CopyTo(_BufferFrame);
+                            // 释放旧的缓冲帧并替换
+                            var oldBuffer = _BufferFrame;
+                            _BufferFrame = processedFrame.Clone();
+                            oldBuffer?.Dispose();
                         }
 
                         if (isSave)
                         {
-                            SaveFrame(tempFrame);
+                            SaveFrame(processedFrame);
                         }
 
                         if (Application.Current == null)
+                        {
+                            tempFrame?.Dispose();
+                            processedFrame?.Dispose();
                             break;
+                        }
+
                         Application.Current.Dispatcher.Invoke(() =>
                         {
-                            Frame = _BufferFrame.Clone();
+                            try
+                            {
+                                var oldFrame = _Frame;
+                                _Frame = _BufferFrame.Clone();
+                                oldFrame?.Dispose();
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"更新 UI 帧时发生错误: {ex.Message}");
+                            }
                         });
 
                         long elapsedTicks = stopwatch.ElapsedTicks;
@@ -374,7 +430,13 @@ namespace camera
                     catch (Exception ex)
                     {
                         Debug.WriteLine($"捕获帧时发生错误: {ex.Message}");
-                        return;
+                        // 不要 return，继续尝试
+                    }
+                    finally
+                    {
+                        // 确保释放临时 Mat 对象
+                        tempFrame?.Dispose();
+                        processedFrame?.Dispose();
                     }
                 }
                 //跳出循环的时候压缩视频文件
@@ -388,11 +450,16 @@ namespace camera
         public long availableSpace { get; set; }
         private Process _ffmpegProcess;
         private bool _isProcessingVideo = false;
+        private CancellationTokenSource _ffmpegErrorReadCts;
 
         private void InitializeFFmpeg()
         {
             if (!isSave)
                 return;
+
+            // 先关闭旧的进程（如果存在）
+            FinalizeFfmpeg();
+
             if (!Directory.Exists(saveDirectory))
             {
                 Directory.CreateDirectory(saveDirectory);
@@ -433,36 +500,79 @@ namespace camera
             _ffmpegProcess.StartInfo.RedirectStandardError = true;
             _ffmpegProcess.StartInfo.CreateNoWindow = true;
 
-            _ffmpegProcess.Start();
-            _isProcessingVideo = true;
-
-            // 启动一个任务来读取错误输出
-            Task.Run(() =>
+            try
             {
-                string error = _ffmpegProcess.StandardError.ReadToEnd();
-                if (!string.IsNullOrEmpty(error))
+                _ffmpegProcess.Start();
+                _isProcessingVideo = true;
+
+                // 启动一个任务来读取错误输出（使用 CancellationToken）
+                _ffmpegErrorReadCts = new CancellationTokenSource();
+                Task.Run(async () =>
                 {
-                    Debug.WriteLine($"FFmpeg 错误: {error}");
-                }
-            });
+                    try
+                    {
+                        string error = await _ffmpegProcess.StandardError.ReadToEndAsync();
+                        if (!string.IsNullOrEmpty(error) && !_ffmpegErrorReadCts.Token.IsCancellationRequested)
+                        {
+                            Debug.WriteLine($"FFmpeg 错误: {error}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"读取 FFmpeg 错误输出时发生异常: {ex.Message}");
+                    }
+                }, _ffmpegErrorReadCts.Token);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"启动 FFmpeg 进程时发生错误: {ex.Message}");
+                _ffmpegProcess?.Dispose();
+                _ffmpegProcess = null;
+                _ffmpegErrorReadCts?.Dispose();
+                _ffmpegErrorReadCts = null;
+            }
         }
 
         private void FinalizeFfmpeg()
         {
+            // 取消错误读取任务
+            if (_ffmpegErrorReadCts != null)
+            {
+                _ffmpegErrorReadCts.Cancel();
+                _ffmpegErrorReadCts.Dispose();
+                _ffmpegErrorReadCts = null;
+            }
+
             if (_ffmpegProcess != null && !_ffmpegProcess.HasExited)
             {
-                // 关闭标准输入流，通知 FFmpeg 输入结束
-                _ffmpegProcess.StandardInput.Close();
-
-                // 等待进程结束，设置超时时间
-                if (!_ffmpegProcess.WaitForExit(5000))  // 等待5秒
+                try
                 {
-                    _ffmpegProcess.Kill();  // 如果进程没有及时结束，强制结束它
-                }
+                    // 关闭标准输入流，通知 FFmpeg 输入结束
+                    _ffmpegProcess.StandardInput?.Close();
 
+                    // 等待进程结束，设置超时时间
+                    if (!_ffmpegProcess.WaitForExit(5000))  // 等待5秒
+                    {
+                        _ffmpegProcess.Kill();  // 如果进程没有及时结束，强制结束它
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"关闭 FFmpeg 进程时发生错误: {ex.Message}");
+                }
+                finally
+                {
+                    _ffmpegProcess.Dispose();
+                    _ffmpegProcess = null;
+                }
+            }
+            else if (_ffmpegProcess != null)
+            {
                 _ffmpegProcess.Dispose();
                 _ffmpegProcess = null;
             }
+
+            _isProcessingVideo = false;
         }
 
         private void SaveFrame(Mat frame)
@@ -622,15 +732,17 @@ namespace camera
             OpenCvSharp.Point textOrg = new OpenCvSharp.Point(frame.Width - textSize.Width - 10, textSize.Height + 10);
 
             // 创建一个与原始帧相同大小和类型的覆盖层
-            Mat overlay = new Mat(frame.Size(), frame.Type());
-            overlay.SetTo(new Scalar(0, 0, 0, 0)); // 完全透明
+            using (Mat overlay = new Mat(frame.Size(), frame.Type()))
+            {
+                overlay.SetTo(new Scalar(0, 0, 0, 0)); // 完全透明
 
-            // 绘制半透明背景
-            OpenCvSharp.Rect bgRect = new OpenCvSharp.Rect(textOrg.X - 5, textOrg.Y - textSize.Height - 5, textSize.Width + 10, textSize.Height + 10);
-            Cv2.Rectangle(overlay, bgRect, new Scalar(0, 0, 0, 0), -1);
+                // 绘制半透明背景
+                OpenCvSharp.Rect bgRect = new OpenCvSharp.Rect(textOrg.X - 5, textOrg.Y - textSize.Height - 5, textSize.Width + 10, textSize.Height + 10);
+                Cv2.Rectangle(overlay, bgRect, new Scalar(0, 0, 0, 0), -1);
 
-            // 将背景叠加到原始帧上
-            Cv2.AddWeighted(overlay, 0.5, frame, 1.0, 0, frame);
+                // 将背景叠加到原始帧上
+                Cv2.AddWeighted(overlay, 0.5, frame, 1.0, 0, frame);
+            }
 
             // 绘制透明背景文本(但必须在带有alpha的RGBA图像上)
             // OpenCvSharp.Rect bgRect = new OpenCvSharp.Rect(textOrg.X - 5, textOrg.Y - textSize.Height - 5, textSize.Width + 10, textSize.Height + 10);
@@ -653,10 +765,92 @@ namespace camera
         }
 
 
+        #region IDisposable Implementation
+
+        private bool _disposed = false;
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing)
+            {
+                // 释放托管资源
+                try
+                {
+                    // 停止捕获循环
+                    isCapture = false;
+
+                    // 取消事件订阅
+                    if (FrameChanged != null)
+                    {
+                        FrameChanged -= AddOverlayTime;
+                        // 清空所有其他订阅者
+                        foreach (var d in FrameChanged.GetInvocationList())
+                        {
+                            FrameChanged -= (FrameChangedEventHandler)d;
+                        }
+                    }
+
+                    // 关闭 FFmpeg 进程
+                    FinalizeFfmpeg();
+
+                    // 释放 VideoCapture
+                    if (cap != null)
+                    {
+                        if (cap.IsOpened())
+                        {
+                            cap.Release();
+                        }
+                        cap.Dispose();
+                        cap = null;
+                    }
+
+                    // 释放 VideoWriter（如果使用）
+                    if (capWriter != null)
+                    {
+                        capWriter.Dispose();
+                        capWriter = null;
+                    }
+
+                    // 释放 Mat 对象
+                    if (_BufferFrame != null)
+                    {
+                        _BufferFrame.Dispose();
+                        _BufferFrame = null;
+                    }
+
+                    if (_Frame != null)
+                    {
+                        _Frame.Dispose();
+                        _Frame = null;
+                    }
+
+                    Debug.WriteLine($"CameraService {Index} 已释放资源");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"释放 CameraService 资源时发生错误: {ex.Message}");
+                }
+            }
+
+            _disposed = true;
+        }
+
         ~CameraService()
         {
-            Debug.WriteLine("析构析构析构析构析构析构析构");
+            Dispose(false);
         }
+
+        #endregion
+
 
     }
 }

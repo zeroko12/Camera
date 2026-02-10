@@ -11,7 +11,7 @@ using System.Windows.Threading;
 
 namespace camera.ViewModels
 {
-    public class MainWindowViewModel : BindableBase
+    public class MainWindowViewModel : BindableBase, IDisposable
     {
 
         private string _title = "监控";
@@ -307,6 +307,7 @@ namespace camera.ViewModels
         void ExecuteClosingCommand()
         {
             SaveSettings();
+            Dispose(); // 释放所有资源
         }
 
         private DelegateCommand _ViewPlayback;
@@ -348,6 +349,55 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("DiskSpaceThreshold", this.DiskSpaceThreshold.ToString());
             ConfigurationManager.SaveSetting("Quality", this.Quality.ToString());
             ConfigurationManager.SaveSetting("SaveInterval", this.SaveInterval.ToString());
+        }
+
+        #endregion
+
+        #region IDisposable Implementation
+
+        private bool _disposed = false;
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+                return;
+
+            if (disposing)
+            {
+                try
+                {
+                    // 取消所有事件订阅并释放所有 CameraService
+                    if (Cameras != null)
+                    {
+                        foreach (var camera in Cameras)
+                        {
+                            if (camera != null)
+                            {
+                                camera.DiskSpaceLow -= Camera_DiskSpaceLow;
+                                camera.Dispose();
+                            }
+                        }
+                        Cameras.Clear();
+                    }
+
+                    // 释放单独的 Cam 实例（如果使用）
+                    Cam?.Dispose();
+
+                    Debug.WriteLine("MainWindowViewModel 已释放资源");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"释放 MainWindowViewModel 资源时发生错误: {ex.Message}");
+                }
+            }
+
+            _disposed = true;
         }
 
         #endregion
