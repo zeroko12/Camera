@@ -99,7 +99,19 @@ namespace camera
         public Mat Frame
         {
             get { return _Frame; }
-            set { SetProperty(ref _Frame, value); }
+            set
+            {
+                // 释放旧的Mat对象，防止内存泄漏
+                var oldFrame = _Frame;
+                if (SetProperty(ref _Frame, value))
+                {
+                    // 只有在值真正改变时才释放旧对象
+                    if (oldFrame != null && oldFrame != value)
+                    {
+                        oldFrame.Dispose();
+                    }
+                }
+            }
         }
 
         private string _Name = "test";
@@ -416,16 +428,18 @@ namespace camera
                             break;
                         }
 
+
                         Application.Current.Dispatcher.Invoke(() =>
                         {
                             try
                             {
-                                var oldFrame = _Frame;
-                                _Frame = _BufferFrame.Clone();
-                                oldFrame?.Dispose();
+                                // 重要：必须使用属性 Frame，而不是字段 _Frame
+                                // 因为属性会触发 PropertyChanged，通知 UI 更新
+                                Frame = _BufferFrame.Clone();
                             }
                             catch (Exception ex)
                             {
+                                Logger.LogError($"更新 UI 帧时发生错误", ex);
                                 Debug.WriteLine($"更新 UI 帧时发生错误: {ex.Message}");
                             }
                         });
