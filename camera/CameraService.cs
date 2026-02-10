@@ -4,6 +4,7 @@ using OpenCvSharp.Flann;
 using OpenCvSharp.WpfExtensions;
 using Prism.Mvvm;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Configuration;
@@ -35,6 +36,8 @@ namespace camera
 
         //string _ffmpegPath = @"D:\ffmpeg-7.0.2-full_build\bin\ffmpeg.exe";
         string _ffmpegPath = @"./ffmpeg.exe";
+
+
 
 
         private int _Quality = 30;
@@ -232,18 +235,19 @@ namespace camera
 
         private void ShowVideoInfo()
         {
-            cap.Set(VideoCaptureProperties.Fps, 25.0);
-            cap.Set(VideoCaptureProperties.FrameWidth, 320);
-            cap.Set(VideoCaptureProperties.FrameHeight, 240);
+            // ✅ 不强制设置分辨率，让摄像头使用默认的最高分辨率
+            // 移除了原来的强制设置：
+            // cap.Set(VideoCaptureProperties.Fps, 25.0);
+            // cap.Set(VideoCaptureProperties.FrameWidth, 320);
+            // cap.Set(VideoCaptureProperties.FrameHeight, 240);
+
+            // 直接读取摄像头当前的配置（通常是最高分辨率）
             FpsOrigin = cap.Get(VideoCaptureProperties.Fps);
             WidthOrigin = cap.Get(VideoCaptureProperties.FrameWidth);
             HeightOrigin = cap.Get(VideoCaptureProperties.FrameHeight);
-            Debug.WriteLine($"原始数据格式:{WidthOrigin}*{HeightOrigin} {FpsOrigin}Hz");
-            //估算码率
-            // long totalBytes = 0;
-            // totalBytes+= Frame.Total() * Frame.ElemSize();
-            // double bitrate = (totalBytes * 8) / elapsedSeconds; // 比特/秒
-            // Debug.WriteLine($"估算比特率: {bitrate / 1000000:F2} Mbps");
+
+            Logger.LogInfo($"摄像头默认配置: {WidthOrigin}x{HeightOrigin} @ {FpsOrigin}fps");
+            Debug.WriteLine($"摄像头分辨率: {WidthOrigin}x{HeightOrigin} {FpsOrigin}fps");
         }
 
         /// <summary>
@@ -444,6 +448,7 @@ namespace camera
                             }
                         });
 
+
                         long elapsedTicks = stopwatch.ElapsedTicks;
                         if (elapsedTicks < frameInterval)
                         {
@@ -456,6 +461,24 @@ namespace camera
                         while (stopwatch.ElapsedTicks < nextFrameTime)
                         {
                             Thread.Sleep(0);
+                        }
+
+                        // 检查是否需要重新初始化 FFmpeg（在安全的地方处理）
+                        if (_needReinitFFmpeg && isSave)
+                        {
+                            _needReinitFFmpeg = false;
+                            Logger.LogInfo("在主循环中重新初始化 FFmpeg...");
+
+                            try
+                            {
+                                FinalizeFfmpeg();
+                                Thread.Sleep(100); // 短暂等待确保完全关闭
+                                InitializeFFmpeg();
+                            }
+                            catch (Exception reinitEx)
+                            {
+                                Logger.LogError("重新初始化 FFmpeg 失败", reinitEx);
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -606,32 +629,132 @@ namespace camera
             _isProcessingVideo = false;
         }
 
+
         private void SaveFrame(Mat frame)
         {
-            if (!_isProcessingVideo)
+            // 检查 FFmpeg 进程是否正常
+            if (!_isProcessingVideo || _ffmpegProcess == null || _ffmpegProcess.HasExited)
             {
+                Logger.LogWarning("FFmpeg 进程未运行，尝试重新初始化...");
                 InitializeFFmpeg();
+
+                // 如果初始化失败，不继续
+                if (!_isProcessingVideo || _ffmpegProcess == null)
+                {
+                    Logger.LogError("FFmpeg 初始化失败，跳过此帧");
+                    return;
+                }
             }
 
+            // 每100帧检查一次磁盘空间（避免频繁检查）
+            if (_frameCount % 100 == 0)
+            {
+                availableSpace = CalcDiskSpaceEnough();
+
+                // 检查是否低于阈值
+                if (availableSpace < DiskThreshold)
+                {
+                    Logger.LogWarning($"磁盘空间不足: {availableSpace}MB < {DiskThreshold}MB");
+
+                    // 触发事件通知用户
+                    try
+                    {
+                        DiskSpaceLow?.Invoke(this, $"磁盘空间不足: {availableSpace}MB");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError("触发 DiskSpaceLow 事件时发生错误", ex);
+                    }
+
+                    // 根据配置决定是否覆盖旧文件
+                    if (OverwriteOldFiles)
+                    {
+                        Logger.LogInfo("尝试删除最旧的文件以释放空间...");
+                        DeleteOldestFile();
+                        availableSpace = CalcDiskSpaceEnough(); // 重新检查
+
+                        if (availableSpace < DiskThreshold)
+                        {
+                            Logger.LogError("删除旧文件后空间仍不足，停止录制");
+                            StopSave();
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        Logger.LogWarning("磁盘空间不足且未启用覆盖旧文件，停止录制");
+                        StopSave();
+                        return;
+                    }
+                }
+            }
+
+            byte[] rentedArray = null;
             try
             {
-                // 将帧数据直接写入 FFmpeg 的标准输入
+                // 使用 ArrayPool 提高性能，避免频繁 GC
                 int frameSize = (int)frame.Total() * frame.ElemSize();
-                byte[] frameData = new byte[frameSize];
-                Marshal.Copy(frame.Data, frameData, 0, frameSize);
-                _ffmpegProcess.StandardInput.BaseStream.Write(frameData, 0, frameSize);
+                rentedArray = ArrayPool<byte>.Shared.Rent(frameSize);
+
+                Marshal.Copy(frame.Data, rentedArray, 0, frameSize);
+                _ffmpegProcess.StandardInput.BaseStream.Write(rentedArray, 0, frameSize);
+                _ffmpegProcess.StandardInput.BaseStream.Flush();
+
+                _frameCount++;
+            }
+            catch (IOException ioEx)
+            {
+                Logger.LogError("写入 FFmpeg 失败（管道可能已关闭）", ioEx);
+
+                // FFmpeg 进程可能已崩溃，尝试恢复
+                _isProcessingVideo = false;
+                Logger.LogWarning("尝试重新初始化 FFmpeg...");
+
+                try
+                {
+                    InitializeFFmpeg();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError("重新初始化 FFmpeg 失败", ex);
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"写入帧数据时发生错误: {ex.Message}");
+                Logger.LogError("保存帧时发生未知错误", ex);
+            }
+            finally
+            {
+                // 归还数组到池中
+                if (rentedArray != null)
+                {
+                    ArrayPool<byte>.Shared.Return(rentedArray);
+                }
             }
 
+            // 检查是否需要切割视频文件
             if (DateTime.Now - _lastSaveTime >= SaveInterval)
             {
-                //CloseVideoWriter();
-                InitializeFFmpeg();
+                Logger.LogInfo($"达到切割间隔 ({SaveInterval})，准备创建新文件...");
+                _needReinitFFmpeg = true; // 标记需要重新初始化
                 _lastSaveTime = DateTime.Now;
             }
+        }
+
+        // 帧计数器（用于定期检查磁盘空间）
+        private long _frameCount = 0;
+
+        // 标记是否需要重新初始化 FFmpeg（避免在 SaveFrame 中直接初始化）
+        private bool _needReinitFFmpeg = false;
+
+        /// <summary>
+        /// 停止保存
+        /// </summary>
+        private void StopSave()
+        {
+            Logger.LogInfo("停止录制...");
+            isSave = false;
+            FinalizeFfmpeg();
         }
 
 
@@ -652,26 +775,35 @@ namespace camera
                 return;
             }
 
+            // 使用 LastWriteTime 而不是 CreationTime（更可靠）
             var oldestFile = Directory.GetFiles(directory, "*.mp4", SearchOption.AllDirectories)
-                .OrderBy(f => new FileInfo(f).CreationTime)
+                .OrderBy(f => new FileInfo(f).LastWriteTime)
                 .FirstOrDefault();
+
+            Logger.LogInfo($"尝试删除最旧文件，目录: {directory}");
 
             if (oldestFile != null)
             {
                 try
                 {
+                    var fileInfo = new FileInfo(oldestFile);
+                    long fileSizeMB = fileInfo.Length / (1024 * 1024);
+
                     File.Delete(oldestFile);
+                    Logger.LogInfo($"已删除最旧的文件: {Path.GetFileName(oldestFile)} ({fileSizeMB}MB)");
                     Debug.WriteLine($"已删除最旧的文件: {oldestFile}");
+
                     //若文件夹为空,删除文件夹
                     var deleteDirectory = Path.GetDirectoryName(oldestFile);
-                    if (Directory.GetFiles(deleteDirectory).Length == 0)
+                    if (Directory.Exists(deleteDirectory) && Directory.GetFiles(deleteDirectory).Length == 0)
                     {
                         Directory.Delete(deleteDirectory);
-                        Console.WriteLine($"目录 '{deleteDirectory}' 已被删除。");
+                        Logger.LogInfo($"已删除空目录: {deleteDirectory}");
                     }
                 }
                 catch (Exception ex)
                 {
+                    Logger.LogError($"删除文件失败: {oldestFile}", ex);
                     Debug.WriteLine($"删除文件时出错: {ex.Message}");
                 }
             }
