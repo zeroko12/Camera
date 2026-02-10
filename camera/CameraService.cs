@@ -37,6 +37,11 @@ namespace camera
         //string _ffmpegPath = @"D:\ffmpeg-7.0.2-full_build\bin\ffmpeg.exe";
         string _ffmpegPath = @"./ffmpeg.exe";
 
+        // ✅ 性能优化：缓存时间字符串（每秒更新一次，而非每帧）
+        private string _cachedTimeString = "";
+        private DateTime _lastTimeStringUpdate = DateTime.MinValue;
+
+
 
 
 
@@ -414,9 +419,10 @@ namespace camera
 
                         lock (_lockObject)
                         {
-                            // 释放旧的缓冲帧并替换
+                            // ✅ 性能优化：使用引用赋值而非Clone，避免~6MB内存拷贝
                             var oldBuffer = _BufferFrame;
-                            _BufferFrame = processedFrame.Clone();
+                            _BufferFrame = processedFrame;
+                            processedFrame = null;  // 防止后续被释放
                             oldBuffer?.Dispose();
                         }
 
@@ -433,13 +439,15 @@ namespace camera
                         }
 
 
-                        Application.Current.Dispatcher.Invoke(() =>
+
+                        // ✅ 性能优化：BeginInvoke异步调用，不阻塞捕获线程
+                        Application.Current.Dispatcher.BeginInvoke(() =>
                         {
                             try
                             {
-                                // 重要：必须使用属性 Frame，而不是字段 _Frame
-                                // 因为属性会触发 PropertyChanged，通知 UI 更新
-                                Frame = _BufferFrame.Clone();
+                                // ✅ 性能优化：使用引用赋值而非Clone
+                                // Frame属性会触发 PropertyChanged，通知 UI 更新
+                                Frame = _BufferFrame;
                             }
                             catch (Exception ex)
                             {
@@ -882,7 +890,17 @@ namespace camera
         /// <param name="frame"></param>
         private void AddOverlayTime(Mat frame)
         {
-            String nowStr = DateTime.Now.ToString();
+            // ✅ 性能优化：每秒更新一次时间字符串，而非每帧（30次/秒→1次/秒）
+            DateTime now = DateTime.Now;
+            if ((now - _lastTimeStringUpdate).TotalSeconds >= 1.0)
+            {
+                _cachedTimeString = now.ToString();
+                _lastTimeStringUpdate = now;
+            }
+
+            // 使用缓存的时间字符串
+            String nowStr = _cachedTimeString;
+
             // 设置文本参数
             double fontScale = 0.3;
             int thickness = 1;
