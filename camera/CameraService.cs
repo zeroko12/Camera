@@ -35,7 +35,13 @@ namespace camera
         private object _lockObject = new object();
 
         //string _ffmpegPath = @"D:\ffmpeg-7.0.2-full_build\bin\ffmpeg.exe";
-        string _ffmpegPath = @"./ffmpeg.exe";
+        string _ffmpegPath;
+
+        // FFmpeg 初始化失败重试控制
+        private int _ffmpegInitFailCount = 0;
+        private const int MaxFFmpegInitRetries = 3;
+        private DateTime _lastFFmpegInitAttempt = DateTime.MinValue;
+        private static readonly TimeSpan FFmpegRetryCooldown = TimeSpan.FromSeconds(10);
 
         // ✅ 性能优化：缓存时间字符串（每秒更新一次，而非每帧）
         private string _cachedTimeString = "";
@@ -73,6 +79,9 @@ namespace camera
         {
             if (isSave)
             {
+                // 用户主动开启录制时，重置失败计数，允许重新尝试
+                _ffmpegInitFailCount = 0;
+                _lastFFmpegInitAttempt = DateTime.MinValue;
                 InitializeFFmpeg();
             }
             else
@@ -225,12 +234,16 @@ namespace camera
 
         public CameraService()
         {
+            // 使用应用程序目录的绝对路径，避免工作目录不一致导致找不到 ffmpeg
+            _ffmpegPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
+            Logger.LogInfo($"FFmpeg 路径: {_ffmpegPath}");
+
+            if (!File.Exists(_ffmpegPath))
+            {
+                Logger.LogWarning($"FFmpeg 可执行文件未找到: {_ffmpegPath}，录像功能将不可用");
+            }
+
             FrameChanged += AddOverlayTime;
-            //   if (!File.Exists(_ffmpegPath))
-            // {
-            //     Debug.WriteLine($"FFmpeg 可执行文件未找到：{_ffmpegPath}");
-            //     
-            // }
         }
 
         public int getCameraNum()
@@ -417,6 +430,7 @@ namespace camera
                         //亮度和对比度设置
                         Cv2.ConvertScaleAbs(processedFrame, processedFrame, Contrast, Luminance);
 
+                        Mat frameForSave = null;
                         lock (_lockObject)
                         {
                             // ✅ 性能优化：使用引用赋值而非Clone，避免~6MB内存拷贝
@@ -424,11 +438,14 @@ namespace camera
                             _BufferFrame = processedFrame;
                             processedFrame = null;  // 防止后续被释放
                             oldBuffer?.Dispose();
+
+                            // 保存引用，供 SaveFrame 使用
+                            frameForSave = _BufferFrame;
                         }
 
-                        if (isSave)
+                        if (isSave && frameForSave != null)
                         {
-                            SaveFrame(processedFrame);
+                            SaveFrame(frameForSave);
                         }
 
                         if (Application.Current == null)
@@ -518,6 +535,17 @@ namespace camera
         {
             if (!isSave)
                 return;
+
+            // 检查 FFmpeg 是否存在
+            if (!File.Exists(_ffmpegPath))
+            {
+                if (_ffmpegInitFailCount == 0)
+                {
+                    Logger.LogError($"FFmpeg 可执行文件不存在: {_ffmpegPath}，无法录制视频");
+                }
+                _ffmpegInitFailCount++;
+                return;
+            }
 
             // 先关闭旧的进程（如果存在）
             FinalizeFfmpeg();
@@ -643,15 +671,38 @@ namespace camera
             // 检查 FFmpeg 进程是否正常
             if (!_isProcessingVideo || _ffmpegProcess == null || _ffmpegProcess.HasExited)
             {
-                Logger.LogWarning("FFmpeg 进程未运行，尝试重新初始化...");
+                // 冷却时间内不重试，避免高频重试导致崩溃
+                if ((DateTime.Now - _lastFFmpegInitAttempt) < FFmpegRetryCooldown)
+                {
+                    return; // 静默跳过，不刷日志
+                }
+
+                // 超过最大重试次数后不再尝试
+                if (_ffmpegInitFailCount >= MaxFFmpegInitRetries)
+                {
+                    if (_ffmpegInitFailCount == MaxFFmpegInitRetries)
+                    {
+                        Logger.LogError($"FFmpeg 已连续失败 {MaxFFmpegInitRetries} 次，停止重试。请检查 ffmpeg.exe 是否存在于: {_ffmpegPath}");
+                        _ffmpegInitFailCount++; // 防止重复打印这条日志
+                    }
+                    return;
+                }
+
+                _lastFFmpegInitAttempt = DateTime.Now;
+                Logger.LogWarning($"FFmpeg 进程未运行，尝试重新初始化 (第 {_ffmpegInitFailCount + 1}/{MaxFFmpegInitRetries} 次)...");
                 InitializeFFmpeg();
 
                 // 如果初始化失败，不继续
                 if (!_isProcessingVideo || _ffmpegProcess == null)
                 {
-                    Logger.LogError("FFmpeg 初始化失败，跳过此帧");
+                    _ffmpegInitFailCount++;
+                    Logger.LogError($"FFmpeg 初始化失败，跳过此帧 (失败次数: {_ffmpegInitFailCount}/{MaxFFmpegInitRetries})");
                     return;
                 }
+
+                // 初始化成功，重置计数
+                _ffmpegInitFailCount = 0;
+                Logger.LogInfo("FFmpeg 重新初始化成功");
             }
 
             // 每100帧检查一次磁盘空间（避免频繁检查）
