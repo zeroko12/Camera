@@ -243,21 +243,38 @@ namespace camera
         {
             try
             {
+                Logger.LogInfo($"正在打开摄像头索引 {index}...");
                 cap = new VideoCapture(index);
+
+                Logger.LogInfo($"设置摄像头 {index} 编码格式为 MJPG...");
                 cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+
                 if (!cap.IsOpened())
+                {
+                    Logger.LogWarning($"摄像头 {index} 无法打开（IsOpened 返回 false）");
                     return false;
+                }
+
                 this.Index = index;
+                Logger.LogInfo($"摄像头 {index} 已打开，正在获取视频信息...");
+
                 //获取视频本身的各种数据
                 ShowVideoInfo();
                 Fps = FpsOrigin;
                 Width = WidthOrigin;
                 Height = HeightOrigin;
+
+                Logger.LogInfo($"摄像头 {index} 视频信息: {Width}x{Height} @ {Fps}fps");
+                Logger.LogInfo($"启动摄像头 {index} 的帧刷新线程...");
+
                 RefreshFrame();
+
+                Logger.LogInfo($"摄像头 {index} 启动成功");
                 return true;
             }
             catch (Exception ex)
             {
+                Logger.LogError($"启动摄像头 {index} 时发生错误", ex);
                 Debug.WriteLine($"启动摄像头时发生错误: {ex.Message}");
                 return false;
             }

@@ -235,22 +235,40 @@ namespace camera.ViewModels
 
         void init()
         {
+            Logger.LogInfo("开始初始化摄像头...");
             int index = 0;
 
             while (true)
             {
-                var camera = new CameraService();
-                if (!camera.StartCapture(index))
+                try
                 {
+                    Logger.LogInfo($"尝试打开摄像头 #{index}...");
+                    var camera = new CameraService();
+
+                    if (!camera.StartCapture(index))
+                    {
+                        Logger.LogInfo($"摄像头 #{index} 打开失败或不存在，停止扫描");
+                        camera.Dispose(); // 释放失败的摄像头
+                        break;
+                    }
+
+                    Cameras.Add(camera);
+                    camera.DiskSpaceLow += Camera_DiskSpaceLow;
+                    Logger.LogInfo($"✓ 摄像头 #{index} 初始化成功");
+                    index++;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"初始化摄像头 #{index} 时发生异常", ex);
                     break;
                 }
-                Cameras.Add(camera);
-                camera.DiskSpaceLow += Camera_DiskSpaceLow;
-                index++;
             }
+
+            Logger.LogInfo($"摄像头初始化完成，共找到 {Cameras.Count} 个摄像头");
 
             if (Cameras.Count == 0)
             {
+                Logger.LogWarning("未检测到可用的摄像头，程序将退出");
                 MessageBox.Show("未检测到可用的摄像头");
                 Application.Current.Shutdown();//退出自身
             }
