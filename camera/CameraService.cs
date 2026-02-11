@@ -458,14 +458,24 @@ namespace camera
 
 
 
-                        // ✅ 性能优化：BeginInvoke异步调用，不阻塞捕获线程
+                        // UI 更新：必须 Clone，因为 _BufferFrame 会在下一帧被 Dispose
+                        // BeginInvoke 异步调用，不阻塞捕获线程
                         Application.Current.Dispatcher.BeginInvoke(() =>
                         {
                             try
                             {
-                                // ✅ 性能优化：使用引用赋值而非Clone
-                                // Frame属性会触发 PropertyChanged，通知 UI 更新
-                                Frame = _BufferFrame;
+                                Mat snapshot = null;
+                                lock (_lockObject)
+                                {
+                                    if (_BufferFrame != null)
+                                    {
+                                        snapshot = _BufferFrame.Clone();
+                                    }
+                                }
+                                if (snapshot != null)
+                                {
+                                    Frame = snapshot; // Frame setter 会 Dispose 旧的 clone
+                                }
                             }
                             catch (Exception ex)
                             {
@@ -589,7 +599,7 @@ namespace camera
                 // 初始化 FFmpeg 进程
                 _ffmpegProcess = new Process();
                 _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
-                _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
+                _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {(int)Width}x{(int)Height} -r {(int)Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
                 _ffmpegProcess.StartInfo.UseShellExecute = false;
                 _ffmpegProcess.StartInfo.RedirectStandardInput = true;
                 _ffmpegProcess.StartInfo.RedirectStandardError = true;
