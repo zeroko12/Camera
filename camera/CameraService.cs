@@ -36,6 +36,7 @@ namespace camera
 
         //string _ffmpegPath = @"D:\ffmpeg-7.0.2-full_build\bin\ffmpeg.exe";
         string _ffmpegPath;
+        private readonly object _ffmpegLock = new object();
 
         // FFmpeg 初始化失败重试控制
         private int _ffmpegInitFailCount = 0;
@@ -536,119 +537,192 @@ namespace camera
             if (!isSave)
                 return;
 
-            // 检查 FFmpeg 是否存在
-            if (!File.Exists(_ffmpegPath))
+            lock (_ffmpegLock)
             {
-                if (_ffmpegInitFailCount == 0)
-                {
-                    Logger.LogError($"FFmpeg 可执行文件不存在: {_ffmpegPath}，无法录制视频");
-                }
-                _ffmpegInitFailCount++;
-                return;
-            }
+                // 双重检查锁定：如果已经初始化成功，直接返回
+                if (_isProcessingVideo && _ffmpegProcess != null && !_ffmpegProcess.HasExited)
+                    return;
 
-            // 先关闭旧的进程（如果存在）
-            FinalizeFfmpeg();
-
-            if (!Directory.Exists(saveDirectory))
-            {
-                Directory.CreateDirectory(saveDirectory);
-            }
-            availableSpace = CalcDiskSpaceEnough();//初始化时设置可用空间
-            fileName = $"{Index}_{DateTime.Now:yyyyMMdd_HH-mm-ss}.mp4";
-            filePath = Path.Combine(saveDirectory, fileName);
-            string directory = Path.GetDirectoryName(filePath);
-            var TargetFile = FileName2FullPath(directory, fileName);//真正要保存的路径
-            Debug.WriteLine($"目标保存路径为:{TargetFile}");
-            if (string.IsNullOrEmpty(TargetFile))
-                return;
-            string directoryPath = Path.GetDirectoryName(TargetFile);
-            if (!Directory.Exists(directoryPath))
-            {
-                try
+                // 检查 FFmpeg 是否存在
+                if (!File.Exists(_ffmpegPath))
                 {
-                    Directory.CreateDirectory(directoryPath);
-                    Debug.WriteLine($"目录已创建：{directoryPath}");
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"创建目录时发生错误：{ex.Message}");
+                    if (_ffmpegInitFailCount == 0)
+                    {
+                        Logger.LogError($"FFmpeg 可执行文件不存在: {_ffmpegPath}，无法录制视频");
+                    }
+                    _ffmpegInitFailCount++;
                     return;
                 }
-            }
-            //开始计时
-            _lastSaveTime = DateTime.Now;
 
-            // 初始化 FFmpeg 进程
-            _ffmpegProcess = new Process();
-            _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
-            //_ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
-            //_ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v mpeg4 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
-            _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
-            _ffmpegProcess.StartInfo.UseShellExecute = false;
-            _ffmpegProcess.StartInfo.RedirectStandardInput = true;
-            _ffmpegProcess.StartInfo.RedirectStandardError = true;
-            _ffmpegProcess.StartInfo.CreateNoWindow = true;
+                // 先关闭旧的进程（如果存在）
+                FinalizeFfmpegInternal(); // 使用内部无锁版本避免死锁
 
-            try
-            {
-                _ffmpegProcess.Start();
-                _isProcessingVideo = true;
-
-                // 启动一个任务来读取错误输出（使用 CancellationToken）
-                _ffmpegErrorReadCts = new CancellationTokenSource();
-                Task.Run(async () =>
+                if (!Directory.Exists(saveDirectory))
+                {
+                    Directory.CreateDirectory(saveDirectory);
+                }
+                availableSpace = CalcDiskSpaceEnough();//初始化时设置可用空间
+                fileName = $"{Index}_{DateTime.Now:yyyyMMdd_HH-mm-ss}.mp4";
+                filePath = Path.Combine(saveDirectory, fileName);
+                string directory = Path.GetDirectoryName(filePath);
+                var TargetFile = FileName2FullPath(directory, fileName);//真正要保存的路径
+                Debug.WriteLine($"目标保存路径为:{TargetFile}");
+                if (string.IsNullOrEmpty(TargetFile))
+                    return;
+                string directoryPath = Path.GetDirectoryName(TargetFile);
+                if (!Directory.Exists(directoryPath))
                 {
                     try
                     {
-                        string error = await _ffmpegProcess.StandardError.ReadToEndAsync();
-                        if (!string.IsNullOrEmpty(error) && !_ffmpegErrorReadCts.Token.IsCancellationRequested)
-                        {
-                            Debug.WriteLine($"FFmpeg 错误: {error}");
-                        }
+                        Directory.CreateDirectory(directoryPath);
+                        Logger.LogInfo($"目录已创建：{directoryPath}");
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"读取 FFmpeg 错误输出时发生异常: {ex.Message}");
+                        Logger.LogError($"创建目录时发生错误：{ex.Message}", ex);
+                        return;
                     }
-                }, _ffmpegErrorReadCts.Token);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"启动 FFmpeg 进程时发生错误: {ex.Message}");
-                _ffmpegProcess?.Dispose();
-                _ffmpegProcess = null;
-                _ffmpegErrorReadCts?.Dispose();
-                _ffmpegErrorReadCts = null;
+                }
+                //开始计时
+                _lastSaveTime = DateTime.Now;
+
+                // 初始化 FFmpeg 进程
+                _ffmpegProcess = new Process();
+                _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
+                _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {Width}x{Height} -r {Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
+                _ffmpegProcess.StartInfo.UseShellExecute = false;
+                _ffmpegProcess.StartInfo.RedirectStandardInput = true;
+                _ffmpegProcess.StartInfo.RedirectStandardError = true;
+                _ffmpegProcess.StartInfo.CreateNoWindow = true;
+                // 设置工作目录为程序所在目录，确保相对路径正确解析
+                _ffmpegProcess.StartInfo.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
+
+                try
+                {
+                    Logger.LogInfo($"启动 FFmpeg: {_ffmpegProcess.StartInfo.Arguments}");
+                    _ffmpegProcess.Start();
+
+                    // ✅ 关键修复：立即标记正在处理，防止其他线程进入重试逻辑
+                    _isProcessingVideo = true;
+
+                    // 等待一小段时间，检查 FFmpeg 是否立即退出（编码器不支持、路径错误等）
+                    // 此时持有锁，且 _isProcessingVideo 为 true，其他线程会被阻塞或直接返回
+                    Thread.Sleep(200);
+
+                    if (_ffmpegProcess.HasExited)
+                    {
+                        _isProcessingVideo = false; // 标记失败
+
+                        string stderrOutput = "";
+                        try
+                        {
+                            stderrOutput = _ffmpegProcess.StandardError.ReadToEnd();
+                        }
+                        catch { }
+
+                        Logger.LogError($"FFmpeg 启动后立即退出，退出码: {_ffmpegProcess.ExitCode}");
+                        if (!string.IsNullOrEmpty(stderrOutput))
+                        {
+                            Logger.LogError($"FFmpeg 错误输出: {stderrOutput}");
+                        }
+
+                        _ffmpegProcess.Dispose();
+                        _ffmpegProcess = null;
+                        return;
+                    }
+
+                    // 启动一个任务来读取错误输出（使用 CancellationToken）
+                    _ffmpegErrorReadCts = new CancellationTokenSource();
+                    Task.Run(async () =>
+                    {
+                        try
+                        {
+                            string error = await _ffmpegProcess.StandardError.ReadToEndAsync();
+                            if (!string.IsNullOrEmpty(error) && !_ffmpegErrorReadCts.Token.IsCancellationRequested)
+                            {
+                                Logger.LogWarning($"FFmpeg 输出: {error}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"读取 FFmpeg 错误输出时发生异常: {ex.Message}");
+                        }
+                    }, _ffmpegErrorReadCts.Token);
+
+                    Logger.LogInfo($"FFmpeg 进程已成功启动 (PID: {_ffmpegProcess.Id})");
+                }
+                catch (Exception ex)
+                {
+                    _isProcessingVideo = false;
+                    Logger.LogError($"启动 FFmpeg 进程时发生错误", ex);
+                    _ffmpegProcess?.Dispose();
+                    _ffmpegProcess = null;
+                    _ffmpegErrorReadCts?.Dispose();
+                    _ffmpegErrorReadCts = null;
+                }
             }
         }
 
         private void FinalizeFfmpeg()
         {
-            // 取消错误读取任务
-            if (_ffmpegErrorReadCts != null)
+            lock (_ffmpegLock)
             {
-                _ffmpegErrorReadCts.Cancel();
-                _ffmpegErrorReadCts.Dispose();
-                _ffmpegErrorReadCts = null;
+                FinalizeFfmpegInternal();
             }
+        }
 
-            if (_ffmpegProcess != null && !_ffmpegProcess.HasExited)
+        private void FinalizeFfmpegInternal()
+        {
+            if (_ffmpegProcess != null)
             {
                 try
                 {
-                    // 关闭标准输入流，通知 FFmpeg 输入结束
-                    _ffmpegProcess.StandardInput?.Close();
-
-                    // 等待进程结束，设置超时时间
-                    if (!_ffmpegProcess.WaitForExit(5000))  // 等待5秒
+                    if (_ffmpegProcess.HasExited)
                     {
-                        _ffmpegProcess.Kill();  // 如果进程没有及时结束，强制结束它
+                        // FFmpeg 已经退出（可能是崩溃），尝试读取 stderr 诊断原因
+                        int exitCode = _ffmpegProcess.ExitCode;
+                        string stderrOutput = "";
+                        try
+                        {
+                            // 先取消异步读取，再同步读取剩余输出
+                            _ffmpegErrorReadCts?.Cancel();
+                            stderrOutput = _ffmpegProcess.StandardError.ReadToEnd();
+                        }
+                        catch { }
+
+                        if (exitCode != 0)
+                        {
+                            Logger.LogError($"FFmpeg 异常退出，退出码: {exitCode}");
+                            if (!string.IsNullOrEmpty(stderrOutput))
+                            {
+                                // 只记录最后 500 个字符，避免日志过大
+                                string trimmed = stderrOutput.Length > 500
+                                    ? stderrOutput.Substring(stderrOutput.Length - 500)
+                                    : stderrOutput;
+                                Logger.LogError($"FFmpeg stderr: {trimmed}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // FFmpeg 还在运行，正常关闭
+                        try
+                        {
+                            _ffmpegProcess.StandardInput?.Close();
+                            if (!_ffmpegProcess.WaitForExit(5000))
+                            {
+                                _ffmpegProcess.Kill();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"关闭 FFmpeg 进程时发生错误: {ex.Message}");
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"关闭 FFmpeg 进程时发生错误: {ex.Message}");
+                    Debug.WriteLine($"FinalizeFfmpeg 异常: {ex.Message}");
                 }
                 finally
                 {
@@ -656,10 +730,13 @@ namespace camera
                     _ffmpegProcess = null;
                 }
             }
-            else if (_ffmpegProcess != null)
+
+            // 清理错误读取任务
+            if (_ffmpegErrorReadCts != null)
             {
-                _ffmpegProcess.Dispose();
-                _ffmpegProcess = null;
+                _ffmpegErrorReadCts.Cancel();
+                _ffmpegErrorReadCts.Dispose();
+                _ffmpegErrorReadCts = null;
             }
 
             _isProcessingVideo = false;
@@ -748,6 +825,13 @@ namespace camera
                 }
             }
 
+            // 再次检查 _ffmpegProcess（可能被其他线程修改）
+            if (_ffmpegProcess == null || _ffmpegProcess.HasExited)
+            {
+                _isProcessingVideo = false;
+                return;
+            }
+
             byte[] rentedArray = null;
             try
             {
@@ -765,18 +849,8 @@ namespace camera
             {
                 Logger.LogError("写入 FFmpeg 失败（管道可能已关闭）", ioEx);
 
-                // FFmpeg 进程可能已崩溃，尝试恢复
-                _isProcessingVideo = false;
-                Logger.LogWarning("尝试重新初始化 FFmpeg...");
-
-                try
-                {
-                    InitializeFFmpeg();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError("重新初始化 FFmpeg 失败", ex);
-                }
+                // FFmpeg 进程可能已崩溃，清理死掉的进程，由头部重试机制统一处理
+                FinalizeFfmpeg();
             }
             catch (Exception ex)
             {
