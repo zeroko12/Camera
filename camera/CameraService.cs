@@ -1,55 +1,57 @@
-﻿using MaterialDesignThemes.Wpf;
-using OpenCvSharp;
-using OpenCvSharp.Flann;
-using OpenCvSharp.WpfExtensions;
+﻿using OpenCvSharp;
 using Prism.Mvvm;
 using System;
 using System.Buffers;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Configuration;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Media.Imaging;
-using System.Windows.Threading;
 
 namespace camera
 {
     public class CameraService : BindableBase, IDisposable
     {
-        VideoCapture cap;
-        VideoWriter capWriter;
-        double FpsOrigin;
-        double WidthOrigin;
-        double HeightOrigin;
-        bool isCapture = false;//是否退出捕获线程
+        #region 摄像头相关字段
+
+        private VideoCapture cap;
+        private double FpsOrigin, WidthOrigin, HeightOrigin;
+        private bool isCapture = false;
+
+        #endregion
+
+        #region 帧缓冲与同步
 
         private Mat _BufferFrame = new();
+        private readonly object _lockObject = new();
 
-        private object _lockObject = new object();
+        // 缓存时间字符串（每秒更新一次，而非每帧）
+        private string _cachedTimeString = "";
+        private DateTime _lastTimeStringUpdate = DateTime.MinValue;
 
-        //string _ffmpegPath = @"D:\ffmpeg-7.0.2-full_build\bin\ffmpeg.exe";
-        string _ffmpegPath;
-        private readonly object _ffmpegLock = new object();
+        #endregion
 
-        // FFmpeg 初始化失败重试控制
+        #region FFmpeg 录制相关字段
+
+        private readonly string _ffmpegPath;
+        private readonly object _ffmpegLock = new();
+        private Process _ffmpegProcess;
+        private CancellationTokenSource _ffmpegErrorReadCts;
+        private bool _isProcessingVideo = false;
+        private bool _needReinitFFmpeg = false;
+        private long _frameCount = 0;
+        private string _currentFileName = "";
+        private string _currentFilePath = "";
+
+        // 重试控制
         private int _ffmpegInitFailCount = 0;
         private const int MaxFFmpegInitRetries = 3;
         private DateTime _lastFFmpegInitAttempt = DateTime.MinValue;
         private static readonly TimeSpan FFmpegRetryCooldown = TimeSpan.FromSeconds(10);
 
-        // ✅ 性能优化：缓存时间字符串（每秒更新一次，而非每帧）
-        private string _cachedTimeString = "";
-        private DateTime _lastTimeStringUpdate = DateTime.MinValue;
-
-
-
+        #endregion
 
 
         private int _Quality = 30;
@@ -150,11 +152,10 @@ namespace camera
 
         private DateTime _lastSaveTime;
 
-        public string saveDirectory = "SavedVideos"; // 保存视频的目录
-        //此处还应该区分视频保存的目录
+        public string saveDirectory = "SavedVideos";
 
 
-        private TimeSpan _saveInterval = TimeSpan.FromMinutes(1); // 默认5分钟保存一次
+        private TimeSpan _saveInterval = TimeSpan.FromMinutes(1);
 
         public TimeSpan SaveInterval
         {
@@ -534,13 +535,8 @@ namespace camera
 
             });
         }
-        string fileName = "";
-        string filePath = "";
 
         public long availableSpace { get; set; }
-        private Process _ffmpegProcess;
-        private bool _isProcessingVideo = false;
-        private CancellationTokenSource _ffmpegErrorReadCts;
 
         private void InitializeFFmpeg()
         {
@@ -572,10 +568,10 @@ namespace camera
                     Directory.CreateDirectory(saveDirectory);
                 }
                 availableSpace = CalcDiskSpaceEnough();//初始化时设置可用空间
-                fileName = $"{Index}_{DateTime.Now:yyyyMMdd_HH-mm-ss}.mp4";
-                filePath = Path.Combine(saveDirectory, fileName);
-                string directory = Path.GetDirectoryName(filePath);
-                var TargetFile = FileName2FullPath(directory, fileName);//真正要保存的路径
+                _currentFileName = $"{Index}_{DateTime.Now:yyyyMMdd_HH-mm-ss}.mp4";
+                _currentFilePath = Path.Combine(saveDirectory, _currentFileName);
+                string directory = Path.GetDirectoryName(_currentFilePath);
+                var TargetFile = FileName2FullPath(directory, _currentFileName);//真正要保存的路径
                 Debug.WriteLine($"目标保存路径为:{TargetFile}");
                 if (string.IsNullOrEmpty(TargetFile))
                     return;
@@ -599,7 +595,9 @@ namespace camera
                 // 初始化 FFmpeg 进程
                 _ffmpegProcess = new Process();
                 _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
-                _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {(int)Width}x{(int)Height} -r {(int)Fps} -i - -c:v libx264 -preset ultrafast -crf {Quality} -an \"{TargetFile}\"";
+                // 使用 mpeg4 内置编码器（libx264 在当前系统崩溃 0xC0000005）
+                // -q:v 控制质量（1-31，越小质量越高），默认值与 CRF 方向一致
+                _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {(int)Width}x{(int)Height} -r {(int)Fps} -i - -c:v mpeg4 -q:v {Quality} -an \"{TargetFile}\"";
                 _ffmpegProcess.StartInfo.UseShellExecute = false;
                 _ffmpegProcess.StartInfo.RedirectStandardInput = true;
                 _ffmpegProcess.StartInfo.RedirectStandardError = true;
@@ -884,11 +882,6 @@ namespace camera
             }
         }
 
-        // 帧计数器（用于定期检查磁盘空间）
-        private long _frameCount = 0;
-
-        // 标记是否需要重新初始化 FFmpeg（避免在 SaveFrame 中直接初始化）
-        private bool _needReinitFFmpeg = false;
 
         /// <summary>
         /// 停止保存
@@ -1129,12 +1122,6 @@ namespace camera
                         cap = null;
                     }
 
-                    // 释放 VideoWriter（如果使用）
-                    if (capWriter != null)
-                    {
-                        capWriter.Dispose();
-                        capWriter = null;
-                    }
 
                     // 释放 Mat 对象
                     if (_BufferFrame != null)
