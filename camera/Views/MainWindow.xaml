@@ -430,6 +430,8 @@
                                             </TextBlock>
                                             <Slider
                                                 x:Name="OpacitySlider"
+                                                hc:TipElement.Visibility="Visible"
+                                                hc:TipElement.Placement="Top"
                                                 IsSnapToTickEnabled="True"
                                                 Maximum="1.0"
                                                 Minimum="0.1"
@@ -443,7 +445,16 @@
                                                 FontSize="11">
                                                 预览帧率
                                             </TextBlock>
-                                            <DockPanel>
+                                            <Slider
+                                                hc:TipElement.Visibility="Visible"
+                                                hc:TipElement.Placement="Top"
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="30"
+                                                Minimum="1"
+                                                TickFrequency="1"
+                                                ToolTip="预览帧率(1-30fps)，越低越省CPU"
+                                                Value="{Binding PreviewFps}" />
+                                            <!--<DockPanel>
                                                 <TextBlock
                                                     DockPanel.Dock="Right"
                                                     Margin="4,0,0,0"
@@ -458,7 +469,7 @@
                                                     TickFrequency="1"
                                                     ToolTip="预览帧率(1-30fps)，越低越省CPU"
                                                     Value="{Binding PreviewFps}" />
-                                            </DockPanel>
+                                            </DockPanel>-->
                                             <Separator />
                                             <TextBlock
                                                 Margin="4"
@@ -486,6 +497,8 @@
                                                 亮度调节
                                             </TextBlock>
                                             <Slider
+                                                hc:TipElement.Visibility="Visible"
+                                                hc:TipElement.Placement="Top"
                                                 IsSnapToTickEnabled="True"
                                                 Maximum="100.0"
                                                 Minimum="-100.0"
@@ -499,12 +512,22 @@
                                                 对比度调节
                                             </TextBlock>
                                             <Slider
+                                                hc:TipElement.Visibility="Visible"
+                                                hc:TipElement.Placement="Top"
                                                 IsSnapToTickEnabled="True"
                                                 Maximum="4"
                                                 Minimum="0"
                                                 TickFrequency="0.1"
                                                 ToolTip="对比度低--高"
                                                 Value="{Binding Contrast}" />
+                                            <Button
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                Command="{Binding ResetImageSettings}"
+                                                Content="恢复默认"
+                                                FontSize="10"
+                                                Style="{StaticResource ButtonDashedWarning.Small}"
+                                                ToolTip="重置亮度为0、对比度为1.0" />
                                             <Separator />
                                             <UniformGrid Columns="2">
 

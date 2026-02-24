@@ -45,6 +45,10 @@ namespace camera
         private string _currentFileName = "";
         private string _currentFilePath = "";
 
+        // 编码器回退：优先 h264_qsv（核显硬编码），失败则自动回退到 mpeg4（CPU 软编码）
+        private bool _useQsv = true;
+        private bool _qsvChecked = false;
+
         // 重试控制
         private int _ffmpegInitFailCount = 0;
         private const int MaxFFmpegInitRetries = 3;
@@ -444,8 +448,11 @@ namespace camera
                             processedFrame.Dispose();
                             processedFrame = claheResult;
                         }
-                        //亮度和对比度设置
-                        Cv2.ConvertScaleAbs(processedFrame, processedFrame, Contrast, Luminance);
+                        // 亮度和对比度设置（默认值时跳过，节省 CPU）
+                        if (Contrast != 1.0 || Luminance != 0.0)
+                        {
+                            Cv2.ConvertScaleAbs(processedFrame, processedFrame, Contrast, Luminance);
+                        }
 
                         Mat frameForSave = null;
                         lock (_lockObject)
@@ -603,82 +610,117 @@ namespace camera
                 //开始计时
                 _lastSaveTime = DateTime.Now;
 
-                // 初始化 FFmpeg 进程
-                _ffmpegProcess = new Process();
-                _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
-                // 使用 mpeg4 内置编码器（libx264 在当前系统崩溃 0xC0000005）
-                // -q:v 控制质量（1-31，越小质量越高），默认值与 CRF 方向一致
-                _ffmpegProcess.StartInfo.Arguments = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {(int)Width}x{(int)Height} -r {(int)Fps} -i - -c:v mpeg4 -q:v {Quality} -an \"{TargetFile}\"";
-                _ffmpegProcess.StartInfo.UseShellExecute = false;
-                _ffmpegProcess.StartInfo.RedirectStandardInput = true;
-                _ffmpegProcess.StartInfo.RedirectStandardError = true;
-                _ffmpegProcess.StartInfo.CreateNoWindow = true;
-                // 设置工作目录为程序所在目录，确保相对路径正确解析
-                _ffmpegProcess.StartInfo.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                // 编码器尝试列表：优先 QSV 硬件编码，失败则回退 mpeg4
+                string[] encodersToTry;
+                if (_useQsv)
+                    encodersToTry = new[] { "h264_qsv", "mpeg4" };
+                else
+                    encodersToTry = new[] { "mpeg4" };
 
-                try
+                bool started = false;
+                foreach (var encoder in encodersToTry)
                 {
-                    Logger.LogInfo($"启动 FFmpeg: {_ffmpegProcess.StartInfo.Arguments}");
-                    _ffmpegProcess.Start();
+                    string encoderArgs = encoder == "h264_qsv"
+                        ? $"-c:v h264_qsv -global_quality {Quality}"
+                        : $"-c:v mpeg4 -q:v {Quality}";
 
-                    // ✅ 关键修复：立即标记正在处理，防止其他线程进入重试逻辑
-                    _isProcessingVideo = true;
+                    string fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {(int)Width}x{(int)Height} -r {(int)Fps} -i - {encoderArgs} -an \"{TargetFile}\"";
 
-                    // 等待一小段时间，检查 FFmpeg 是否立即退出（编码器不支持、路径错误等）
-                    // 此时持有锁，且 _isProcessingVideo 为 true，其他线程会被阻塞或直接返回
-                    Thread.Sleep(200);
+                    _ffmpegProcess = new Process();
+                    _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
+                    _ffmpegProcess.StartInfo.Arguments = fullArgs;
+                    _ffmpegProcess.StartInfo.UseShellExecute = false;
+                    _ffmpegProcess.StartInfo.RedirectStandardInput = true;
+                    _ffmpegProcess.StartInfo.RedirectStandardError = true;
+                    _ffmpegProcess.StartInfo.CreateNoWindow = true;
+                    _ffmpegProcess.StartInfo.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
 
-                    if (_ffmpegProcess.HasExited)
+                    try
                     {
-                        _isProcessingVideo = false; // 标记失败
+                        Logger.LogInfo($"启动 FFmpeg ({encoder}): {fullArgs}");
+                        _ffmpegProcess.Start();
+                        _isProcessingVideo = true;
 
-                        string stderrOutput = "";
-                        try
+                        // 等待一小段时间，检查是否立即退出
+                        Thread.Sleep(300);
+
+                        if (_ffmpegProcess.HasExited)
                         {
-                            stderrOutput = _ffmpegProcess.StandardError.ReadToEnd();
-                        }
-                        catch { }
+                            _isProcessingVideo = false;
+                            string stderrOutput = "";
+                            try { stderrOutput = _ffmpegProcess.StandardError.ReadToEnd(); } catch { }
 
-                        Logger.LogError($"FFmpeg 启动后立即退出，退出码: {_ffmpegProcess.ExitCode}");
-                        if (!string.IsNullOrEmpty(stderrOutput))
+                            Logger.LogError($"FFmpeg ({encoder}) 启动后立即退出，退出码: {_ffmpegProcess.ExitCode}");
+                            if (!string.IsNullOrEmpty(stderrOutput))
+                                Logger.LogError($"FFmpeg 错误输出: {stderrOutput}");
+
+                            _ffmpegProcess.Dispose();
+                            _ffmpegProcess = null;
+
+                            // QSV 失败，标记为不可用，继续尝试下一个编码器
+                            if (encoder == "h264_qsv")
+                            {
+                                _useQsv = false;
+                                _qsvChecked = true;
+                                Logger.LogWarning("h264_qsv 硬件编码不可用，自动回退到 mpeg4 软件编码...");
+                                continue; // 尝试 mpeg4
+                            }
+                            return; // mpeg4 也失败了，放弃
+                        }
+
+                        // 启动成功
+                        if (encoder == "h264_qsv" && !_qsvChecked)
                         {
-                            Logger.LogError($"FFmpeg 错误输出: {stderrOutput}");
+                            _qsvChecked = true;
+                            Logger.LogInfo("h264_qsv 硬件编码验证通过，使用核显加速");
+                        }
+                        else if (encoder == "mpeg4")
+                        {
+                            Logger.LogInfo("使用 mpeg4 软件编码");
                         }
 
-                        _ffmpegProcess.Dispose();
+                        started = true;
+                        break; // 启动成功，跳出循环
+                    }
+                    catch (Exception ex)
+                    {
+                        _isProcessingVideo = false;
+                        Logger.LogError($"启动 FFmpeg ({encoder}) 时发生错误", ex);
+                        _ffmpegProcess?.Dispose();
                         _ffmpegProcess = null;
+
+                        if (encoder == "h264_qsv")
+                        {
+                            _useQsv = false;
+                            _qsvChecked = true;
+                            continue;
+                        }
                         return;
                     }
-
-                    // 启动一个任务来读取错误输出（使用 CancellationToken）
-                    _ffmpegErrorReadCts = new CancellationTokenSource();
-                    Task.Run(async () =>
-                    {
-                        try
-                        {
-                            string error = await _ffmpegProcess.StandardError.ReadToEndAsync();
-                            if (!string.IsNullOrEmpty(error) && !_ffmpegErrorReadCts.Token.IsCancellationRequested)
-                            {
-                                Logger.LogWarning($"FFmpeg 输出: {error}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"读取 FFmpeg 错误输出时发生异常: {ex.Message}");
-                        }
-                    }, _ffmpegErrorReadCts.Token);
-
-                    Logger.LogInfo($"FFmpeg 进程已成功启动 (PID: {_ffmpegProcess.Id})");
                 }
-                catch (Exception ex)
+
+                if (!started || _ffmpegProcess == null)
+                    return;
+
+                // 启动异步读取错误输出
+                _ffmpegErrorReadCts = new CancellationTokenSource();
+                Task.Run(async () =>
                 {
-                    _isProcessingVideo = false;
-                    Logger.LogError($"启动 FFmpeg 进程时发生错误", ex);
-                    _ffmpegProcess?.Dispose();
-                    _ffmpegProcess = null;
-                    _ffmpegErrorReadCts?.Dispose();
-                    _ffmpegErrorReadCts = null;
-                }
+                    try
+                    {
+                        string error = await _ffmpegProcess.StandardError.ReadToEndAsync();
+                        if (!string.IsNullOrEmpty(error) && !_ffmpegErrorReadCts.Token.IsCancellationRequested)
+                        {
+                            Logger.LogWarning($"FFmpeg 输出: {error}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"读取 FFmpeg 错误输出时发生异常: {ex.Message}");
+                    }
+                }, _ffmpegErrorReadCts.Token);
+
+                Logger.LogInfo($"FFmpeg 进程已成功启动 (PID: {_ffmpegProcess.Id})");
             }
         }
 

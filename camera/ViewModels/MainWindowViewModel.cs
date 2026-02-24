@@ -308,6 +308,16 @@ namespace camera.ViewModels
             Cam.ChangeCameraInfo();
         }
 
+        private DelegateCommand _ResetImageSettings;
+        public DelegateCommand ResetImageSettings =>
+            _ResetImageSettings ?? (_ResetImageSettings = new DelegateCommand(ExecuteResetImageSettings));
+
+        void ExecuteResetImageSettings()
+        {
+            Contrast = 1.0;
+            Luminance = 0.0;
+        }
+
         private DelegateCommand _ShowConsole;
         public DelegateCommand ShowConsole =>
             _ShowConsole ?? (_ShowConsole = new DelegateCommand(ExecuteShowConsole));
