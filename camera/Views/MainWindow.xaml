@@ -330,10 +330,28 @@
                                                     ToolTip="分钟"
                                                     Value="{Binding SaveInterval}" />
                                             </UniformGrid>
+                                            <Separator />
+                                            <TextBlock
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="11">
+                                                录制帧率
+                                            </TextBlock>
+                                            <Slider
+                                                hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="{Binding MaxFps}"
+                                                Minimum="1"
+                                                TickFrequency="1"
+                                                ToolTip="录制帧率，越低越省CPU，监控15fps足够"
+                                                Value="{Binding RecordFps}" />
+                                            <Separator />
                                             <Button
                                                 Margin="5"
                                                 Command="{Binding ViewPlayback}"
                                                 Content="查看回放" />
+
                                             <!--<hc:Divider HorizontalContentAlignment="Left" Content="空间策略" />-->
                                             <Separator />
                                             <TextBlock
@@ -430,8 +448,8 @@
                                             </TextBlock>
                                             <Slider
                                                 x:Name="OpacitySlider"
-                                                hc:TipElement.Visibility="Visible"
                                                 hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
                                                 IsSnapToTickEnabled="True"
                                                 Maximum="1.0"
                                                 Minimum="0.1"
@@ -446,13 +464,13 @@
                                                 预览帧率
                                             </TextBlock>
                                             <Slider
-                                                hc:TipElement.Visibility="Visible"
                                                 hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
                                                 IsSnapToTickEnabled="True"
-                                                Maximum="30"
+                                                Maximum="{Binding MaxFps}"
                                                 Minimum="1"
                                                 TickFrequency="1"
-                                                ToolTip="预览帧率(1-30fps)，越低越省CPU"
+                                                ToolTip="预览帧率，越低越省CPU"
                                                 Value="{Binding PreviewFps}" />
                                             <!--<DockPanel>
                                                 <TextBlock
@@ -497,8 +515,8 @@
                                                 亮度调节
                                             </TextBlock>
                                             <Slider
-                                                hc:TipElement.Visibility="Visible"
                                                 hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
                                                 IsSnapToTickEnabled="True"
                                                 Maximum="100.0"
                                                 Minimum="-100.0"
@@ -512,8 +530,8 @@
                                                 对比度调节
                                             </TextBlock>
                                             <Slider
-                                                hc:TipElement.Visibility="Visible"
                                                 hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
                                                 IsSnapToTickEnabled="True"
                                                 Maximum="4"
                                                 Minimum="0"

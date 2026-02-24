@@ -46,8 +46,9 @@ namespace camera
         private string _currentFilePath = "";
 
         // 编码器回退：优先 h264_qsv（核显硬编码），失败则自动回退到 mpeg4（CPU 软编码）
-        private bool _useQsv = true;
-        private bool _qsvChecked = false;
+        // ★ static：所有摄像头实例共享，一个检测到 QSV 不可用，其他全部跳过
+        private static bool _useQsv = true;
+        private static bool _qsvChecked = false;
 
         // 重试控制
         private int _ffmpegInitFailCount = 0;
@@ -67,15 +68,31 @@ namespace camera
 
         private int _PreviewFps = 15;
         /// <summary>
-        /// 预览帧率（1-30），控制 UI 刷新频率
+        /// 预览帧率（1-摄像头帧率），控制 UI 刷新频率
         /// </summary>
         public int PreviewFps
         {
             get { return _PreviewFps; }
             set
             {
-                int clamped = Math.Clamp(value, 1, 30);
+                int maxFps = Fps > 0 ? (int)Fps : 30;
+                int clamped = Math.Clamp(value, 1, maxFps);
                 SetProperty(ref _PreviewFps, clamped);
+            }
+        }
+
+        private int _RecordFps = 15;
+        /// <summary>
+        /// 录制帧率（1-摄像头帧率），控制喂给 FFmpeg 的帧频率，降低可节省 CPU
+        /// </summary>
+        public int RecordFps
+        {
+            get { return _RecordFps; }
+            set
+            {
+                int maxFps = Fps > 0 ? (int)Fps : 30;
+                int clamped = Math.Clamp(value, 1, maxFps);
+                SetProperty(ref _RecordFps, clamped);
             }
         }
 
@@ -410,10 +427,11 @@ namespace camera
                 Stopwatch stopwatch = new Stopwatch();
                 long frameInterval = (long)(1000.0 / Fps * TimeSpan.TicksPerMillisecond);
                 int uiFrameSkip = 0;
+                int recordFrameSkip = 0;
 
                 while (isCapture)
                 {
-                    stopwatch.Start();
+                    stopwatch.Restart(); // ✅ 优化3：每帧重置计时器（原 Start() 从不重置，ticks 持续累加）
                     Mat tempFrame = null;
                     Mat processedFrame = null;
 
@@ -437,20 +455,30 @@ namespace camera
 
                         FrameChanged?.Invoke(tempFrame);
 
-                        // 创建处理后的帧
-                        processedFrame = tempFrame.Clone();
+                        // ✅ 优化2：仅在需要图像处理时才 Clone，否则直接使用原帧
+                        bool needProcess = IsGrayHomogenization || Contrast != 1.0 || Luminance != 0.0;
+                        if (needProcess)
+                        {
+                            processedFrame = tempFrame.Clone();
 
-                        //针对亮度通道的自适应直方图均衡化
-                        if (IsGrayHomogenization)
-                        {
-                            Mat claheResult = ApplyCLAHE(processedFrame);
-                            processedFrame.Dispose();
-                            processedFrame = claheResult;
+                            // 针对亮度通道的自适应直方图均衡化
+                            if (IsGrayHomogenization)
+                            {
+                                Mat claheResult = ApplyCLAHE(processedFrame);
+                                processedFrame.Dispose();
+                                processedFrame = claheResult;
+                            }
+                            // 亮度和对比度设置
+                            if (Contrast != 1.0 || Luminance != 0.0)
+                            {
+                                Cv2.ConvertScaleAbs(processedFrame, processedFrame, Contrast, Luminance);
+                            }
                         }
-                        // 亮度和对比度设置（默认值时跳过，节省 CPU）
-                        if (Contrast != 1.0 || Luminance != 0.0)
+                        else
                         {
-                            Cv2.ConvertScaleAbs(processedFrame, processedFrame, Contrast, Luminance);
+                            // 无需处理，直接引用原帧（省去 921KB Clone）
+                            processedFrame = tempFrame;
+                            tempFrame = null; // 防止被后续释放
                         }
 
                         Mat frameForSave = null;
@@ -466,9 +494,16 @@ namespace camera
                             frameForSave = _BufferFrame;
                         }
 
+                        // ✅ 优化1：录制降帧 — 根据 RecordFps 跳帧，减少 FFmpeg 编码量
                         if (isSave && frameForSave != null)
                         {
-                            SaveFrame(frameForSave);
+                            int recordSkipInterval = Math.Max(1, (int)Fps / Math.Max(1, RecordFps));
+                            recordFrameSkip++;
+                            if (recordFrameSkip >= recordSkipInterval)
+                            {
+                                recordFrameSkip = 0;
+                                SaveFrame(frameForSave);
+                            }
                         }
 
                         if (Application.Current == null)
@@ -624,7 +659,7 @@ namespace camera
                         ? $"-c:v h264_qsv -global_quality {Quality}"
                         : $"-c:v mpeg4 -q:v {Quality}";
 
-                    string fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {(int)Width}x{(int)Height} -r {(int)Fps} -i - {encoderArgs} -an \"{TargetFile}\"";
+                    string fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {(int)Width}x{(int)Height} -r {RecordFps} -i - {encoderArgs} -an \"{TargetFile}\"";
 
                     _ffmpegProcess = new Process();
                     _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
@@ -642,7 +677,8 @@ namespace camera
                         _isProcessingVideo = true;
 
                         // 等待一小段时间，检查是否立即退出
-                        Thread.Sleep(300);
+                        // 500ms 确保 QSV 初始化有足够时间暴露错误
+                        Thread.Sleep(500);
 
                         if (_ffmpegProcess.HasExited)
                         {
@@ -909,6 +945,15 @@ namespace camera
             catch (IOException ioEx)
             {
                 Logger.LogError("写入 FFmpeg 失败（管道可能已关闭）", ioEx);
+
+                // 如果正在使用 QSV 且进程已崩溃，说明 QSV 运行时不稳定（如并发会话过多）
+                // 标记为不可用，后续所有摄像头都将使用 mpeg4
+                if (_useQsv && _ffmpegProcess != null && _ffmpegProcess.HasExited)
+                {
+                    _useQsv = false;
+                    _qsvChecked = true;
+                    Logger.LogWarning($"摄像头 {Index}: h264_qsv 运行时崩溃，全局回退到 mpeg4 软件编码");
+                }
 
                 // FFmpeg 进程可能已崩溃，清理死掉的进程，由头部重试机制统一处理
                 FinalizeFfmpeg();

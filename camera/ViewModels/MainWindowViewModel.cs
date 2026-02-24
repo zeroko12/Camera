@@ -222,8 +222,32 @@ namespace camera.ViewModels
             }
         }
 
+        private int _RecordFps = 15;
+        public int RecordFps
+        {
+            get { return _RecordFps; }
+            set { SetProperty(ref _RecordFps, value); OnRecordFpsChanged(); }
+        }
+
+        private void OnRecordFpsChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.RecordFps = RecordFps;
+            }
+        }
+
         #endregion
 
+        /// <summary>
+        /// 摄像头最大帧率，用于滑块上限
+        /// </summary>
+        private int _MaxFps = 30;
+        public int MaxFps
+        {
+            get { return _MaxFps; }
+            set { SetProperty(ref _MaxFps, value); }
+        }
 
         //摄像头集合
         private ObservableCollection<CameraService> _Cameras = new();
@@ -280,6 +304,14 @@ namespace camera.ViewModels
             }
 
             Logger.LogInfo($"摄像头初始化完成，共找到 {Cameras.Count} 个摄像头");
+
+            // 从第一个摄像头获取实际帧率作为滑块上限
+            if (Cameras.Count > 0)
+            {
+                MaxFps = (int)Cameras[0].Fps;
+                if (MaxFps <= 0) MaxFps = 30;
+                Logger.LogInfo($"摄像头最大帧率: {MaxFps}fps");
+            }
 
             if (Cameras.Count == 0)
             {
