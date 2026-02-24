@@ -410,7 +410,6 @@ namespace camera
                 Stopwatch stopwatch = new Stopwatch();
                 long frameInterval = (long)(1000.0 / Fps * TimeSpan.TicksPerMillisecond);
                 int uiFrameSkip = 0;
-                int uiSkipInterval = Math.Max(1, (int)Fps / Math.Max(1, PreviewFps)); // 动态计算跳帧间隔
 
                 while (isCapture)
                 {
@@ -480,7 +479,8 @@ namespace camera
                         }
 
 
-                        // UI 节流：根据 PreviewFps 控制刷新率
+                        // UI 节流：根据 PreviewFps 控制刷新率（每帧重新计算，支持实时调整）
+                        int uiSkipInterval = Math.Max(1, (int)Fps / Math.Max(1, PreviewFps));
                         uiFrameSkip++;
                         if (uiFrameSkip >= uiSkipInterval)
                         {
