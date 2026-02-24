@@ -61,6 +61,20 @@ namespace camera
             set { SetProperty(ref _Quality, value); }
         }
 
+        private int _PreviewFps = 15;
+        /// <summary>
+        /// 预览帧率（1-30），控制 UI 刷新频率
+        /// </summary>
+        public int PreviewFps
+        {
+            get { return _PreviewFps; }
+            set
+            {
+                int clamped = Math.Clamp(value, 1, 30);
+                SetProperty(ref _PreviewFps, clamped);
+            }
+        }
+
         private bool _isSave = false;//是否保存
         public bool isSave
         {
@@ -391,7 +405,8 @@ namespace camera
             {
                 Stopwatch stopwatch = new Stopwatch();
                 long frameInterval = (long)(1000.0 / Fps * TimeSpan.TicksPerMillisecond);
-                long nextFrameTime = 0;
+                int uiFrameSkip = 0;
+                int uiSkipInterval = Math.Max(1, (int)Fps / Math.Max(1, PreviewFps)); // 动态计算跳帧间隔
 
                 while (isCapture)
                 {
@@ -458,46 +473,42 @@ namespace camera
                         }
 
 
-
-                        // UI 更新：必须 Clone，因为 _BufferFrame 会在下一帧被 Dispose
-                        // BeginInvoke 异步调用，不阻塞捕获线程
-                        Application.Current.Dispatcher.BeginInvoke(() =>
+                        // UI 节流：根据 PreviewFps 控制刷新率
+                        uiFrameSkip++;
+                        if (uiFrameSkip >= uiSkipInterval)
                         {
-                            try
+                            uiFrameSkip = 0;
+                            Application.Current.Dispatcher.BeginInvoke(() =>
                             {
-                                Mat snapshot = null;
-                                lock (_lockObject)
+                                try
                                 {
-                                    if (_BufferFrame != null)
+                                    Mat snapshot = null;
+                                    lock (_lockObject)
                                     {
-                                        snapshot = _BufferFrame.Clone();
+                                        if (_BufferFrame != null)
+                                        {
+                                            snapshot = _BufferFrame.Clone();
+                                        }
+                                    }
+                                    if (snapshot != null)
+                                    {
+                                        Frame = snapshot;
                                     }
                                 }
-                                if (snapshot != null)
+                                catch (Exception ex)
                                 {
-                                    Frame = snapshot; // Frame setter 会 Dispose 旧的 clone
+                                    Logger.LogError($"更新 UI 帧时发生错误", ex);
                                 }
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.LogError($"更新 UI 帧时发生错误", ex);
-                                Debug.WriteLine($"更新 UI 帧时发生错误: {ex.Message}");
-                            }
-                        });
+                            });
+                        }
 
-
+                        // 帧率控制（去掉忙等循环，降低 CPU 空转）
                         long elapsedTicks = stopwatch.ElapsedTicks;
                         if (elapsedTicks < frameInterval)
                         {
-                            long sleepTime = (frameInterval - elapsedTicks) / TimeSpan.TicksPerMillisecond;
-                            if (sleepTime > 1)
-                                Thread.Sleep((int)sleepTime - 1);
-                        }
-
-                        nextFrameTime += frameInterval;
-                        while (stopwatch.ElapsedTicks < nextFrameTime)
-                        {
-                            Thread.Sleep(0);
+                            int sleepMs = (int)((frameInterval - elapsedTicks) / TimeSpan.TicksPerMillisecond);
+                            if (sleepMs > 0)
+                                Thread.Sleep(sleepMs);
                         }
 
                         // 检查是否需要重新初始化 FFmpeg（在安全的地方处理）
@@ -1018,7 +1029,6 @@ namespace camera
         /// <param name="frame"></param>
         private void AddOverlayTime(Mat frame)
         {
-            // ✅ 性能优化：每秒更新一次时间字符串，而非每帧（30次/秒→1次/秒）
             DateTime now = DateTime.Now;
             if ((now - _lastTimeStringUpdate).TotalSeconds >= 1.0)
             {
@@ -1026,38 +1036,27 @@ namespace camera
                 _lastTimeStringUpdate = now;
             }
 
-            // 使用缓存的时间字符串
-            String nowStr = _cachedTimeString;
+            string nowStr = _cachedTimeString;
+            const double fontScale = 0.3;
+            const int thickness = 1;
+            const HersheyFonts font = HersheyFonts.HersheySimplex;
 
-            // 设置文本参数
-            double fontScale = 0.3;
-            int thickness = 1;
-            HersheyFonts font = HersheyFonts.HersheySimplex;
+            OpenCvSharp.Size textSize = Cv2.GetTextSize(nowStr, font, fontScale, thickness, out _);
+            var textOrg = new OpenCvSharp.Point(frame.Width - textSize.Width - 10, textSize.Height + 10);
 
-            // 计算文本大小
-            OpenCvSharp.Size textSize = Cv2.GetTextSize(nowStr, font, fontScale, thickness, out int baseline);
+            // 只在文字区域绘制半透明背景（ROI 操作，而非全帧 AddWeighted）
+            var bgRect = new OpenCvSharp.Rect(
+                textOrg.X - 5, textOrg.Y - textSize.Height - 5,
+                textSize.Width + 10, textSize.Height + 10);
 
-            // 计算日期位置（右上角，留出10像素的边距）
-            OpenCvSharp.Point textOrg = new OpenCvSharp.Point(frame.Width - textSize.Width - 10, textSize.Height + 10);
-
-            // 创建一个与原始帧相同大小和类型的覆盖层
-            using (Mat overlay = new Mat(frame.Size(), frame.Type()))
+            // 边界裁剪
+            bgRect = bgRect.Intersect(new OpenCvSharp.Rect(0, 0, frame.Width, frame.Height));
+            if (bgRect.Width > 0 && bgRect.Height > 0)
             {
-                overlay.SetTo(new Scalar(0, 0, 0, 0)); // 完全透明
-
-                // 绘制半透明背景
-                OpenCvSharp.Rect bgRect = new OpenCvSharp.Rect(textOrg.X - 5, textOrg.Y - textSize.Height - 5, textSize.Width + 10, textSize.Height + 10);
-                Cv2.Rectangle(overlay, bgRect, new Scalar(0, 0, 0, 0), -1);
-
-                // 将背景叠加到原始帧上
-                Cv2.AddWeighted(overlay, 0.5, frame, 1.0, 0, frame);
+                using var roi = new Mat(frame, bgRect);
+                roi.ConvertTo(roi, -1, 0.5, 0); // 只暗化文字背景区域
             }
 
-            // 绘制透明背景文本(但必须在带有alpha的RGBA图像上)
-            // OpenCvSharp.Rect bgRect = new OpenCvSharp.Rect(textOrg.X - 5, textOrg.Y - textSize.Height - 5, textSize.Width + 10, textSize.Height + 10);
-            // Cv2.Rectangle(frame, bgRect, new Scalar(0, 0, 0, 0), -1);
-
-            // 绘制日期文本
             Cv2.PutText(frame, nowStr, textOrg, font, fontScale, new Scalar(255, 255, 255), thickness, LineTypes.AntiAlias);
         }
 

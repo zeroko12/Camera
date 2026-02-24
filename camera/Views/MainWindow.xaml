@@ -441,6 +441,29 @@
                                                 Margin="4"
                                                 HorizontalAlignment="Center"
                                                 FontSize="11">
+                                                预览帧率
+                                            </TextBlock>
+                                            <DockPanel>
+                                                <TextBlock
+                                                    DockPanel.Dock="Right"
+                                                    Margin="4,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="10"
+                                                    Foreground="Black"
+                                                    Text="{Binding PreviewFps, StringFormat={}{0}fps}" />
+                                                <Slider
+                                                    IsSnapToTickEnabled="True"
+                                                    Maximum="30"
+                                                    Minimum="1"
+                                                    TickFrequency="1"
+                                                    ToolTip="预览帧率(1-30fps)，越低越省CPU"
+                                                    Value="{Binding PreviewFps}" />
+                                            </DockPanel>
+                                            <Separator />
+                                            <TextBlock
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="11">
                                                 穿透模式快捷键
                                             </TextBlock>
                                             <hk:HotKeyBox

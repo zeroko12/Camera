@@ -207,6 +207,21 @@ namespace camera.ViewModels
             }
         }
 
+        private int _PreviewFps = 15;
+        public int PreviewFps
+        {
+            get { return _PreviewFps; }
+            set { SetProperty(ref _PreviewFps, value); OnPreviewFpsChanged(); }
+        }
+
+        private void OnPreviewFpsChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.PreviewFps = PreviewFps;
+            }
+        }
+
         #endregion
 
 
