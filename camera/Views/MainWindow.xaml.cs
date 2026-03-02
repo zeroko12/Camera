@@ -13,7 +13,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using System.Threading;
 using System.Configuration;
-
+using System.ComponentModel;
 namespace camera.Views
 {
     /// <summary>
@@ -30,6 +30,9 @@ namespace camera.Views
         private double AspectRatio = 12.0 / 9.0;
 
         public bool CanClickThrough { get; set; } = false;
+
+        private System.Windows.Forms.NotifyIcon _notifyIcon;
+        private bool _isRealExit = false;
         public MainWindow()
         {
             // 检查是否已有实例在运行
@@ -118,6 +121,24 @@ namespace camera.Views
             base.OnSourceInitialized(e);
         }
 
+
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            if (!_isRealExit)
+            {
+                e.Cancel = true;
+                this.Hide();
+            }
+            else
+            {
+                if (_notifyIcon != null)
+                {
+                    _notifyIcon.Visible = false;
+                    _notifyIcon.Dispose();
+                }
+                base.OnClosing(e);
+            }
+        }
 
         protected override void OnClosed(EventArgs e)
         {
@@ -208,6 +229,47 @@ namespace camera.Views
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            // 初始化系统托盘图标
+            _notifyIcon = new System.Windows.Forms.NotifyIcon();
+            _notifyIcon.Text = "Camera Service";
+            try
+            {
+                string iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "jh.ico");
+                if (System.IO.File.Exists(iconPath))
+                {
+                    _notifyIcon.Icon = new System.Drawing.Icon(iconPath);
+                }
+                else
+                {
+                    _notifyIcon.Icon = System.Drawing.SystemIcons.Application;
+                }
+            }
+            catch
+            {
+                _notifyIcon.Icon = System.Drawing.SystemIcons.Application;
+            }
+
+            _notifyIcon.Visible = true;
+            _notifyIcon.DoubleClick += (s, args) =>
+            {
+                this.Show();
+                if (this.WindowState == WindowState.Minimized)
+                {
+                    this.WindowState = WindowState.Normal;
+                }
+                this.Activate();
+            };
+
+            var contextMenu = new System.Windows.Forms.ContextMenuStrip();
+            var menuExit = new System.Windows.Forms.ToolStripMenuItem("完全退出");
+            menuExit.Click += (s, args) =>
+            {
+                _isRealExit = true;
+                this.Close(); // 将会触发真正的关闭
+            };
+            contextMenu.Items.Add(menuExit);
+            _notifyIcon.ContextMenuStrip = contextMenu;
+
             // 设置窗口样式为透明
             int exStyle = GetWindowLong(new WindowInteropHelper(this).Handle, GWL_EXSTYLE);
             SetWindowLong(new WindowInteropHelper(this).Handle, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
