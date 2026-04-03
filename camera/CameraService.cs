@@ -892,12 +892,12 @@ namespace camera
                     // 根据配置决定是否覆盖旧文件
                     if (OverwriteOldFiles)
                     {
-                        Logger.LogInfo("开始清理旧文件以释放空间 (工业级缓冲策略)...");
-                        
+                        Logger.LogInfo("开始清理旧文件以释放空间 ...");
+
                         // 目标空间：设置一个安全缓冲 (阈值 + 500MB)
                         // 这样可以一次性清理出足够的空间，防止程序在临界值边缘频繁执行删除和检测操作
-                        long targetSpace = DiskThreshold + 500; 
-                        
+                        long targetSpace = DiskThreshold + 500;
+
                         bool deletedAny = true;
                         // 循环清理，直到达到安全目标，或者实在没有文件可删为止
                         while (availableSpace < targetSpace && deletedAny)
@@ -913,7 +913,7 @@ namespace camera
                         if (availableSpace < DiskThreshold)
                         {
                             Logger.LogError("清理所有旧文件后空间仍不足，停止录制");
-                            
+
                             // 触发事件通知用户
                             try
                             {
@@ -931,7 +931,7 @@ namespace camera
                     else
                     {
                         Logger.LogWarning("磁盘空间不足且未启用覆盖旧文件，停止录制");
-                        
+
                         // 触发事件通知用户
                         try
                         {
@@ -1029,30 +1029,37 @@ namespace camera
 
         private bool DeleteOldestFile()
         {
-            string directory = Path.Combine(saveDirectory, Index.ToString());
-            if (!Directory.Exists(directory))
+            // 全局查找：不再局限于当前 Camera 的目录 (Index.ToString())
+            // 而是在整个 saveDirectory 中寻找全局最老的视频文件进行牺牲
+            if (!Directory.Exists(saveDirectory))
             {
                 return false;
             }
 
             // 使用 LastWriteTime 而不是 CreationTime（更可靠）
-            var oldestFile = Directory.GetFiles(directory, "*.mp4", SearchOption.AllDirectories)
+            var oldestFile = Directory.GetFiles(saveDirectory, "*.mp4", SearchOption.AllDirectories)
                 .OrderBy(f => new FileInfo(f).LastWriteTime)
                 .FirstOrDefault();
 
             if (oldestFile != null)
             {
-                Logger.LogInfo($"尝试删除最旧文件，目录: {directory}");
+                Logger.LogInfo($"尝试全局删除最旧文件: {oldestFile}");
                 try
                 {
+                    // 补充多线程竞争检查：可能刚才已经刚好被其他摄像头实例清除了
+                    if (!File.Exists(oldestFile))
+                    {
+                        return true; 
+                    }
+
                     var fileInfo = new FileInfo(oldestFile);
                     long fileSizeMB = fileInfo.Length / (1024 * 1024);
 
                     File.Delete(oldestFile);
-                    Logger.LogInfo($"已删除最旧的文件: {Path.GetFileName(oldestFile)} ({fileSizeMB}MB)");
+                    Logger.LogInfo($"已成功删除全局最旧的文件: {Path.GetFileName(oldestFile)} ({fileSizeMB}MB)");
                     Debug.WriteLine($"已删除最旧的文件: {oldestFile}");
 
-                    //若文件夹为空,删除文件夹
+                    // 若文件夹为空,删除文件夹
                     var deleteDirectory = Path.GetDirectoryName(oldestFile);
                     if (Directory.Exists(deleteDirectory) && Directory.GetFiles(deleteDirectory).Length == 0)
                     {
@@ -1063,7 +1070,7 @@ namespace camera
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError($"删除文件失败: {oldestFile}", ex);
+                    Logger.LogError($"删除全局最旧文件失败 (可能是锁定或权限问题): {oldestFile}", ex);
                     Debug.WriteLine($"删除文件时出错: {ex.Message}");
                     return false;
                 }
