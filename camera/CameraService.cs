@@ -1,4 +1,4 @@
-﻿using OpenCvSharp;
+using OpenCvSharp;
 using Prism.Mvvm;
 using System;
 using System.Buffers;
@@ -889,26 +889,41 @@ namespace camera
                 {
                     Logger.LogWarning($"磁盘空间不足: {availableSpace}MB < {DiskThreshold}MB");
 
-                    // 触发事件通知用户
-                    try
-                    {
-                        DiskSpaceLow?.Invoke(this, $"磁盘空间不足: {availableSpace}MB");
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError("触发 DiskSpaceLow 事件时发生错误", ex);
-                    }
-
                     // 根据配置决定是否覆盖旧文件
                     if (OverwriteOldFiles)
                     {
-                        Logger.LogInfo("尝试删除最旧的文件以释放空间...");
-                        DeleteOldestFile();
-                        availableSpace = CalcDiskSpaceEnough(); // 重新检查
+                        Logger.LogInfo("开始清理旧文件以释放空间 (工业级缓冲策略)...");
+                        
+                        // 目标空间：设置一个安全缓冲 (阈值 + 500MB)
+                        // 这样可以一次性清理出足够的空间，防止程序在临界值边缘频繁执行删除和检测操作
+                        long targetSpace = DiskThreshold + 500; 
+                        
+                        bool deletedAny = true;
+                        // 循环清理，直到达到安全目标，或者实在没有文件可删为止
+                        while (availableSpace < targetSpace && deletedAny)
+                        {
+                            deletedAny = DeleteOldestFile();
+                            if (deletedAny)
+                            {
+                                availableSpace = CalcDiskSpaceEnough(); // 重新检查
+                            }
+                        }
 
+                        // 清理循环结束后，再次确认是否甚至低于最低危急阈值
                         if (availableSpace < DiskThreshold)
                         {
-                            Logger.LogError("删除旧文件后空间仍不足，停止录制");
+                            Logger.LogError("清理所有旧文件后空间仍不足，停止录制");
+                            
+                            // 触发事件通知用户
+                            try
+                            {
+                                DiskSpaceLow?.Invoke(this, $"清理所有旧文件后空间仍不足，录像已停止: {availableSpace}MB");
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogError("触发 DiskSpaceLow 事件时发生错误", ex);
+                            }
+
                             StopSave();
                             return;
                         }
@@ -916,6 +931,17 @@ namespace camera
                     else
                     {
                         Logger.LogWarning("磁盘空间不足且未启用覆盖旧文件，停止录制");
+                        
+                        // 触发事件通知用户
+                        try
+                        {
+                            DiskSpaceLow?.Invoke(this, $"磁盘空间不足且未启用覆盖旧文件，录像已停止: {availableSpace}MB");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogError("触发 DiskSpaceLow 事件时发生错误", ex);
+                        }
+
                         StopSave();
                         return;
                     }
@@ -1001,12 +1027,12 @@ namespace camera
             return availableSpace;
         }
 
-        private void DeleteOldestFile()
+        private bool DeleteOldestFile()
         {
             string directory = Path.Combine(saveDirectory, Index.ToString());
             if (!Directory.Exists(directory))
             {
-                return;
+                return false;
             }
 
             // 使用 LastWriteTime 而不是 CreationTime（更可靠）
@@ -1014,10 +1040,9 @@ namespace camera
                 .OrderBy(f => new FileInfo(f).LastWriteTime)
                 .FirstOrDefault();
 
-            Logger.LogInfo($"尝试删除最旧文件，目录: {directory}");
-
             if (oldestFile != null)
             {
+                Logger.LogInfo($"尝试删除最旧文件，目录: {directory}");
                 try
                 {
                     var fileInfo = new FileInfo(oldestFile);
@@ -1034,13 +1059,16 @@ namespace camera
                         Directory.Delete(deleteDirectory);
                         Logger.LogInfo($"已删除空目录: {deleteDirectory}");
                     }
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError($"删除文件失败: {oldestFile}", ex);
                     Debug.WriteLine($"删除文件时出错: {ex.Message}");
+                    return false;
                 }
             }
+            return false;
         }
 
 
