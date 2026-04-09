@@ -480,7 +480,7 @@ namespace camera
                                 }
                                 catch (Exception ex)
                                 {
-                                    Logger.LogWarning($"摄像头 {Index} 尝试重新初始化连接时发生异常", ex);
+                                    Logger.LogError($"摄像头 {Index} 尝试重新初始化连接时发生异常", ex);
                                 }
                             }
                             else
@@ -1013,16 +1013,8 @@ namespace camera
                         // 这样可以一次性清理出足够的空间，防止程序在临界值边缘频繁执行删除和检测操作
                         long targetSpace = DiskThreshold + 500;
 
-                        bool deletedAny = true;
-                        // 循环清理，直到达到安全目标，或者实在没有文件可删为止
-                        while (availableSpace < targetSpace && deletedAny)
-                        {
-                            deletedAny = DeleteOldestFile();
-                            if (deletedAny)
-                            {
-                                availableSpace = CalcDiskSpaceEnough(); // 重新检查
-                            }
-                        }
+                        // 调用全局并发安全的批处理清理（取代了原本导致堵塞的死循环）
+                        availableSpace = BatchCleanUpDiskSpace(targetSpace, availableSpace);
 
                         // 清理循环结束后，再次确认是否甚至低于最低危急阈值
                         if (availableSpace < DiskThreshold)
@@ -1142,55 +1134,83 @@ namespace camera
             return availableSpace;
         }
 
-        private bool DeleteOldestFile()
+        private static readonly object _diskCleanupLock = new object();
+
+        private long BatchCleanUpDiskSpace(long targetSpace, long currentAvailableSpace)
         {
-            // 全局查找：不再局限于当前 Camera 的目录 (Index.ToString())
-            // 而是在整个 saveDirectory 中寻找全局最老的视频文件进行牺牲
-            if (!Directory.Exists(saveDirectory))
+            // 全局并发防护：防止多个摄像头同时发现硬盘满了而同一秒发起上万次全盘搜索洗盘操作
+            lock (_diskCleanupLock)
             {
-                return false;
-            }
+                // 加锁后，再次测量真实剩余容量，可能刚才前一个拿到锁的摄像头已经帮大家把地洗干净了
+                currentAvailableSpace = CalcDiskSpaceEnough();
+                if (currentAvailableSpace >= targetSpace)
+                {
+                    return currentAvailableSpace;
+                }
 
-            // 使用 LastWriteTime 而不是 CreationTime（更可靠）
-            var oldestFile = Directory.GetFiles(saveDirectory, "*.mp4", SearchOption.AllDirectories)
-                .OrderBy(f => new FileInfo(f).LastWriteTime)
-                .FirstOrDefault();
+                if (!Directory.Exists(saveDirectory))
+                {
+                    return currentAvailableSpace;
+                }
 
-            if (oldestFile != null)
-            {
-                Logger.LogInfo($"尝试全局删除最旧文件: {oldestFile}");
+                Logger.LogInfo($"触发底层全局批清理任务 (目标空间: {targetSpace}MB)...");
                 try
                 {
-                    // 补充多线程竞争检查：可能刚才已经刚好被其他摄像头实例清除了
-                    if (!File.Exists(oldestFile))
+                    // [1] 只执行一次极为昂贵的硬盘全盘检索和按时间排序操作！
+                    var allMp4Files = Directory.GetFiles(saveDirectory, "*.mp4", SearchOption.AllDirectories)
+                        .Select(f => new FileInfo(f))
+                        .OrderBy(fi => fi.LastWriteTime)
+                        .ToList();
+
+                    // [2] 按时间从老到新循环猎杀
+                    foreach (var fileInfo in allMp4Files)
                     {
-                        return true; 
+                        if (currentAvailableSpace >= targetSpace)
+                        {
+                            break; // 达标即平稳退出
+                        }
+
+                        try
+                        {
+                            if (File.Exists(fileInfo.FullName))
+                            {
+                                long fileSizeMB = fileInfo.Length / (1024 * 1024);
+                                if (fileSizeMB < 1) fileSizeMB = 1;
+
+                                fileInfo.Delete(); // 发起物理击杀
+
+                                Logger.LogInfo($"批处理已清理陈旧片段: {fileInfo.Name} 腾出空间 {fileSizeMB}MB");
+                                
+                                // 软统计增加可用空间记录
+                                currentAvailableSpace += fileSizeMB;
+
+                                // 清理附带空包骨架(空文件夹)
+                                var parentDir = fileInfo.Directory;
+                                if (parentDir != null && parentDir.Exists && parentDir.GetFiles().Length == 0)
+                                {
+                                    parentDir.Delete();
+                                    Logger.LogInfo($"批处理已顺手删除空级联目录: {parentDir.FullName}");
+                                }
+                            }
+                        }
+                        catch (IOException)
+                        {
+                            // 碰到被最近某个实例 FFmpeg 独占死锁的现任文件，安静跳过即可
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogError($"批清理删除个别文件失败: {fileInfo.FullName}", ex);
+                        }
                     }
-
-                    var fileInfo = new FileInfo(oldestFile);
-                    long fileSizeMB = fileInfo.Length / (1024 * 1024);
-
-                    File.Delete(oldestFile);
-                    Logger.LogInfo($"已成功删除全局最旧的文件: {Path.GetFileName(oldestFile)} ({fileSizeMB}MB)");
-                    Debug.WriteLine($"已删除最旧的文件: {oldestFile}");
-
-                    // 若文件夹为空,删除文件夹
-                    var deleteDirectory = Path.GetDirectoryName(oldestFile);
-                    if (Directory.Exists(deleteDirectory) && Directory.GetFiles(deleteDirectory).Length == 0)
-                    {
-                        Directory.Delete(deleteDirectory);
-                        Logger.LogInfo($"已删除空目录: {deleteDirectory}");
-                    }
-                    return true;
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError($"删除全局最旧文件失败 (可能是锁定或权限问题): {oldestFile}", ex);
-                    Debug.WriteLine($"删除文件时出错: {ex.Message}");
-                    return false;
+                    Logger.LogError("全局批量拉取旧视频时发生越权或其他异常", ex);
                 }
+
+                // 最终重判一次磁盘真实水位线
+                return CalcDiskSpaceEnough();
             }
-            return false;
         }
 
 
