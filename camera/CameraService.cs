@@ -2,6 +2,7 @@ using OpenCvSharp;
 using Prism.Mvvm;
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -39,6 +40,15 @@ namespace camera
         private readonly object _ffmpegLock = new();
         private Process _ffmpegProcess;
         private CancellationTokenSource _ffmpegErrorReadCts;
+        
+        // 视频帧保存队列（工业级防死锁）
+        private BlockingCollection<Mat> _frameSaveQueue;
+        private CancellationTokenSource _ffmpegWriteCts;
+        private Task _ffmpegWriteTask;
+
+        // 相机读取失败计数
+        private int _continuousReadFailCount = 0;
+
         private bool _isProcessingVideo = false;
         private bool _needReinitFFmpeg = false;
         private long _frameCount = 0;
@@ -438,20 +448,50 @@ namespace camera
                     try
                     {
                         tempFrame = new Mat();
-                        if (!cap.Read(tempFrame))
+                        if (!cap.Read(tempFrame) || tempFrame.Empty())
                         {
-                            Debug.WriteLine("无法读取帧");
-                            //MessageBox.Show("无法读取帧,请检查是否被其他程序占用!");
-                            //结束自身
+                            Debug.WriteLine("无法读取帧或空帧");
                             tempFrame?.Dispose();
+
+                            _continuousReadFailCount++;
+                            if (_continuousReadFailCount > 30) // 大约丢失1秒的帧数
+                            {
+                                Logger.LogWarning($"摄像头 {Index} 连续读取失败超过 30 次，底端崩溃，尝试重新初始化底层连接...");
+                                Thread.Sleep(1000); // 必须退避以防止空循环死锁 CPU
+                                try
+                                {
+                                    if (cap != null && cap.IsOpened())
+                                    {
+                                        cap.Release();
+                                    }
+                                    cap?.Dispose();
+                                    
+                                    cap = new VideoCapture(Index);
+                                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                                    cap.Set(VideoCaptureProperties.FrameWidth, Width);
+                                    cap.Set(VideoCaptureProperties.FrameHeight, Height);
+                                    cap.Set(VideoCaptureProperties.Fps, Fps);
+                                    
+                                    if (cap.IsOpened())
+                                    {
+                                        _continuousReadFailCount = 0;
+                                        Logger.LogInfo($"摄像头 {Index} 系统自恢复重置成功。");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.LogWarning($"摄像头 {Index} 尝试重新初始化连接时发生异常", ex);
+                                }
+                            }
+                            else
+                            {
+                                Thread.Sleep(30); // 普通底层错误时短暂退避，避免占用 100% CPU 空转
+                            }
                             continue;
                         }
-                        if (tempFrame.Empty())
-                        {
-                            Debug.WriteLine("帧为空");
-                            tempFrame?.Dispose();
-                            continue;
-                        }
+
+                        // 能够顺利读到此处，证明底层通路正常运行，清空安全重试错误记录
+                        _continuousReadFailCount = 0;
 
                         FrameChanged?.Invoke(tempFrame);
 
@@ -502,7 +542,16 @@ namespace camera
                             if (recordFrameSkip >= recordSkipInterval)
                             {
                                 recordFrameSkip = 0;
-                                SaveFrame(frameForSave);
+                                // 采用多线程非阻塞队列保存。如果底层 FFmpeg 写入阻塞或被操作系统挂起导致挤压过满，强行丢弃避免拖死相机捕获线程
+                                if (_frameSaveQueue != null && !_frameSaveQueue.IsAddingCompleted)
+                                {
+                                    Mat clonedToSave = frameForSave.Clone();
+                                    if (!_frameSaveQueue.TryAdd(clonedToSave))
+                                    {
+                                        clonedToSave.Dispose(); // 队列满了，牺牲存储而保留实时视频流不死
+                                        Logger.LogWarning($"警告: 摄像头 {Index} FFmpeg IO阻塞缓冲区已满，被迫丢掉一帧数据...");
+                                    }
+                                }
                             }
                         }
 
@@ -756,7 +805,53 @@ namespace camera
                     }
                 }, _ffmpegErrorReadCts.Token);
 
+                // 解耦机制：初始化缓冲队列与独立的写磁盘线程
+                _frameSaveQueue = new BlockingCollection<Mat>(90); // 最多缓存相当于 3 秒的数据
+                _ffmpegWriteCts = new CancellationTokenSource();
+                _ffmpegWriteTask = Task.Run(() => FFmpegWriterLoop(_ffmpegWriteCts.Token), _ffmpegWriteCts.Token);
+
                 Logger.LogInfo($"FFmpeg 进程已成功启动 (PID: {_ffmpegProcess.Id})");
+            }
+        }
+
+        private void FFmpegWriterLoop(CancellationToken token)
+        {
+            try
+            {
+                foreach (var frame in _frameSaveQueue.GetConsumingEnumerable(token))
+                {
+                    try
+                    {
+                        SaveFrame(frame); // 于纯后台消费存储，硬盘任何大波动都被该独立线程吸收
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError("FFmpeg 写入循环发生块级处理错误", ex);
+                    }
+                    finally
+                    {
+                        frame?.Dispose(); // 万分重要：消费完必须销毁此 Clone 的内存句柄防溢出！
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Task 正常取消
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("FFmpeg 后端录制独立任务中发生严重异常崩溃", ex);
+            }
+            finally
+            {
+                // 关闭并切断遗留引用清理大块内存，防止停止录像是大泄露
+                if (_frameSaveQueue != null)
+                {
+                    while (_frameSaveQueue.TryTake(out Mat remainingFrame))
+                    {
+                        remainingFrame?.Dispose();
+                    }
+                }
             }
         }
 
@@ -770,6 +865,26 @@ namespace camera
 
         private void FinalizeFfmpegInternal()
         {
+            // 阻断外部新采集帧排队与叫停底层写线程
+            if (_frameSaveQueue != null && !_frameSaveQueue.IsAddingCompleted)
+            {
+                _frameSaveQueue.CompleteAdding();
+            }
+
+            if (_ffmpegWriteCts != null)
+            {
+                _ffmpegWriteCts.Cancel();
+                try { _ffmpegWriteTask?.Wait(1000); } catch { }
+                _ffmpegWriteCts.Dispose();
+                _ffmpegWriteCts = null;
+            }
+
+            if (_frameSaveQueue != null)
+            {
+                _frameSaveQueue.Dispose();
+                _frameSaveQueue = null;
+            }
+
             if (_ffmpegProcess != null)
             {
                 try
@@ -1243,6 +1358,15 @@ namespace camera
                         cap = null;
                     }
 
+
+                    // 释放积压的写对象队列防止泄露
+                    if (_frameSaveQueue != null)
+                    {
+                        _frameSaveQueue.CompleteAdding();
+                        while (_frameSaveQueue.TryTake(out Mat f)) f?.Dispose();
+                        _frameSaveQueue.Dispose();
+                        _frameSaveQueue = null;
+                    }
 
                     // 释放 Mat 对象
                     if (_BufferFrame != null)
