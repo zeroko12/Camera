@@ -1366,10 +1366,13 @@ namespace camera
                     if (FrameChanged != null)
                     {
                         FrameChanged -= AddOverlayTime;
-                        // 清空所有其他订阅者
-                        foreach (var d in FrameChanged.GetInvocationList())
+                        // 清空所有其他订阅者（需判断是否已经被清空为 null）
+                        if (FrameChanged != null)
                         {
-                            FrameChanged -= (FrameChangedEventHandler)d;
+                            foreach (var d in FrameChanged.GetInvocationList())
+                            {
+                                FrameChanged -= (FrameChangedEventHandler)d;
+                            }
                         }
                     }
 

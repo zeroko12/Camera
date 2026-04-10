@@ -5,6 +5,7 @@ using Prism.Mvvm;
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -419,17 +420,62 @@ namespace camera.ViewModels
 
 
         #region 配置相关
+        private string _SystemTitle = "季华恒一离子注入机监控";
+        public string SystemTitle
+        {
+            get { return _SystemTitle; }
+            set { SetProperty(ref _SystemTitle, value); }
+        }
+
+        private string _LogoPath;
+        public string LogoPath
+        {
+            get { return _LogoPath; }
+            set { SetProperty(ref _LogoPath, value); }
+        }
+
+        private Visibility _LogoVisibility = Visibility.Collapsed;
+        public Visibility LogoVisibility
+        {
+            get { return _LogoVisibility; }
+            set { SetProperty(ref _LogoVisibility, value); }
+        }
+
         private void LoadSettings()
         {
             isSave = bool.Parse(ConfigurationManager.GetSetting("isSave") ?? "true");
             Opacity = double.Parse(ConfigurationManager.GetSetting("Opacity") ?? "1.0");
             Title = ConfigurationManager.GetSetting("Title") ?? "监控";
+            SystemTitle = ConfigurationManager.GetSetting("SystemTitle") ?? "季华恒一离子注入机监控";
             OverwriteOldFiles = bool.Parse(ConfigurationManager.GetSetting("OverwriteOldFiles") ?? "true");
             DiskSpaceThreshold = int.Parse(ConfigurationManager.GetSetting("DiskSpaceThreshold") ?? "1024");
             DiskSpaceThresholdInput = DiskSpaceThreshold;
             Quality = int.Parse(ConfigurationManager.GetSetting("Quality") ?? "30");
             SaveInterval = int.Parse(ConfigurationManager.GetSetting("SaveInterval") ?? "1");
 
+            // 探测根目录下可能存在的 LOGO 图片文件
+            string possibleLogoPng = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.png");
+            string possibleLogoJpg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.jpg");
+            string possibleLogoIco = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.ico");
+            if (File.Exists(possibleLogoPng))
+            {
+                LogoPath = possibleLogoPng;
+                LogoVisibility = Visibility.Visible;
+            }
+            else if (File.Exists(possibleLogoJpg))
+            {
+                LogoPath = possibleLogoJpg;
+                LogoVisibility = Visibility.Visible;
+            }
+            else if (File.Exists(possibleLogoIco))
+            {
+                LogoPath = possibleLogoIco;
+                LogoVisibility = Visibility.Visible;
+            }
+            else
+            {
+                LogoVisibility = Visibility.Collapsed;
+            }
         }
 
         private void SaveSettings()
@@ -437,6 +483,7 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("isSave", isSave.ToString());
             ConfigurationManager.SaveSetting("Opacity", Opacity.ToString());
             ConfigurationManager.SaveSetting("Title", Title);
+            ConfigurationManager.SaveSetting("SystemTitle", SystemTitle);
             ConfigurationManager.SaveSetting("OverwriteOldFiles", OverwriteOldFiles.ToString());
             ConfigurationManager.SaveSetting("DiskSpaceThreshold", this.DiskSpaceThreshold.ToString());
             ConfigurationManager.SaveSetting("Quality", this.Quality.ToString());

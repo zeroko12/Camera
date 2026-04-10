@@ -9,7 +9,8 @@
     xmlns:local="clr-namespace:camera"
     xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
     xmlns:prism="http://prismlibrary.com/"
-    Title="{Binding Title}"
+    Title="{Binding SystemTitle}"
+    Icon="{Binding LogoPath}"
     Width="900"
     Height="480"
     prism:ViewModelLocator.AutoWireViewModel="True"
@@ -26,7 +27,7 @@
     -->
 
     <!-- <Window.Style>
-        <Style TargetType="Window">
+        <Style TargetType="Window" >
             <Setter Property="WindowChrome.WindowChrome">
                 <Setter.Value>
                     <WindowChrome
@@ -205,11 +206,21 @@
                 MouseEnter="TitleBar_MouseEnter"
                 MouseLeave="TitleBar_MouseLeave"
                 MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
-                <TextBlock
+                <StackPanel
                     Margin="10,0,0,0"
                     VerticalAlignment="Center"
-                    Foreground="White"
-                    Text="季华恒一离子注入机监控" />
+                    Orientation="Horizontal">
+                    <Image
+                        Width="18"
+                        Height="18"
+                        Margin="0,0,8,0"
+                        Source="{Binding LogoPath}"
+                        Visibility="{Binding LogoVisibility}" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        Foreground="White"
+                        Text="{Binding SystemTitle}" />
+                </StackPanel>
                 <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                     <!--<Button
               Width="30"
