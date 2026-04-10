@@ -1,4 +1,4 @@
-﻿<Window
+<Window
     x:Class="camera.Views.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -375,7 +375,7 @@
                                                     Maximum="1024000"
                                                     Minimum="1"
                                                     Style="{StaticResource NumericUpDownPlus}"
-                                                    Value="{Binding DiskSpaceThreshold}" />
+                                                    Value="{Binding DiskSpaceThresholdInput}" />
                                                 <TextBlock
                                                     HorizontalAlignment="Center"
                                                     VerticalAlignment="Center"
@@ -383,6 +383,11 @@
                                                     M
                                                 </TextBlock>
                                             </StackPanel>
+                                            <Button
+                                                Margin="2"
+                                                Command="{Binding ConfirmDiskThresholdCommand}"
+                                                Content="确定"
+                                                Style="{StaticResource ButtonPrimary.Small}" />
                                             <Separator />
                                             <hc:ButtonGroup Margin="4" Orientation="Vertical">
                                                 <RadioButton Content="覆盖旧文件" IsChecked="{c:Binding OverwriteOldFiles}" />

@@ -1,4 +1,4 @@
-﻿using ImTools;
+using ImTools;
 using MaterialDesignColors;
 using Prism.Commands;
 using Prism.Mvvm;
@@ -81,6 +81,22 @@ namespace camera.ViewModels
         }
 
 
+
+        private int _DiskSpaceThresholdInput = 1024;
+        public int DiskSpaceThresholdInput
+        {
+            get { return _DiskSpaceThresholdInput; }
+            set { SetProperty(ref _DiskSpaceThresholdInput, value); }
+        }
+
+        private DelegateCommand _ConfirmDiskThresholdCommand;
+        public DelegateCommand ConfirmDiskThresholdCommand =>
+            _ConfirmDiskThresholdCommand ?? (_ConfirmDiskThresholdCommand = new DelegateCommand(ExecuteConfirmDiskThresholdCommand));
+
+        private void ExecuteConfirmDiskThresholdCommand()
+        {
+            DiskSpaceThreshold = DiskSpaceThresholdInput;
+        }
 
         private int _DiskSpaceThreshold = 1024;
         public int DiskSpaceThreshold
@@ -410,6 +426,7 @@ namespace camera.ViewModels
             Title = ConfigurationManager.GetSetting("Title") ?? "监控";
             OverwriteOldFiles = bool.Parse(ConfigurationManager.GetSetting("OverwriteOldFiles") ?? "true");
             DiskSpaceThreshold = int.Parse(ConfigurationManager.GetSetting("DiskSpaceThreshold") ?? "1024");
+            DiskSpaceThresholdInput = DiskSpaceThreshold;
             Quality = int.Parse(ConfigurationManager.GetSetting("Quality") ?? "30");
             SaveInterval = int.Parse(ConfigurationManager.GetSetting("SaveInterval") ?? "1");
 
