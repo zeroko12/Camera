@@ -1021,14 +1021,18 @@ namespace camera
                         {
                             Logger.LogError("清理所有旧文件后空间仍不足，停止录制");
 
-                            // 触发事件通知用户
-                            try
+                            // 触发事件通知用户，增加全局限制：10秒内只弹一次框，防止多摄像头同时抛出十几个弹框叠在一起
+                            if ((DateTime.Now - _lastDiskSpaceWarningTime).TotalSeconds > 10)
                             {
-                                DiskSpaceLow?.Invoke(this, $"清理所有旧文件后空间仍不足，录像已停止: {availableSpace}MB");
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.LogError("触发 DiskSpaceLow 事件时发生错误", ex);
+                                _lastDiskSpaceWarningTime = DateTime.Now;
+                                try
+                                {
+                                    DiskSpaceLow?.Invoke(this, $"清理所有旧文件后空间仍不足，录像已停止: {availableSpace}MB");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.LogError("触发 DiskSpaceLow 事件时发生错误", ex);
+                                }
                             }
 
                             StopSave();
@@ -1039,14 +1043,18 @@ namespace camera
                     {
                         Logger.LogWarning("磁盘空间不足且未启用覆盖旧文件，停止录制");
 
-                        // 触发事件通知用户
-                        try
+                        if ((DateTime.Now - _lastDiskSpaceWarningTime).TotalSeconds > 10)
                         {
-                            DiskSpaceLow?.Invoke(this, $"磁盘空间不足且未启用覆盖旧文件，录像已停止: {availableSpace}MB");
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogError("触发 DiskSpaceLow 事件时发生错误", ex);
+                            _lastDiskSpaceWarningTime = DateTime.Now;
+                            // 触发事件通知用户
+                            try
+                            {
+                                DiskSpaceLow?.Invoke(this, $"磁盘空间不足且未启用覆盖旧文件，录像已停止: {availableSpace}MB");
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogError("触发 DiskSpaceLow 事件时发生错误", ex);
+                            }
                         }
 
                         StopSave();
@@ -1135,6 +1143,7 @@ namespace camera
         }
 
         private static readonly object _diskCleanupLock = new object();
+        private static DateTime _lastDiskSpaceWarningTime = DateTime.MinValue;
 
         private long BatchCleanUpDiskSpace(long targetSpace, long currentAvailableSpace)
         {
