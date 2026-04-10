@@ -683,7 +683,7 @@ namespace camera
                     try
                     {
                         Directory.CreateDirectory(directoryPath);
-                        Logger.LogInfo($"目录已创建：{directoryPath}");
+                        // Logger.LogInfo($"目录已创建：{directoryPath}");
                     }
                     catch (Exception ex)
                     {
@@ -721,7 +721,7 @@ namespace camera
 
                     try
                     {
-                        Logger.LogInfo($"启动 FFmpeg ({encoder}): {fullArgs}");
+                        // Logger.LogInfo($"启动 FFmpeg ({encoder}): {fullArgs}");
                         _ffmpegProcess.Start();
                         _isProcessingVideo = true;
 
@@ -757,11 +757,11 @@ namespace camera
                         if (encoder == "h264_qsv" && !_qsvChecked)
                         {
                             _qsvChecked = true;
-                            Logger.LogInfo("h264_qsv 硬件编码验证通过，使用核显加速");
+                            // Logger.LogInfo("h264_qsv 硬件编码验证通过，使用核显加速");
                         }
                         else if (encoder == "mpeg4")
                         {
-                            Logger.LogInfo("使用 mpeg4 软件编码");
+                            // Logger.LogInfo("使用 mpeg4 软件编码");
                         }
 
                         started = true;
@@ -810,7 +810,7 @@ namespace camera
                 _ffmpegWriteCts = new CancellationTokenSource();
                 _ffmpegWriteTask = Task.Run(() => FFmpegWriterLoop(_ffmpegWriteCts.Token), _ffmpegWriteCts.Token);
 
-                Logger.LogInfo($"FFmpeg 进程已成功启动 (PID: {_ffmpegProcess.Id})");
+                // Logger.LogInfo($"FFmpeg 进程已成功启动 (PID: {_ffmpegProcess.Id})");
             }
         }
 
@@ -991,7 +991,7 @@ namespace camera
 
                 // 初始化成功，重置计数
                 _ffmpegInitFailCount = 0;
-                Logger.LogInfo("FFmpeg 重新初始化成功");
+                // Logger.LogInfo("FFmpeg 重新初始化成功");
             }
 
             // 每100帧检查一次磁盘空间（避免频繁检查）
@@ -1007,7 +1007,7 @@ namespace camera
                     // 根据配置决定是否覆盖旧文件
                     if (OverwriteOldFiles)
                     {
-                        Logger.LogInfo("开始清理旧文件以释放空间 ...");
+                        // Logger.LogInfo("开始清理旧文件以释放空间 ...");
 
                         // 目标空间：设置一个安全缓冲 (阈值 + 500MB)
                         // 这样可以一次性清理出足够的空间，防止程序在临界值边缘频繁执行删除和检测操作
@@ -1115,7 +1115,7 @@ namespace camera
             // 检查是否需要切割视频文件
             if (DateTime.Now - _lastSaveTime >= SaveInterval)
             {
-                Logger.LogInfo($"达到切割间隔 ({SaveInterval})，准备创建新文件...");
+                // Logger.LogInfo($"达到切割间隔 ({SaveInterval})，准备创建新文件...");
                 _needReinitFFmpeg = true; // 标记需要重新初始化
                 _lastSaveTime = DateTime.Now;
             }
@@ -1162,7 +1162,7 @@ namespace camera
                     return currentAvailableSpace;
                 }
 
-                Logger.LogInfo($"触发底层全局批清理任务 (目标空间: {targetSpace}MB)...");
+                // Logger.LogInfo($"触发底层全局批清理任务 (目标空间: {targetSpace}MB)...");
                 try
                 {
                     // [1] 只执行一次极为昂贵的硬盘全盘检索和按时间排序操作！
@@ -1188,7 +1188,7 @@ namespace camera
 
                                 fileInfo.Delete(); // 发起物理击杀
 
-                                Logger.LogInfo($"批处理已清理陈旧片段: {fileInfo.Name} 腾出空间 {fileSizeMB}MB");
+                                // Logger.LogInfo($"批处理已清理陈旧片段: {fileInfo.Name} 腾出空间 {fileSizeMB}MB");
                                 
                                 // 软统计增加可用空间记录
                                 currentAvailableSpace += fileSizeMB;
@@ -1198,7 +1198,7 @@ namespace camera
                                 if (parentDir != null && parentDir.Exists && parentDir.GetFiles().Length == 0)
                                 {
                                     parentDir.Delete();
-                                    Logger.LogInfo($"批处理已顺手删除空级联目录: {parentDir.FullName}");
+                                    // Logger.LogInfo($"批处理已顺手删除空级联目录: {parentDir.FullName}");
                                 }
                             }
                         }

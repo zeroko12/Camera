@@ -11,7 +11,8 @@ namespace camera
     public static class Logger
     {
         private static readonly string LogDirectory;
-        private static readonly string LogFilePath;
+        private static string _currentDateStr;
+        private static string _logFilePath;
         private static readonly object _lockObj = new object();
 
         static Logger()
@@ -26,21 +27,32 @@ namespace camera
                     Directory.CreateDirectory(LogDirectory);
                 }
 
-                // 日志文件名：包含日期
-                string logFileName = $"camera_{DateTime.Now:yyyyMMdd}.log";
-                LogFilePath = Path.Combine(LogDirectory, logFileName);
+                UpdateLogFilePath();
 
                 // 写入启动标记
                 LogInfo("=".PadRight(80, '='));
                 LogInfo($"应用程序启动 - {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                LogInfo($"日志路径: {LogFilePath}");
+                LogInfo($"日志存储目录: {LogDirectory}");
                 LogInfo("=".PadRight(80, '='));
+
+                // 启动时清理一次旧日志
+                CleanOldLogs();
             }
             catch (Exception ex)
             {
                 // 如果日志初始化失败，至少输出到调试窗口
                 Debug.WriteLine($"日志初始化失败: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 更新日志文件路径（支持每日分文件）
+        /// </summary>
+        private static void UpdateLogFilePath()
+        {
+            _currentDateStr = DateTime.Now.ToString("yyyyMMdd");
+            string logFileName = $"camera_{_currentDateStr}.log";
+            _logFilePath = Path.Combine(LogDirectory, logFileName);
         }
 
         /// <summary>
@@ -107,17 +119,21 @@ namespace camera
             {
                 lock (_lockObj)
                 {
+                    // 检查日期是否变更，实现每日分文件
+                    if (DateTime.Now.ToString("yyyyMMdd") != _currentDateStr)
+                    {
+                        UpdateLogFilePath();
+                        CleanOldLogs(); // 换天时顺便清理
+                    }
+
                     string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
                     string logEntry = $"[{timestamp}] [{level}] {message}";
 
                     // 写入文件
-                    File.AppendAllText(LogFilePath, logEntry + Environment.NewLine, Encoding.UTF8);
+                    File.AppendAllText(_logFilePath, logEntry + Environment.NewLine, Encoding.UTF8);
 
                     // 同时输出到调试窗口
                     Debug.WriteLine(logEntry);
-
-                    // 清理旧日志（保留最近7天）
-                    CleanOldLogs();
                 }
             }
             catch (Exception ex)
@@ -160,7 +176,7 @@ namespace camera
         /// </summary>
         public static string GetLogFilePath()
         {
-            return LogFilePath;
+            return _logFilePath;
         }
 
         /// <summary>
