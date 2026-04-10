@@ -10,12 +10,12 @@
     xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
     xmlns:prism="http://prismlibrary.com/"
     Title="{Binding SystemTitle}"
-    Icon="{Binding LogoPath}"
     Width="900"
     Height="480"
     prism:ViewModelLocator.AutoWireViewModel="True"
     AllowsTransparency="True"
     Background="Transparent"
+    Icon="{Binding LogoPath}"
     ResizeMode="CanResize"
     WindowStyle="None">
     <!--
