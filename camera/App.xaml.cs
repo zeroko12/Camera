@@ -1,4 +1,4 @@
-﻿using camera.Views;
+using camera.Views;
 using Prism.Ioc;
 using System;
 using System.Diagnostics;
@@ -94,35 +94,70 @@ namespace camera
             Logger.LogInfo("  3. UnobservedTaskException (Task 异常)");
         }
 
+        private bool _isHandlingException = false;
         /// <summary>
         /// UI 线程未捕获异常处理
         /// </summary>
         private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
         {
+            // 防重入：如果在处理异常的过程中再次发生异常，直接记录并退出
+            if (_isHandlingException)
+            {
+                Debug.WriteLine("检测到递归异常处理，正在强制终止程序...");
+                return;
+            }
+
+            _isHandlingException = true;
             try
             {
-                Logger.LogError("UI 线程未捕获异常", e.Exception);
+                // [1] 首先确保日志被写入（最重要）
+                try
+                {
+                    Logger.LogError("UI 线程未捕获异常", e.Exception);
+                }
+                catch (Exception logEx)
+                {
+                    Debug.WriteLine("记录 UI 异常失败: " + logEx.Message);
+                }
 
-                var result = MessageBox.Show(
-                    $"程序遇到错误！\n\n错误: {e.Exception.Message}\n\n是否继续运行？\n\n点击「是」继续，点击「否」退出程序。\n\n日志位置: {Logger.GetLogFilePath()}",
-                    "错误",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Error);
+                // [2] 尝试正常弹窗询问用户是否继续
+                MessageBoxResult result = MessageBoxResult.No;
+                try
+                {
+                    result = MessageBox.Show(
+                        $"程序遇到错误！\n\n错误: {e.Exception.Message}\n\n是否继续运行？\n\n点击「是」尝试继续，点击「否」退出并查看日志。\n\n日志位置: {Logger.GetLogFilePath()}",
+                        "系统异常",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Error);
+                }
+                catch
+                {
+                    // 如果弹窗失败（例如内存溢出或窗口句柄耗尽），默认退出
+                    result = MessageBoxResult.No;
+                }
 
                 if (result == MessageBoxResult.Yes)
                 {
-                    e.Handled = true; // 阻止程序崩溃
-                    Logger.LogWarning("用户选择继续运行程序");
+                    e.Handled = true;
+                    Logger.LogWarning("用户选择忽略异常继续运行");
                 }
                 else
                 {
                     Logger.LogWarning("用户选择退出程序");
                     e.Handled = false;
+                    // 如果选择退出，确保所有 FFmpeg 等资源被清理（理想情况下通过 OnExit，但此处直接关掉进程更安全）
+                    Environment.Exit(1);
                 }
             }
-            catch (Exception ex)
+            catch (Exception fatalEx)
             {
-                Logger.LogFatal("处理 UI 线程异常时发生错误", ex);
+                // 最后的防线：绝对不能再抛出任何异常
+                try { Logger.LogFatal("全局异常处理器内部崩溃", fatalEx); } catch { }
+                Debug.WriteLine("FATAL EXCEPTION IN HANDLER: " + fatalEx.Message);
+            }
+            finally
+            {
+                _isHandlingException = false;
             }
         }
 

@@ -360,6 +360,12 @@ namespace camera.ViewModels
             {
                 try
                 {
+                    // 分时初始化：防止 4 路摄像头同时请求 USB 带宽和 GPU 资源导致系统卡死
+                    if (index > 0)
+                    {
+                        System.Threading.Thread.Sleep(600);
+                    }
+
                     Logger.LogInfo($"尝试打开摄像头 #{index}...");
                     var camera = new CameraService();
 

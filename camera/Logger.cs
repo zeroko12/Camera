@@ -145,7 +145,7 @@ namespace camera
         }
 
         /// <summary>
-        /// 清理7天前的日志文件
+        /// 清理30天前的日志文件
         /// </summary>
         private static void CleanOldLogs()
         {
@@ -158,7 +158,7 @@ namespace camera
                 foreach (var file in files)
                 {
                     var fileInfo = new FileInfo(file);
-                    if ((DateTime.Now - fileInfo.CreationTime).TotalDays > 7)
+                    if ((DateTime.Now - fileInfo.CreationTime).TotalDays > 30)
                     {
                         fileInfo.Delete();
                         Debug.WriteLine($"已删除旧日志文件: {file}");

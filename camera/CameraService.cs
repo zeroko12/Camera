@@ -835,7 +835,7 @@ namespace camera
                 }, _ffmpegErrorReadCts.Token);
 
                 // 解耦机制：初始化缓冲队列与独立的写磁盘线程
-                _frameSaveQueue = new BlockingCollection<Mat>(90); // 最多缓存相当于 3 秒的数据
+                _frameSaveQueue = new BlockingCollection<Mat>(180); // 扩大缓冲区由 90 -> 180，以缓冲磁盘 IO 抖动
                 _ffmpegWriteCts = new CancellationTokenSource();
                 _ffmpegWriteTask = Task.Run(() => FFmpegWriterLoop(_ffmpegWriteCts.Token), _ffmpegWriteCts.Token);
 
@@ -1104,19 +1104,25 @@ namespace camera
             try
             {
                 // 优化 2：在写入管道前进行 YUV 预转换。
-                // 虽然这在 C# 侧消耗了极少量 CPU，但它消除了 FFmpeg 内部巨大的 swscale 压力并减少了 IO。
                 yuvFrame = new Mat();
                 Cv2.CvtColor(frame, yuvFrame, ColorConversionCodes.BGR2YUV_I420);
 
                 // 使用 ArrayPool 提高性能，避免频繁 GC
                 int frameSize = (int)yuvFrame.Total() * yuvFrame.ElemSize();
                 rentedArray = ArrayPool<byte>.Shared.Rent(frameSize);
-
                 Marshal.Copy(yuvFrame.Data, rentedArray, 0, frameSize);
-                _ffmpegProcess.StandardInput.BaseStream.Write(rentedArray, 0, frameSize);
-                _ffmpegProcess.StandardInput.BaseStream.Flush();
 
-                _frameCount++;
+                // 增加写保护判定
+                if (_ffmpegProcess != null && !_ffmpegProcess.HasExited && _ffmpegProcess.StandardInput.BaseStream.CanWrite)
+                {
+                    _ffmpegProcess.StandardInput.BaseStream.Write(rentedArray, 0, frameSize);
+                    _ffmpegProcess.StandardInput.BaseStream.Flush();
+                    _frameCount++;
+                }
+                else
+                {
+                    Logger.LogWarning($"摄像头 {Index}: FFmpeg 管道不可写，跳过此帧。进程状态: {(_ffmpegProcess == null ? "Null" : "已退出")}");
+                }
             }
             catch (IOException ioEx)
             {
