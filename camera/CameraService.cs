@@ -734,7 +734,7 @@ namespace camera
                 {
                     string encoderArgs = encoder == "h264_qsv"
                         ? $"-c:v h264_qsv -global_quality {Quality}"
-                        : $"-c:v mpeg4 -q:v {Quality}";
+                        : $"-c:v mpeg4 -threads 0 -q:v {Quality}";
 
                     // 优化 1：更改输入像素格式为 yuv420p，减少 50% 的管道传输量，并消除 FFmpeg 内部的色彩转换负载
                     string fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {(int)Width}x{(int)Height} -r {RecordFps} -i - {encoderArgs} -an \"{TargetFile}\"";
@@ -847,11 +847,13 @@ namespace camera
         {
             try
             {
+                // 使用 GetConsumingEnumerable 配合 CancellationToken 实现优雅退出
+                // 只要未调用 CompleteAdding() 且未取消 token，循环就会持续等待
                 foreach (var frame in _frameSaveQueue.GetConsumingEnumerable(token))
                 {
                     try
                     {
-                        SaveFrame(frame); // 于纯后台消费存储，硬盘任何大波动都被该独立线程吸收
+                        SaveFrame(frame); 
                     }
                     catch (Exception ex)
                     {
@@ -859,13 +861,17 @@ namespace camera
                     }
                     finally
                     {
-                        frame?.Dispose(); // 万分重要：消费完必须销毁此 Clone 的内存句柄防溢出！
+                        frame?.Dispose(); 
                     }
                 }
             }
             catch (OperationCanceledException)
             {
-                // Task 正常取消
+                // 任务由于 Cancellation侦听 而正常退出
+            }
+            catch (ObjectDisposedException)
+            {
+                // 极罕见情况下集合已被快速销毁，视为正常退出
             }
             catch (Exception ex)
             {
@@ -873,13 +879,17 @@ namespace camera
             }
             finally
             {
-                // 关闭并切断遗留引用清理大块内存，防止停止录像是大泄露
-                if (_frameSaveQueue != null)
+                // ★ 关键：后台线程是唯一负责排水和最后清理的角色
+                // 此处逻辑确保即便是任务被强制叫停，内存残留的 Mat 也会被彻底释放
+                var queueForCleanup = _frameSaveQueue;
+                if (queueForCleanup != null)
                 {
-                    while (_frameSaveQueue.TryTake(out Mat remainingFrame))
+                    while (queueForCleanup.TryTake(out Mat remainingFrame))
                     {
                         remainingFrame?.Dispose();
                     }
+                    // 只有在循环彻底结束后，由后台线程自己销毁集合，防止主线程 Dispose 导致的竞态崩溃
+                    try { queueForCleanup.Dispose(); } catch { }
                 }
             }
         }
@@ -894,25 +904,29 @@ namespace camera
 
         private void FinalizeFfmpegInternal()
         {
-            // 阻断外部新采集帧排队与叫停底层写线程
+            // 1. 发出停止信号：阻断外部新采集帧排队
             if (_frameSaveQueue != null && !_frameSaveQueue.IsAddingCompleted)
             {
-                _frameSaveQueue.CompleteAdding();
+                try { _frameSaveQueue.CompleteAdding(); } catch { }
             }
 
+            // 2. 发出取消信号并等待后台写入线程同步存盘（最多给 1 秒宽限）
             if (_ffmpegWriteCts != null)
             {
                 _ffmpegWriteCts.Cancel();
-                try { _ffmpegWriteTask?.Wait(1000); } catch { }
+                try 
+                { 
+                    // 确保等待任务结束，但不直接 Dispose 队列
+                    _ffmpegWriteTask?.Wait(1000); 
+                } 
+                catch { }
                 _ffmpegWriteCts.Dispose();
                 _ffmpegWriteCts = null;
             }
 
-            if (_frameSaveQueue != null)
-            {
-                _frameSaveQueue.Dispose();
-                _frameSaveQueue = null;
-            }
+            // 3. 将引用置空，具体的 Dispose 逻辑交给 FFmpegWriterLoop 的 finally 块
+            _frameSaveQueue = null;
+            _ffmpegWriteTask = null;
 
             if (_ffmpegProcess != null)
             {
@@ -1214,7 +1228,10 @@ namespace camera
                         .OrderBy(fi => fi.LastWriteTime)
                         .ToList();
 
-                    // [2] 按时间从老到新循环猎杀
+                    int deletedCount = 0;
+                    long deletedSpaceMB = 0;
+
+                    // [2] 按时间从老到新循环处理
                     foreach (var fileInfo in allMp4Files)
                     {
                         if (currentAvailableSpace >= targetSpace)
@@ -1229,30 +1246,38 @@ namespace camera
                                 long fileSizeMB = fileInfo.Length / (1024 * 1024);
                                 if (fileSizeMB < 1) fileSizeMB = 1;
 
-                                fileInfo.Delete(); // 发起物理击杀
-
-                                // Logger.LogInfo($"批处理已清理陈旧片段: {fileInfo.Name} 腾出空间 {fileSizeMB}MB");
+                                fileInfo.Delete(); // 发起物理删除
+                                deletedCount++;
+                                deletedSpaceMB += fileSizeMB;
                                 
                                 // 软统计增加可用空间记录
                                 currentAvailableSpace += fileSizeMB;
 
                                 // 清理附带空包骨架(空文件夹)
                                 var parentDir = fileInfo.Directory;
-                                if (parentDir != null && parentDir.Exists && parentDir.GetFiles().Length == 0)
+                                if (parentDir != null && parentDir.Exists && (parentDir.GetFiles().Length == 0 && parentDir.GetDirectories().Length == 0))
                                 {
-                                    parentDir.Delete();
-                                    // Logger.LogInfo($"批处理已顺手删除空级联目录: {parentDir.FullName}");
+                                    try { parentDir.Delete(); } catch { }
                                 }
                             }
                         }
                         catch (IOException)
                         {
-                            // 碰到被最近某个实例 FFmpeg 独占死锁的现任文件，安静跳过即可
+                            // 忽略被占用的文件
                         }
                         catch (Exception ex)
                         {
                             Logger.LogError($"批清理删除个别文件失败: {fileInfo.FullName}", ex);
                         }
+                    }
+
+                    if (deletedCount > 0)
+                    {
+                        Logger.LogInfo($"磁盘清理完成: 共删除 {deletedCount} 个过期视频文件，释放空间约 {deletedSpaceMB}MB");
+                    }
+                    else if (currentAvailableSpace < targetSpace)
+                    {
+                        Logger.LogWarning($"磁盘空间不足且无可清理的视频文件 (*.mp4)。当前可用: {currentAvailableSpace}MB, 目标: {targetSpace}MB");
                     }
                 }
                 catch (Exception ex)
