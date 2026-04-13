@@ -576,9 +576,21 @@ namespace camera
                                     Mat snapshot = null;
                                     lock (_lockObject)
                                     {
-                                        if (_BufferFrame != null)
+                                        if (_BufferFrame != null && !_BufferFrame.Empty())
                                         {
-                                            snapshot = _BufferFrame.Clone();
+                                            // 优化 4：预览降采样。如果原始分辨率很高，在送到 UI 前先缩放，减轻 BitmapSource 转换负担
+                                            const int maxPreviewWidth = 640;
+                                            if (_BufferFrame.Width > maxPreviewWidth)
+                                            {
+                                                snapshot = new Mat();
+                                                double ratio = (double)maxPreviewWidth / _BufferFrame.Width;
+                                                int newHeight = (int)(_BufferFrame.Height * ratio);
+                                                Cv2.Resize(_BufferFrame, snapshot, new OpenCvSharp.Size(maxPreviewWidth, newHeight), 0, 0, InterpolationFlags.Linear);
+                                            }
+                                            else
+                                            {
+                                                snapshot = _BufferFrame.Clone();
+                                            }
                                         }
                                     }
                                     if (snapshot != null)
@@ -708,7 +720,8 @@ namespace camera
                         ? $"-c:v h264_qsv -global_quality {Quality}"
                         : $"-c:v mpeg4 -q:v {Quality}";
 
-                    string fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt bgr24 -s {(int)Width}x{(int)Height} -r {RecordFps} -i - {encoderArgs} -an \"{TargetFile}\"";
+                    // 优化 1：更改输入像素格式为 yuv420p，减少 50% 的管道传输量，并消除 FFmpeg 内部的色彩转换负载
+                    string fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {(int)Width}x{(int)Height} -r {RecordFps} -i - {encoderArgs} -an \"{TargetFile}\"";
 
                     _ffmpegProcess = new Process();
                     _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
@@ -1071,13 +1084,19 @@ namespace camera
             }
 
             byte[] rentedArray = null;
+            Mat yuvFrame = null;
             try
             {
+                // 优化 2：在写入管道前进行 YUV 预转换。
+                // 虽然这在 C# 侧消耗了极少量 CPU，但它消除了 FFmpeg 内部巨大的 swscale 压力并减少了 IO。
+                yuvFrame = new Mat();
+                Cv2.CvtColor(frame, yuvFrame, ColorConversionCodes.BGR2YUV_I420);
+
                 // 使用 ArrayPool 提高性能，避免频繁 GC
-                int frameSize = (int)frame.Total() * frame.ElemSize();
+                int frameSize = (int)yuvFrame.Total() * yuvFrame.ElemSize();
                 rentedArray = ArrayPool<byte>.Shared.Rent(frameSize);
 
-                Marshal.Copy(frame.Data, rentedArray, 0, frameSize);
+                Marshal.Copy(yuvFrame.Data, rentedArray, 0, frameSize);
                 _ffmpegProcess.StandardInput.BaseStream.Write(rentedArray, 0, frameSize);
                 _ffmpegProcess.StandardInput.BaseStream.Flush();
 
@@ -1110,6 +1129,8 @@ namespace camera
                 {
                     ArrayPool<byte>.Shared.Return(rentedArray);
                 }
+                // 优化 3：销毁临时的 YUV 帧，防止内存泄露
+                yuvFrame?.Dispose();
             }
 
             // 检查是否需要切割视频文件
