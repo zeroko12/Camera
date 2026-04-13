@@ -108,7 +108,17 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <hc:ImageBlock Margin="5" Source="{Binding Frame, Converter={StaticResource MatToImageSourceConverter}}" />
+                                <hc:ImageBlock
+                                    Margin="5"
+                                    Cursor="Hand"
+                                    Source="{Binding Frame, Converter={StaticResource MatToImageSourceConverter}}">
+                                    <hc:ImageBlock.InputBindings>
+                                        <MouseBinding
+                                            Command="{Binding DataContext.ToggleMaximizeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            MouseAction="LeftDoubleClick" />
+                                    </hc:ImageBlock.InputBindings>
+                                </hc:ImageBlock>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -151,6 +161,41 @@
                     </EventTrigger>
                 </Ellipse.Triggers>
             </Ellipse>
+
+            <!--  全屏高清视图覆盖层  -->
+            <Grid
+                x:Name="MaximizedView"
+                Panel.ZIndex="100"
+                Background="{DynamicResource BackgroundBrush}"
+                Visibility="{c:Binding IsSingleCameraMode,
+                                       FalseToVisibility=Collapsed}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel
+                    Grid.Row="0"
+                    Margin="10"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal">
+                    <Button
+                        Command="{Binding BackToGridCommand}"
+                        Content="返回网格"
+                        Style="{StaticResource ButtonPrimary.Small}" />
+                </StackPanel>
+
+                <hc:ImageBlock
+                    Grid.Row="1"
+                    Margin="20"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Source="{Binding SelectedCamera.Frame, Converter={StaticResource MatToImageSourceConverter}}">
+                    <hc:ImageBlock.InputBindings>
+                        <MouseBinding Command="{Binding BackToGridCommand}" MouseAction="LeftDoubleClick" />
+                    </hc:ImageBlock.InputBindings>
+                </hc:ImageBlock>
+            </Grid>
 
             <!--<materialDesign:PackIcon
     Grid.Column="0"
@@ -488,6 +533,20 @@
                                                 TickFrequency="1"
                                                 ToolTip="预览帧率，越低越省CPU"
                                                 Value="{Binding PreviewFps}" />
+                                            <Separator />
+                                            <TextBlock
+                                                Margin="4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="11">
+                                                预览宽度限制 (px)
+                                            </TextBlock>
+                                            <hc:NumericUpDown
+                                                Margin="5"
+                                                Maximum="3840"
+                                                Minimum="100"
+                                                Style="{StaticResource NumericUpDownPlus}"
+                                                ToolTip="网格模式下的预览宽度"
+                                                Value="{Binding MaxPreviewWidth}" />
                                             <!--<DockPanel>
                                                 <TextBlock
                                                     DockPanel.Dock="Right"

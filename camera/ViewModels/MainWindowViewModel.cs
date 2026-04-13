@@ -254,6 +254,21 @@ namespace camera.ViewModels
             }
         }
 
+        private int _MaxPreviewWidth = 640;
+        public int MaxPreviewWidth
+        {
+            get { return _MaxPreviewWidth; }
+            set { SetProperty(ref _MaxPreviewWidth, value); OnMaxPreviewWidthChanged(); }
+        }
+
+        private void OnMaxPreviewWidthChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.MaxPreviewWidth = MaxPreviewWidth;
+            }
+        }
+
         #endregion
 
         /// <summary>
@@ -274,12 +289,59 @@ namespace camera.ViewModels
             set { SetProperty(ref _Cameras, value); }
         }
 
+        private bool _IsSingleCameraMode = false;
+        public bool IsSingleCameraMode
+        {
+            get { return _IsSingleCameraMode; }
+            set { SetProperty(ref _IsSingleCameraMode, value); }
+        }
+
+        private CameraService _SelectedCamera;
+        public CameraService SelectedCamera
+        {
+            get { return _SelectedCamera; }
+            set { SetProperty(ref _SelectedCamera, value); }
+        }
+
         private CameraService _Cam = new();
         public CameraService Cam
         {
             get { return _Cam; }
             set { SetProperty(ref _Cam, value); }
         }
+
+        private DelegateCommand<CameraService> _ToggleMaximizeCommand;
+        public DelegateCommand<CameraService> ToggleMaximizeCommand =>
+            _ToggleMaximizeCommand ?? (_ToggleMaximizeCommand = new DelegateCommand<CameraService>(ExecuteToggleMaximizeCommand));
+
+        private void ExecuteToggleMaximizeCommand(CameraService camera)
+        {
+            if (camera == null) return;
+
+            if (IsSingleCameraMode && SelectedCamera == camera)
+            {
+                ExecuteBackToGridCommand();
+            }
+            else
+            {
+                if (SelectedCamera != null) SelectedCamera.IsHighDefinition = false;
+                SelectedCamera = camera;
+                SelectedCamera.IsHighDefinition = true;
+                IsSingleCameraMode = true;
+            }
+        }
+
+        private DelegateCommand _BackToGridCommand;
+        public DelegateCommand BackToGridCommand =>
+            _BackToGridCommand ?? (_BackToGridCommand = new DelegateCommand(ExecuteBackToGridCommand));
+
+        private void ExecuteBackToGridCommand()
+        {
+            if (SelectedCamera != null) SelectedCamera.IsHighDefinition = false;
+            IsSingleCameraMode = false;
+            SelectedCamera = null;
+        }
+
         public MainWindowViewModel()
         {
             init();
@@ -452,6 +514,7 @@ namespace camera.ViewModels
             DiskSpaceThresholdInput = DiskSpaceThreshold;
             Quality = int.Parse(ConfigurationManager.GetSetting("Quality") ?? "30");
             SaveInterval = int.Parse(ConfigurationManager.GetSetting("SaveInterval") ?? "1");
+            MaxPreviewWidth = int.Parse(ConfigurationManager.GetSetting("MaxPreviewWidth") ?? "640");
 
             // 探测根目录下可能存在的 LOGO 图片文件
             string possibleLogoPng = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.png");
@@ -488,6 +551,7 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("DiskSpaceThreshold", this.DiskSpaceThreshold.ToString());
             ConfigurationManager.SaveSetting("Quality", this.Quality.ToString());
             ConfigurationManager.SaveSetting("SaveInterval", this.SaveInterval.ToString());
+            ConfigurationManager.SaveSetting("MaxPreviewWidth", this.MaxPreviewWidth.ToString());
         }
 
         #endregion

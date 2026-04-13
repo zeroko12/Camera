@@ -252,6 +252,20 @@ namespace camera
             set { SetProperty(ref _IsGrayHomogenization, value); }
         }
 
+        private bool _IsHighDefinition = false;
+        public bool IsHighDefinition
+        {
+            get { return _IsHighDefinition; }
+            set { SetProperty(ref _IsHighDefinition, value); }
+        }
+
+        private int _MaxPreviewWidth = 640;
+        public int MaxPreviewWidth
+        {
+            get { return _MaxPreviewWidth; }
+            set { SetProperty(ref _MaxPreviewWidth, value); }
+        }
+
         #endregion
 
 
@@ -578,14 +592,16 @@ namespace camera
                                     {
                                         if (_BufferFrame != null && !_BufferFrame.Empty())
                                         {
-                                            // 优化 4：预览降采样。如果原始分辨率很高，在送到 UI 前先缩放，减轻 BitmapSource 转换负担
-                                            const int maxPreviewWidth = 640;
-                                            if (_BufferFrame.Width > maxPreviewWidth)
+                                            // 优化 4：预览降采。
+                                            // 逻辑：如果未开启高清模式，且摄像头宽度大于设定的最大预览宽度，则进行缩小处理（防止放大）。
+                                            int targetWidth = Math.Min(MaxPreviewWidth, _BufferFrame.Width);
+                                            
+                                            if (!IsHighDefinition && _BufferFrame.Width > targetWidth)
                                             {
                                                 snapshot = new Mat();
-                                                double ratio = (double)maxPreviewWidth / _BufferFrame.Width;
+                                                double ratio = (double)targetWidth / _BufferFrame.Width;
                                                 int newHeight = (int)(_BufferFrame.Height * ratio);
-                                                Cv2.Resize(_BufferFrame, snapshot, new OpenCvSharp.Size(maxPreviewWidth, newHeight), 0, 0, InterpolationFlags.Linear);
+                                                Cv2.Resize(_BufferFrame, snapshot, new OpenCvSharp.Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Linear);
                                             }
                                             else
                                             {
