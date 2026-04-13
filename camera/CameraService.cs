@@ -816,22 +816,23 @@ namespace camera
                 if (!started || _ffmpegProcess == null)
                     return;
 
-                // 启动异步读取错误输出
+                // 启动异步读取并丢弃输出，防止 FFmpeg 管道阻塞
+                // 仅在主进程中通过 FinalizeFfmpeg 处理异常时的最后报错
                 _ffmpegErrorReadCts = new CancellationTokenSource();
                 Task.Run(async () =>
                 {
                     try
                     {
-                        string error = await _ffmpegProcess.StandardError.ReadToEndAsync();
-                        if (!string.IsNullOrEmpty(error) && !_ffmpegErrorReadCts.Token.IsCancellationRequested)
+                        // 持续读取直到进程结束，但不存入内存也不打印，以释放管道缓冲区
+                        using (var reader = _ffmpegProcess.StandardError)
                         {
-                            Logger.LogWarning($"FFmpeg 输出: {error}");
+                            while (!reader.EndOfStream && !_ffmpegErrorReadCts.Token.IsCancellationRequested)
+                            {
+                                await reader.ReadLineAsync();
+                            }
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"读取 FFmpeg 错误输出时发生异常: {ex.Message}");
-                    }
+                    catch { }
                 }, _ffmpegErrorReadCts.Token);
 
                 // 解耦机制：初始化缓冲队列与独立的写磁盘线程
