@@ -55,10 +55,89 @@ namespace camera
         private string _currentFileName = "";
         private string _currentFilePath = "";
 
-        // 编码器回退：优先 h264_qsv（核显硬编码），失败则自动回退到 mpeg4（CPU 软编码）
-        // ★ static：所有摄像头实例共享，一个检测到 QSV 不可用，其他全部跳过
+        // 编码器会话管理：支持硬件编码器并发限制
+        // 硬件编码器会话管理
+        private static readonly object _encoderLock = new object();
+
+        // 编码器可用性标记
+        private static bool _useNvenc = true;
+        private static bool _useAmf = true;
         private static bool _useQsv = true;
+        private static bool _useLibx264 = true;
+        private static bool _nvencChecked = false;
+        private static bool _amfChecked = false;
         private static bool _qsvChecked = false;
+        private static bool _libx264Checked = false;
+
+        // 硬件编码器并发会话计数（消费级显卡限制）
+        private static int _nvencSessionCount = 0;
+        private static int _amfSessionCount = 0;
+        private static int _qsvSessionCount = 0;
+
+        // 追踪本次运行时失败的编码器（避免反复尝试失败的编码器）
+        private static readonly System.Collections.Generic.HashSet<string> _failedEncoders = new();
+        private readonly System.Collections.Generic.HashSet<string> _thisCameraFailedEncoders = new();
+
+        // 硬件编码器最大会话数限制（可配置，基于常见显卡的保守默认值）
+        private static int _maxNvencSessions = 2;     // NVIDIA 消费级: 2, 专业卡: 8-32
+        private static int _maxAmfSessions = 3;        // AMD: 3-4
+        private static int _maxQsvSessions = 2;        // Intel QSV: 2
+
+        // 配置属性 - 允许在运行时调整
+        public static int MaxNvencSessions
+        {
+            get => _maxNvencSessions;
+            set { lock (_encoderLock) _maxNvencSessions = Math.Max(1, value); }
+        }
+        public static int MaxAmfSessions
+        {
+            get => _maxAmfSessions;
+            set { lock (_encoderLock) _maxAmfSessions = Math.Max(1, value); }
+        }
+        public static int MaxQsvSessions
+        {
+            get => _maxQsvSessions;
+            set { lock (_encoderLock) _maxQsvSessions = Math.Max(1, value); }
+        }
+
+        // 初始化编码器会话限制（根据常见显卡类型设置合理值）
+        static CameraService()
+        {
+            // 尝试从环境变量或配置读取（如果存在）
+            TryLoadEncoderLimitsFromConfig();
+        }
+
+        private static void TryLoadEncoderLimitsFromConfig()
+        {
+            try
+            {
+                var config = System.Configuration.ConfigurationManager.AppSettings;
+                if (int.TryParse(config["MaxNvencSessions"], out int nvenc))
+                    _maxNvencSessions = Math.Max(1, nvenc);
+                if (int.TryParse(config["MaxAmfSessions"], out int amf))
+                    _maxAmfSessions = Math.Max(1, amf);
+                if (int.TryParse(config["MaxQsvSessions"], out int qsv))
+                    _maxQsvSessions = Math.Max(1, qsv);
+            }
+            catch { }
+        }
+
+        // 追踪当前实例使用的编码器
+        private string _currentEncoder = "";
+
+        // 编码器选择策略
+        public enum EncoderPreference
+        {
+            Auto,       // 自动选择（优先硬件，考虑会话数
+            PreferHardware, // 强制硬件优先，会话满则失败
+            ForceSoftware   // 强制软件编码
+        }
+        private static EncoderPreference _globalEncoderPreference = EncoderPreference.Auto;
+        public static EncoderPreference GlobalEncoderPreference
+        {
+            get => _globalEncoderPreference;
+            set => _globalEncoderPreference = value;
+        }
 
         // 重试控制
         private int _ffmpegInitFailCount = 0;
@@ -66,10 +145,15 @@ namespace camera
         private DateTime _lastFFmpegInitAttempt = DateTime.MinValue;
         private static readonly TimeSpan FFmpegRetryCooldown = TimeSpan.FromSeconds(10);
 
+        // 摄像头捕获格式
+        private enum CaptureFormat { YUY2, NV12, MJPG }
+        private static CaptureFormat _preferredFormat = CaptureFormat.YUY2;
+        private static bool _formatChecked = false;
+
         #endregion
 
 
-        private int _Quality = 30;
+        private int _Quality = 20;
         public int Quality
         {
             get { return _Quality; }
@@ -314,18 +398,75 @@ namespace camera
 
         private void ShowVideoInfo()
         {
-            // ✅ 不强制设置分辨率，让摄像头使用默认的最高分辨率
-            // 移除了原来的强制设置：
-            // cap.Set(VideoCaptureProperties.Fps, 25.0);
-            // cap.Set(VideoCaptureProperties.FrameWidth, 320);
-            // cap.Set(VideoCaptureProperties.FrameHeight, 240);
+            // OBS Studio 风格的摄像头分辨率探测：尝试多个标准分辨率，选择摄像头支持的最高分辨率
+            var testResolutions = new (int Width, int Height)[]
+            {
+                (3840, 2160), // 4K
+                (2560, 1440), // QHD
+                (1920, 1080), // 1080p
+                (1600, 1200), // UXGA
+                (1280, 720),  // 720p
+                (1024, 768),  // XGA
+                (800, 600),   // SVGA
+                (640, 480),   // VGA
+            };
 
-            // 直接读取摄像头当前的配置（通常是最高分辨率）
-            FpsOrigin = cap.Get(VideoCaptureProperties.Fps);
-            WidthOrigin = cap.Get(VideoCaptureProperties.FrameWidth);
-            HeightOrigin = cap.Get(VideoCaptureProperties.FrameHeight);
+            int bestWidth = 0;
+            int bestHeight = 0;
+            double bestFps = 0;
 
-            Logger.LogInfo($"摄像头默认配置: {WidthOrigin}x{HeightOrigin} @ {FpsOrigin}fps");
+            // 先读取当前默认配置作为备选
+            double defaultFps = cap.Get(VideoCaptureProperties.Fps);
+            double defaultWidth = cap.Get(VideoCaptureProperties.FrameWidth);
+            double defaultHeight = cap.Get(VideoCaptureProperties.FrameHeight);
+
+            Logger.LogInfo($"摄像头默认配置: {defaultWidth}x{defaultHeight} @ {defaultFps}fps");
+
+            // 尝试从高到低设置各个标准分辨率
+            foreach (var (width, height) in testResolutions)
+            {
+                try
+                {
+                    // 尝试设置分辨率
+                    cap.Set(VideoCaptureProperties.FrameWidth, width);
+                    cap.Set(VideoCaptureProperties.FrameHeight, height);
+                    Thread.Sleep(30); // 给摄像头一点时间响应
+
+                    // 读取实际设置的分辨率
+                    double actualWidth = cap.Get(VideoCaptureProperties.FrameWidth);
+                    double actualHeight = cap.Get(VideoCaptureProperties.FrameHeight);
+                    double actualFps = cap.Get(VideoCaptureProperties.Fps);
+
+                    // 检查是否设置成功（允许微小误差）
+                    if (Math.Abs(actualWidth - width) < 10 && Math.Abs(actualHeight - height) < 10)
+                    {
+                        bestWidth = (int)actualWidth;
+                        bestHeight = (int)actualHeight;
+                        bestFps = actualFps > 0 ? actualFps : 30;
+                        Logger.LogInfo($"摄像头支持分辨率: {bestWidth}x{bestHeight} @ {bestFps}fps");
+                        break; // 找到第一个支持的最高分辨率，停止尝试
+                    }
+                }
+                catch
+                {
+                    // 这个分辨率不支持，继续尝试下一个
+                }
+            }
+
+            // 如果没有找到任何支持的标准分辨率，使用默认配置
+            if (bestWidth == 0 || bestHeight == 0)
+            {
+                bestWidth = (int)defaultWidth;
+                bestHeight = (int)defaultHeight;
+                bestFps = defaultFps > 0 ? defaultFps : 30;
+                Logger.LogInfo($"使用摄像头默认分辨率: {bestWidth}x{bestHeight} @ {bestFps}fps");
+            }
+
+            FpsOrigin = bestFps;
+            WidthOrigin = bestWidth;
+            HeightOrigin = bestHeight;
+
+            Logger.LogInfo($"最终摄像头配置: {WidthOrigin}x{HeightOrigin} @ {FpsOrigin}fps");
             Debug.WriteLine($"摄像头分辨率: {WidthOrigin}x{HeightOrigin} {FpsOrigin}fps");
         }
 
@@ -341,8 +482,41 @@ namespace camera
                 Logger.LogInfo($"正在打开摄像头索引 {index}...");
                 cap = new VideoCapture(index);
 
-                Logger.LogInfo($"设置摄像头 {index} 编码格式为 MJPG...");
-                cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                // 尝试多种捕获格式，优先使用未压缩格式以避免MJPEG解压缩开销
+                bool formatSet = false;
+                if (!_formatChecked || _preferredFormat == CaptureFormat.YUY2)
+                {
+                    Logger.LogInfo($"尝试设置摄像头 {index} 编码格式为 YUY2...");
+                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+                    Thread.Sleep(50);
+                    if (cap.IsOpened())
+                    {
+                        formatSet = true;
+                        _preferredFormat = CaptureFormat.YUY2;
+                        Logger.LogInfo($"摄像头 {index} 使用 YUY2 格式");
+                    }
+                }
+
+                if (!formatSet && (!_formatChecked || _preferredFormat == CaptureFormat.NV12))
+                {
+                    Logger.LogInfo($"尝试设置摄像头 {index} 编码格式为 NV12...");
+                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
+                    Thread.Sleep(50);
+                    if (cap.IsOpened())
+                    {
+                        formatSet = true;
+                        _preferredFormat = CaptureFormat.NV12;
+                        Logger.LogInfo($"摄像头 {index} 使用 NV12 格式");
+                    }
+                }
+
+                if (!formatSet)
+                {
+                    Logger.LogInfo($"设置摄像头 {index} 编码格式为 MJPG...");
+                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                    _preferredFormat = CaptureFormat.MJPG;
+                }
+                _formatChecked = true;
 
                 if (!cap.IsOpened())
                 {
@@ -481,7 +655,13 @@ namespace camera
                                     cap?.Dispose();
                                     
                                     cap = new VideoCapture(Index);
-                                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                                    // 使用已确定的最优格式
+                                    if (_preferredFormat == CaptureFormat.YUY2)
+                                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+                                    else if (_preferredFormat == CaptureFormat.NV12)
+                                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
+                                    else
+                                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
                                     cap.Set(VideoCaptureProperties.FrameWidth, Width);
                                     cap.Set(VideoCaptureProperties.FrameHeight, Height);
                                     cap.Set(VideoCaptureProperties.Fps, Fps);
@@ -601,7 +781,7 @@ namespace camera
                                                 snapshot = new Mat();
                                                 double ratio = (double)targetWidth / _BufferFrame.Width;
                                                 int newHeight = (int)(_BufferFrame.Height * ratio);
-                                                Cv2.Resize(_BufferFrame, snapshot, new OpenCvSharp.Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Linear);
+                                                Cv2.Resize(_BufferFrame, snapshot, new OpenCvSharp.Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Lanczos4);
                                             }
                                             else
                                             {
@@ -722,19 +902,61 @@ namespace camera
                 //开始计时
                 _lastSaveTime = DateTime.Now;
 
-                // 编码器尝试列表：优先 QSV 硬件编码，失败则回退 mpeg4
-                string[] encodersToTry;
-                if (_useQsv)
-                    encodersToTry = new[] { "h264_qsv", "mpeg4" };
-                else
-                    encodersToTry = new[] { "mpeg4" };
+                // 构建编码器尝试列表 - 优先硬件编码（参考OBS Studio策略）
+                var encodersToTry = new System.Collections.Generic.List<string>();
+                lock (_encoderLock)
+                {
+                    // 优先硬件编码，降低CPU占用
+                    if (_globalEncoderPreference != EncoderPreference.ForceSoftware)
+                    {
+                        if (_useNvenc && _nvencSessionCount < MaxNvencSessions &&
+                            !_failedEncoders.Contains("h264_nvenc") &&
+                            !_thisCameraFailedEncoders.Contains("h264_nvenc"))
+                        {
+                            encodersToTry.Add("h264_nvenc");
+                            Logger.LogInfo($"NVENC 可用，当前会话: {_nvencSessionCount}/{MaxNvencSessions}");
+                        }
+                        if (_useAmf && _amfSessionCount < MaxAmfSessions &&
+                            !_failedEncoders.Contains("h264_amf") &&
+                            !_thisCameraFailedEncoders.Contains("h264_amf"))
+                        {
+                            encodersToTry.Add("h264_amf");
+                            Logger.LogInfo($"AMF 可用，当前会话: {_amfSessionCount}/{MaxAmfSessions}");
+                        }
+                        if (_useQsv && _qsvSessionCount < MaxQsvSessions &&
+                            !_failedEncoders.Contains("h264_qsv") &&
+                            !_thisCameraFailedEncoders.Contains("h264_qsv"))
+                        {
+                            encodersToTry.Add("h264_qsv");
+                            Logger.LogInfo($"QSV 可用，当前会话: {_qsvSessionCount}/{MaxQsvSessions}");
+                        }
+                    }
+
+                    // 软件编码作为回退（总是可用）
+                    if (_useLibx264 && _globalEncoderPreference != EncoderPreference.PreferHardware)
+                    {
+                        encodersToTry.Add("libx264");
+                    }
+                    encodersToTry.Add("mpeg4");
+                }
 
                 bool started = false;
                 foreach (var encoder in encodersToTry)
                 {
-                    string encoderArgs = encoder == "h264_qsv"
-                        ? $"-c:v h264_qsv -global_quality {Quality}"
-                        : $"-c:v mpeg4 -threads 0 -q:v {Quality}";
+                    string encoderArgs = encoder switch
+                    {
+                        // NVIDIA NVENC - 使用最简单参数，参考OBS
+                        "h264_nvenc" => $"-c:v h264_nvenc",
+                        // AMD AMF - 最简单参数
+                        "h264_amf" => $"-c:v h264_amf",
+                        // Intel QSV - 最简单参数
+                        "h264_qsv" => $"-c:v h264_qsv",
+                        // libx264 - 软件回退
+                        "libx264" => $"-c:v libx264 -preset ultrafast -crf {Math.Clamp(Quality, 23, 28)}",
+                        // mpeg4 - 最终回退
+                        "mpeg4" => $"-c:v mpeg4 -threads 0 -q:v {Math.Clamp(Quality / 6, 2, 5)}",
+                        _ => $"-c:v mpeg4 -threads 0 -q:v 3"
+                    };
 
                     // 优化 1：更改输入像素格式为 yuv420p，减少 50% 的管道传输量，并消除 FFmpeg 内部的色彩转换负载
                     string fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {(int)Width}x{(int)Height} -r {RecordFps} -i - {encoderArgs} -an \"{TargetFile}\"";
@@ -771,26 +993,62 @@ namespace camera
                             _ffmpegProcess.Dispose();
                             _ffmpegProcess = null;
 
-                            // QSV 失败，标记为不可用，继续尝试下一个编码器
+                            // 标记当前编码器不可用（仅本次会话，下次启动仍会尝试）
+                            // 注意：不禁用全局，因为可能是临时问题
+                            if (encoder == "h264_nvenc")
+                            {
+                                Logger.LogWarning("h264_nvenc (NVIDIA) 硬件编码启动失败，尝试下一个...");
+                                continue;
+                            }
+                            if (encoder == "h264_amf")
+                            {
+                                Logger.LogWarning("h264_amf (AMD) 硬件编码启动失败，尝试下一个...");
+                                continue;
+                            }
                             if (encoder == "h264_qsv")
                             {
-                                _useQsv = false;
-                                _qsvChecked = true;
-                                Logger.LogWarning("h264_qsv 硬件编码不可用，自动回退到 mpeg4 软件编码...");
-                                continue; // 尝试 mpeg4
+                                Logger.LogWarning("h264_qsv (Intel) 硬件编码启动失败，尝试下一个...");
+                                continue;
+                            }
+                            if (encoder == "libx264")
+                            {
+                                Logger.LogWarning("libx264 软件编码启动失败，尝试 mpeg4...");
+                                continue;
                             }
                             return; // mpeg4 也失败了，放弃
                         }
 
                         // 启动成功
-                        if (encoder == "h264_qsv" && !_qsvChecked)
+                        lock (_encoderLock)
                         {
-                            _qsvChecked = true;
-                            // Logger.LogInfo("h264_qsv 硬件编码验证通过，使用核显加速");
-                        }
-                        else if (encoder == "mpeg4")
-                        {
-                            // Logger.LogInfo("使用 mpeg4 软件编码");
+                            _currentEncoder = encoder;
+                            if (encoder == "h264_nvenc")
+                            {
+                                _nvencSessionCount++;
+                                if (!_nvencChecked) _nvencChecked = true;
+                                Logger.LogInfo($"h264_nvenc (NVIDIA) 硬件编码启动成功，会话数: {_nvencSessionCount}/{MaxNvencSessions}");
+                            }
+                            else if (encoder == "h264_amf")
+                            {
+                                _amfSessionCount++;
+                                if (!_amfChecked) _amfChecked = true;
+                                Logger.LogInfo($"h264_amf (AMD) 硬件编码启动成功，会话数: {_amfSessionCount}/{MaxAmfSessions}");
+                            }
+                            else if (encoder == "h264_qsv")
+                            {
+                                _qsvSessionCount++;
+                                if (!_qsvChecked) _qsvChecked = true;
+                                Logger.LogInfo($"h264_qsv (Intel) 硬件编码启动成功，会话数: {_qsvSessionCount}/{MaxQsvSessions}");
+                            }
+                            else if (encoder == "libx264")
+                            {
+                                if (!_libx264Checked) _libx264Checked = true;
+                                Logger.LogInfo("libx264 软件编码启动成功");
+                            }
+                            else if (encoder == "mpeg4")
+                            {
+                                Logger.LogInfo("mpeg4 软件编码启动成功");
+                            }
                         }
 
                         started = true;
@@ -803,32 +1061,47 @@ namespace camera
                         _ffmpegProcess?.Dispose();
                         _ffmpegProcess = null;
 
-                        if (encoder == "h264_qsv")
+                        lock (_encoderLock)
                         {
-                            _useQsv = false;
-                            _qsvChecked = true;
-                            continue;
+                            // 标记该编码器失败，本次运行不再尝试
+                            _failedEncoders.Add(encoder);
+                            _thisCameraFailedEncoders.Add(encoder);
+                            Logger.LogWarning($"编码器 {encoder} 启动失败，添加到失败列表，尝试下一个...");
                         }
-                        return;
+                        continue;
                     }
                 }
 
                 if (!started || _ffmpegProcess == null)
                     return;
 
-                // 启动异步读取并丢弃输出，防止 FFmpeg 管道阻塞
-                // 仅在主进程中通过 FinalizeFfmpeg 处理异常时的最后报错
+                // 启动异步读取FFmpeg所有输出，记录到日志以便调试（前20行）
                 _ffmpegErrorReadCts = new CancellationTokenSource();
+                int logLineCount = 0;
                 Task.Run(async () =>
                 {
                     try
                     {
-                        // 持续读取直到进程结束，但不存入内存也不打印，以释放管道缓冲区
                         using (var reader = _ffmpegProcess.StandardError)
                         {
-                            while (!reader.EndOfStream && !_ffmpegErrorReadCts.Token.IsCancellationRequested)
+                            string line;
+                            while ((line = await reader.ReadLineAsync()) != null &&
+                                   !_ffmpegErrorReadCts.Token.IsCancellationRequested)
                             {
-                                await reader.ReadLineAsync();
+                                // 记录前20行和所有错误信息
+                                if (!string.IsNullOrWhiteSpace(line))
+                                {
+                                    bool isError = line.Contains("error") || line.Contains("Error") ||
+                                                   line.Contains("invalid") || line.Contains("Invalid") ||
+                                                   line.Contains("cannot") || line.Contains("Cannot") ||
+                                                   line.Contains("failed") || line.Contains("Failed");
+
+                                    if (isError || logLineCount < 20)
+                                    {
+                                        Logger.LogInfo($"[FFmpeg] {line}");
+                                        logLineCount++;
+                                    }
+                                }
                             }
                         }
                     }
@@ -905,6 +1178,30 @@ namespace camera
 
         private void FinalizeFfmpegInternal()
         {
+            // 0. 释放硬件编码器会话计数
+            lock (_encoderLock)
+            {
+                if (!string.IsNullOrEmpty(_currentEncoder))
+                {
+                    if (_currentEncoder == "h264_nvenc" && _nvencSessionCount > 0)
+                    {
+                        _nvencSessionCount--;
+                        Logger.LogInfo($"释放 NVENC 会话，剩余: {_nvencSessionCount}/{MaxNvencSessions}");
+                    }
+                    else if (_currentEncoder == "h264_amf" && _amfSessionCount > 0)
+                    {
+                        _amfSessionCount--;
+                        Logger.LogInfo($"释放 AMF 会话，剩余: {_amfSessionCount}/{MaxAmfSessions}");
+                    }
+                    else if (_currentEncoder == "h264_qsv" && _qsvSessionCount > 0)
+                    {
+                        _qsvSessionCount--;
+                        Logger.LogInfo($"释放 QSV 会话，剩余: {_qsvSessionCount}/{MaxQsvSessions}");
+                    }
+                    _currentEncoder = "";
+                }
+            }
+
             // 1. 发出停止信号：阻断外部新采集帧排队
             if (_frameSaveQueue != null && !_frameSaveQueue.IsAddingCompleted)
             {
@@ -1143,17 +1440,23 @@ namespace camera
             {
                 Logger.LogError("写入 FFmpeg 失败（管道可能已关闭）", ioEx);
 
-                // 如果正在使用 QSV 且进程已崩溃，说明 QSV 运行时不稳定（如并发会话过多）
-                // 标记为不可用，后续所有摄像头都将使用 mpeg4
-                if (_useQsv && _ffmpegProcess != null && _ffmpegProcess.HasExited)
+                // 如果正在使用硬件编码且进程已崩溃，添加到失败列表
+                if (_ffmpegProcess != null && _ffmpegProcess.HasExited)
                 {
-                    _useQsv = false;
-                    _qsvChecked = true;
-                    Logger.LogWarning($"摄像头 {Index}: h264_qsv 运行时崩溃，全局回退到 mpeg4 软件编码");
+                    if (!string.IsNullOrEmpty(_currentEncoder))
+                    {
+                        lock (_encoderLock)
+                        {
+                            _failedEncoders.Add(_currentEncoder);
+                            _thisCameraFailedEncoders.Add(_currentEncoder);
+                        }
+                        Logger.LogWarning($"摄像头 {Index}: {_currentEncoder} 运行时崩溃，添加到失败列表，将尝试其他编码器");
+                    }
                 }
 
-                // FFmpeg 进程可能已崩溃，清理死掉的进程，由头部重试机制统一处理
+                // FFmpeg 进程可能已崩溃，清理死掉的进程，标记需要重新初始化
                 FinalizeFfmpeg();
+                _needReinitFFmpeg = true;
             }
             catch (Exception ex)
             {
