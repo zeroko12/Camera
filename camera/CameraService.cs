@@ -160,9 +160,10 @@ namespace camera
             set { SetProperty(ref _Quality, value); }
         }
 
-        private int _PreviewFps = 15;
+        private int _PreviewFps = 8;
         /// <summary>
         /// 预览帧率（1-摄像头帧率），控制 UI 刷新频率
+        /// OBS 风格：预览不需要高帧率，降低可大幅减少 CPU
         /// </summary>
         public int PreviewFps
         {
@@ -175,9 +176,10 @@ namespace camera
             }
         }
 
-        private int _RecordFps = 15;
+        private int _RecordFps = 10;
         /// <summary>
         /// 录制帧率（1-摄像头帧率），控制喂给 FFmpeg 的帧频率，降低可节省 CPU
+        /// OBS 风格：监控场景 10-12fps 足够
         /// </summary>
         public int RecordFps
         {
@@ -343,7 +345,7 @@ namespace camera
             set { SetProperty(ref _IsHighDefinition, value); }
         }
 
-        private int _MaxPreviewWidth = 640;
+        private int _MaxPreviewWidth = 1080;
         public int MaxPreviewWidth
         {
             get { return _MaxPreviewWidth; }
@@ -945,17 +947,17 @@ namespace camera
                 {
                     string encoderArgs = encoder switch
                     {
-                        // NVIDIA NVENC - 使用最简单参数，参考OBS
-                        "h264_nvenc" => $"-c:v h264_nvenc",
-                        // AMD AMF - 最简单参数
-                        "h264_amf" => $"-c:v h264_amf",
-                        // Intel QSV - 最简单参数
-                        "h264_qsv" => $"-c:v h264_qsv",
-                        // libx264 - 软件回退
-                        "libx264" => $"-c:v libx264 -preset ultrafast -crf {Math.Clamp(Quality, 23, 28)}",
+                        // NVIDIA NVENC - OBS 风格：最快预设 + 低延迟
+                        "h264_nvenc" => $"-c:v h264_nvenc -preset p1 -tune ll",
+                        // AMD AMF - OBS 风格：速度优先
+                        "h264_amf" => $"-c:v h264_amf -quality speed",
+                        // Intel QSV - OBS 风格：最快预设 + 低功耗模式
+                        "h264_qsv" => $"-c:v h264_qsv -preset veryfast -low_power true",
+                        // libx264 - 软件回退：ultrafast + 零延迟 + 稍高CRF降低CPU
+                        "libx264" => $"-c:v libx264 -preset ultrafast -tune zerolatency -crf {Math.Clamp(Quality, 26, 31)}",
                         // mpeg4 - 最终回退
-                        "mpeg4" => $"-c:v mpeg4 -threads 0 -q:v {Math.Clamp(Quality / 6, 2, 5)}",
-                        _ => $"-c:v mpeg4 -threads 0 -q:v 3"
+                        "mpeg4" => $"-c:v mpeg4 -threads 0 -q:v {Math.Clamp(Quality / 6, 3, 6)}",
+                        _ => $"-c:v mpeg4 -threads 0 -q:v 4"
                     };
 
                     // 优化 1：更改输入像素格式为 yuv420p，减少 50% 的管道传输量，并消除 FFmpeg 内部的色彩转换负载
