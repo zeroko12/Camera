@@ -32,6 +32,11 @@ namespace camera
         private string _cachedTimeString = "";
         private DateTime _lastTimeStringUpdate = DateTime.MinValue;
 
+        // 智能预览更新：用于检测画面变化（保存缩小的灰度图以节省内存）
+        private Mat _lastGrayFrame = null;  // 只保存 320x240 灰度图
+        private bool _enableSmartPreviewUpdate = true;
+        private double _sceneChangeThreshold = 8.0;  // 略微提高阈值减少误检
+
         #endregion
 
         #region FFmpeg 录制相关字段
@@ -614,6 +619,63 @@ namespace camera
             }
         }
 
+        // 安全的画面变化检测：在锁内直接使用 _BufferFrame，避免克隆完整帧
+        // 只保存缩小的灰度图，内存占用从 ~6MB 降至 ~76KB
+        private bool CheckAndUpdateSceneChange()
+        {
+            if (!_enableSmartPreviewUpdate)
+                return true;
+
+            lock (_lockObject)
+            {
+                if (_BufferFrame == null || _BufferFrame.Empty())
+                    return false;
+
+                try
+                {
+                    // 直接在锁内创建缩小的灰度图（320x240，仅76KB）
+                    using Mat smallFrame = new Mat();
+                    Cv2.Resize(_BufferFrame, smallFrame, new OpenCvSharp.Size(320, 240), 0, 0, InterpolationFlags.Linear);
+
+                    using Mat grayFrame = new Mat();
+                    Cv2.CvtColor(smallFrame, grayFrame, ColorConversionCodes.BGR2GRAY);
+
+                    if (_lastGrayFrame == null || _lastGrayFrame.Empty())
+                    {
+                        _lastGrayFrame = grayFrame.Clone();
+                        return true;
+                    }
+
+                    if (_lastGrayFrame.Size() != grayFrame.Size())
+                    {
+                        _lastGrayFrame.Dispose();
+                        _lastGrayFrame = grayFrame.Clone();
+                        return true;
+                    }
+
+                    // 计算差异
+                    using Mat diff = new Mat();
+                    Cv2.Absdiff(grayFrame, _lastGrayFrame, diff);
+
+                    Scalar meanDiff = Cv2.Mean(diff);
+                    double diffValue = meanDiff.Val0;
+
+                    if (diffValue > _sceneChangeThreshold)
+                    {
+                        _lastGrayFrame.Dispose();
+                        _lastGrayFrame = grayFrame.Clone();
+                        return true;
+                    }
+
+                    return false;
+                }
+                catch
+                {
+                    return true;
+                }
+            }
+        }
+
         /// <summary>
         /// 刷新Frame帧的线程,使用isCapture控制是否跳出循环,跳出循环时执行关闭写入并压缩覆盖
         /// </summary>
@@ -759,48 +821,55 @@ namespace camera
                         }
 
 
-                        // UI 节流：根据 PreviewFps 控制刷新率（每帧重新计算，支持实时调整）
+                        // UI 节流：根据 PreviewFps 控制刷新率 + 智能画面变化检测
                         int uiSkipInterval = Math.Max(1, (int)Fps / Math.Max(1, PreviewFps));
                         uiFrameSkip++;
                         if (uiFrameSkip >= uiSkipInterval)
                         {
                             uiFrameSkip = 0;
-                            Application.Current.Dispatcher.BeginInvoke(() =>
+
+                            // 先检查画面是否有变化（安全版本，不克隆完整帧）
+                            bool needsUpdate = CheckAndUpdateSceneChange();
+
+                            if (needsUpdate)
                             {
-                                try
+                                Application.Current.Dispatcher.BeginInvoke(() =>
                                 {
-                                    Mat snapshot = null;
-                                    lock (_lockObject)
+                                    try
                                     {
-                                        if (_BufferFrame != null && !_BufferFrame.Empty())
+                                        Mat snapshot = null;
+                                        lock (_lockObject)
                                         {
-                                            // 优化 4：预览降采。
-                                            // 逻辑：如果未开启高清模式，且摄像头宽度大于设定的最大预览宽度，则进行缩小处理（防止放大）。
-                                            int targetWidth = Math.Min(MaxPreviewWidth, _BufferFrame.Width);
-                                            
-                                            if (!IsHighDefinition && _BufferFrame.Width > targetWidth)
+                                            if (_BufferFrame != null && !_BufferFrame.Empty())
                                             {
-                                                snapshot = new Mat();
-                                                double ratio = (double)targetWidth / _BufferFrame.Width;
-                                                int newHeight = (int)(_BufferFrame.Height * ratio);
-                                                Cv2.Resize(_BufferFrame, snapshot, new OpenCvSharp.Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Lanczos4);
-                                            }
-                                            else
-                                            {
-                                                snapshot = _BufferFrame.Clone();
+                                                // 优化 4：预览降采。
+                                                // 逻辑：如果未开启高清模式，且摄像头宽度大于设定的最大预览宽度，则进行缩小处理（防止放大）。
+                                                int targetWidth = Math.Min(MaxPreviewWidth, _BufferFrame.Width);
+
+                                                if (!IsHighDefinition && _BufferFrame.Width > targetWidth)
+                                                {
+                                                    snapshot = new Mat();
+                                                    double ratio = (double)targetWidth / _BufferFrame.Width;
+                                                    int newHeight = (int)(_BufferFrame.Height * ratio);
+                                                    Cv2.Resize(_BufferFrame, snapshot, new OpenCvSharp.Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Lanczos4);
+                                                }
+                                                else
+                                                {
+                                                    snapshot = _BufferFrame.Clone();
+                                                }
                                             }
                                         }
+                                        if (snapshot != null)
+                                        {
+                                            Frame = snapshot;
+                                        }
                                     }
-                                    if (snapshot != null)
+                                    catch (Exception ex)
                                     {
-                                        Frame = snapshot;
+                                        Logger.LogError($"更新 UI 帧时发生错误", ex);
                                     }
-                                }
-                                catch (Exception ex)
-                                {
-                                    Logger.LogError($"更新 UI 帧时发生错误", ex);
-                                }
-                            });
+                                });
+                            }
                         }
 
                         // 帧率控制（去掉忙等循环，降低 CPU 空转）
@@ -1785,6 +1854,13 @@ namespace camera
                     {
                         _Frame.Dispose();
                         _Frame = null;
+                    }
+
+                    // 释放智能预览更新的灰度帧缓存（仅76KB）
+                    if (_lastGrayFrame != null)
+                    {
+                        _lastGrayFrame.Dispose();
+                        _lastGrayFrame = null;
                     }
 
                     Debug.WriteLine($"CameraService {Index} 已释放资源");
