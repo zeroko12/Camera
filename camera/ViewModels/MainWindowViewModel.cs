@@ -521,6 +521,11 @@ namespace camera.ViewModels
             Quality = int.Parse(ConfigurationManager.GetSetting("Quality") ?? "30");
             SaveInterval = int.Parse(ConfigurationManager.GetSetting("SaveInterval") ?? "1");
             MaxPreviewWidth = int.Parse(ConfigurationManager.GetSetting("MaxPreviewWidth") ?? "640");
+            PreviewFps = int.Parse(ConfigurationManager.GetSetting("PreviewFps") ?? "15");
+            RecordFps = int.Parse(ConfigurationManager.GetSetting("RecordFps") ?? "15");
+            Contrast = double.Parse(ConfigurationManager.GetSetting("Contrast") ?? "1.0");
+            Luminance = double.Parse(ConfigurationManager.GetSetting("Luminance") ?? "0.0");
+            IsGrayHomogenization = bool.Parse(ConfigurationManager.GetSetting("IsGrayHomogenization") ?? "false");
 
             // 探测根目录下可能存在的 LOGO 图片文件
             string possibleLogoPng = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.png");
@@ -558,6 +563,11 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("Quality", this.Quality.ToString());
             ConfigurationManager.SaveSetting("SaveInterval", this.SaveInterval.ToString());
             ConfigurationManager.SaveSetting("MaxPreviewWidth", this.MaxPreviewWidth.ToString());
+            ConfigurationManager.SaveSetting("PreviewFps", this.PreviewFps.ToString());
+            ConfigurationManager.SaveSetting("RecordFps", this.RecordFps.ToString());
+            ConfigurationManager.SaveSetting("Contrast", this.Contrast.ToString());
+            ConfigurationManager.SaveSetting("Luminance", this.Luminance.ToString());
+            ConfigurationManager.SaveSetting("IsGrayHomogenization", this.IsGrayHomogenization.ToString());
         }
 
         #endregion
