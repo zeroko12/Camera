@@ -44,27 +44,10 @@ namespace camera
         {
             try
             {
-                // 询问用户是否打开测试窗口
-                var result = MessageBox.Show(
-                    "是否打开 CameraServiceV3 测试窗口？\n\n点击「是」打开测试窗口\n点击「否」打开主窗口",
-                    "启动选择",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-
-                if (result == MessageBoxResult.Yes)
-                {
-                    Logger.LogInfo("创建测试窗口...");
-                    var testWindow = new TestWindowV3();
-                    Logger.LogInfo("测试窗口创建成功");
-                    return testWindow;
-                }
-                else
-                {
-                    Logger.LogInfo("创建主窗口...");
-                    var window = Container.Resolve<MainWindow>();
-                    Logger.LogInfo("主窗口创建成功");
-                    return window;
-                }
+                Logger.LogInfo("创建主窗口...");
+                var window = Container.Resolve<MainWindow>();
+                Logger.LogInfo("主窗口创建成功");
+                return window;
             }
             catch (Exception ex)
             {

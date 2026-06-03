@@ -1,7 +1,7 @@
 using OpenCvSharp;
 using System;
 
-namespace camera.CameraV3.Abstractions
+namespace camera.Pipeline
 {
     public interface IFrameProcessor
     {

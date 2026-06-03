@@ -1,11 +1,10 @@
 using System;
-using camera.CameraV3.Abstractions;
 
-namespace camera.CameraV3.Pipeline
+namespace camera.Pipeline
 {
     public class FramePipelineBuilder
     {
-        private readonly FramePipeline _pipeline = new FramePipeline();
+        private readonly FramePipeline _pipeline = new();
 
         public static FramePipelineBuilder Create()
         {

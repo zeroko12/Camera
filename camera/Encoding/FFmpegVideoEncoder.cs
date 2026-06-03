@@ -1,19 +1,20 @@
 using OpenCvSharp;
 using System;
+using System.Buffers;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using camera.CameraV3.Abstractions;
 
-namespace camera.CameraV3.Encoding
+namespace camera.Encoding
 {
     public class FFmpegVideoEncoder : IVideoEncoder
     {
         private readonly string _ffmpegPath;
-        private Process? _ffmpegProcess;
-        private CancellationTokenSource? _cts;
-        private Task? _errorReadTask;
+        private Process _ffmpegProcess;
+        private CancellationTokenSource _cts;
+        private Task _errorReadTask;
         private bool _isDisposed;
 
         public bool IsInitialized => _ffmpegProcess != null && !_ffmpegProcess.HasExited;
@@ -23,10 +24,7 @@ namespace camera.CameraV3.Encoding
         public string Codec { get; private set; } = "";
         public string OutputPath { get; private set; } = "";
 
-        public event EventHandler<byte[]>? FrameEncoded;
-        public event EventHandler<Exception>? Error;
-
-        public FFmpegVideoEncoder(string? ffmpegPath = null)
+        public FFmpegVideoEncoder(string ffmpegPath = null)
         {
             _ffmpegPath = ffmpegPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
             if (!File.Exists(_ffmpegPath))
@@ -35,12 +33,7 @@ namespace camera.CameraV3.Encoding
             }
         }
 
-        public bool Initialize(int width, int height, double fps, string codec, int bitrate = 5000000)
-        {
-            return Initialize(width, height, fps, codec, bitrate, "");
-        }
-
-        public bool Initialize(int width, int height, double fps, string codec, int bitrate, string outputPath)
+        public bool Initialize(int width, int height, double fps, string codec, int quality, string outputPath)
         {
             if (IsInitialized)
             {
@@ -55,7 +48,7 @@ namespace camera.CameraV3.Encoding
 
             try
             {
-                string encoderArgs = GetEncoderArguments(codec, bitrate);
+                string encoderArgs = GetEncoderArguments(codec, quality);
                 string fullArgs;
 
                 if (string.IsNullOrEmpty(outputPath))
@@ -87,78 +80,87 @@ namespace camera.CameraV3.Encoding
                 };
 
                 Logger.LogInfo($"[FFmpegEncoder] 启动 FFmpeg: {codec}, {width}x{height} @ {fps}fps");
-
                 _ffmpegProcess.Start();
 
                 _cts = new CancellationTokenSource();
                 _errorReadTask = Task.Run(() => ReadErrorOutputAsync(_cts.Token), _cts.Token);
 
-                Thread.Sleep(300);
+                // 等待 500 毫秒以确保显卡加速正常启动（若是 QSV 会在这段时间报错）
+                Thread.Sleep(500);
 
                 if (_ffmpegProcess.HasExited)
                 {
                     string stderr = "";
                     try { stderr = _ffmpegProcess.StandardError.ReadToEnd(); } catch { }
-                    Logger.LogError($"[FFmpegEncoder] FFmpeg 启动失败: {stderr}");
+                    Logger.LogError($"[FFmpegEncoder] FFmpeg 启动后立即退出，错误信息: {stderr}");
                     return false;
                 }
 
-                Logger.LogInfo($"[FFmpegEncoder] FFmpeg 启动成功 (PID: {_ffmpegProcess.Id})");
+                Logger.LogInfo($"[FFmpegEncoder] FFmpeg 进程已成功启动 (PID: {_ffmpegProcess.Id})");
                 return true;
             }
             catch (Exception ex)
             {
                 Logger.LogError($"[FFmpegEncoder] 初始化失败: {ex.Message}", ex);
-                Error?.Invoke(this, ex);
                 Cleanup();
                 return false;
             }
         }
 
-        private string GetEncoderArguments(string codec, int bitrate)
+        private string GetEncoderArguments(string codec, int quality)
         {
             return codec switch
             {
+                // NVIDIA NVENC - OBS 风格：最快预设 + 低延迟
                 "h264_nvenc" => $"-c:v h264_nvenc -preset p1 -tune ll",
+                // AMD AMF - OBS 风格：速度优先
                 "h264_amf" => $"-c:v h264_amf -quality speed",
+                // Intel QSV - OBS 风格：最快预设 + 低功耗模式
                 "h264_qsv" => $"-c:v h264_qsv -preset veryfast -low_power true",
-                "libx264" => $"-c:v libx264 -preset ultrafast -tune zerolatency -crf 28",
-                "mpeg4" => $"-c:v mpeg4 -threads 0 -q:v 4",
+                // libx264 - 软件回退：ultrafast + 零延迟 + 稍高CRF降低CPU
+                "libx264" => $"-c:v libx264 -preset ultrafast -tune zerolatency -crf {Math.Clamp(quality, 26, 31)}",
+                // mpeg4 - 最终回退
+                "mpeg4" => $"-c:v mpeg4 -threads 0 -q:v {Math.Clamp(quality / 6, 3, 6)}",
                 _ => $"-c:v mpeg4 -threads 0 -q:v 4"
             };
         }
 
         public bool EncodeFrame(Mat frame, DateTime timestamp)
         {
-            if (!IsInitialized || _ffmpegProcess == null)
+            if (!IsInitialized || _ffmpegProcess == null || !_ffmpegProcess.StandardInput.BaseStream.CanWrite)
                 return false;
 
+            byte[] rentedArray = null;
+            Mat yuvFrame = null;
             try
             {
-                Mat yuvFrame = new Mat();
-                if (frame.Channels() == 3)
-                {
-                    Cv2.CvtColor(frame, yuvFrame, ColorConversionCodes.BGR2YUV_I420);
-                }
-                else
-                {
-                    yuvFrame = frame.Clone();
-                }
+                // 转换 BGR 到 YUV_I420，数据量减半，且消除 FFmpeg 色彩空间转换负载
+                yuvFrame = new Mat();
+                Cv2.CvtColor(frame, yuvFrame, ColorConversionCodes.BGR2YUV_I420);
 
-                int dataSize = Width * Height * 3 / 2;
-                byte[] buffer = new byte[dataSize];
-                System.Runtime.InteropServices.Marshal.Copy(yuvFrame.Data, buffer, 0, dataSize);
+                int frameSize = (int)yuvFrame.Total() * yuvFrame.ElemSize();
+                
+                // V2 核心优化：使用 ArrayPool 消除堆内存高频分配，极大降低 GC 卡顿
+                rentedArray = ArrayPool<byte>.Shared.Rent(frameSize);
+                Marshal.Copy(yuvFrame.Data, rentedArray, 0, frameSize);
 
-                _ffmpegProcess.StandardInput.BaseStream.Write(buffer, 0, buffer.Length);
+                _ffmpegProcess.StandardInput.BaseStream.Write(rentedArray, 0, frameSize);
                 _ffmpegProcess.StandardInput.BaseStream.Flush();
 
-                yuvFrame.Dispose();
                 return true;
             }
             catch (Exception ex)
             {
-                Logger.LogWarning($"[FFmpegEncoder] 编码帧失败: {ex.Message}");
+                Logger.LogWarning($"[FFmpegEncoder] 写入 FFmpeg 帧失败: {ex.Message}");
                 return false;
+            }
+            finally
+            {
+                if (rentedArray != null)
+                {
+                    ArrayPool<byte>.Shared.Return(rentedArray);
+                }
+                yuvFrame?.Dispose();
             }
         }
 
@@ -169,7 +171,7 @@ namespace camera.CameraV3.Encoding
                 try
                 {
                     _ffmpegProcess.StandardInput.Close();
-                    _ffmpegProcess.WaitForExit(2000);
+                    _ffmpegProcess.WaitForExit(3000);
                 }
                 catch { }
             }
@@ -184,13 +186,21 @@ namespace camera.CameraV3.Encoding
                 using (var reader = _ffmpegProcess?.StandardError)
                 {
                     if (reader == null) return;
-                    string? line;
+                    string line;
                     while ((line = await reader.ReadLineAsync()) != null && !token.IsCancellationRequested)
                     {
-                        if (!string.IsNullOrWhiteSpace(line) && lineCount < 20)
+                        if (!string.IsNullOrWhiteSpace(line))
                         {
-                            Logger.LogInfo($"[FFmpeg] {line}");
-                            lineCount++;
+                            bool isError = line.Contains("error") || line.Contains("Error") ||
+                                           line.Contains("invalid") || line.Contains("Invalid") ||
+                                           line.Contains("cannot") || line.Contains("Cannot") ||
+                                           line.Contains("failed") || line.Contains("Failed");
+
+                            if (isError || lineCount < 20)
+                            {
+                                Logger.LogInfo($"[FFmpeg] {line}");
+                                lineCount++;
+                            }
                         }
                     }
                 }
@@ -201,9 +211,15 @@ namespace camera.CameraV3.Encoding
         private void Cleanup()
         {
             _cts?.Cancel();
-            _errorReadTask?.Wait(500);
+            try { _errorReadTask?.Wait(500); } catch { }
             _cts?.Dispose();
             _cts = null;
+
+            if (!string.IsNullOrEmpty(Codec))
+            {
+                VideoEncoderFactory.ReleaseSession(Codec);
+                Codec = "";
+            }
 
             if (_ffmpegProcess != null)
             {

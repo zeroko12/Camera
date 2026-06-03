@@ -130,7 +130,7 @@ namespace camera
                     string logEntry = $"[{timestamp}] [{level}] {message}";
 
                     // 写入文件
-                    File.AppendAllText(_logFilePath, logEntry + Environment.NewLine, Encoding.UTF8);
+                    File.AppendAllText(_logFilePath, logEntry + Environment.NewLine, System.Text.Encoding.UTF8);
 
                     // 同时输出到调试窗口
                     Debug.WriteLine(logEntry);

@@ -1,18 +1,16 @@
 using OpenCvSharp;
 using System;
 using System.IO;
-using System.Threading;
-using camera.CameraV3.Abstractions;
-using camera.CameraV3.Encoding;
+using camera.Encoding;
 
-namespace camera.CameraV3.Recording
+namespace camera.Recording
 {
     public class FFmpegVideoRecorder : IVideoRecorder
     {
         private readonly RecordingOptions _options;
         private readonly string _ffmpegPath;
-        private IVideoEncoder? _encoder;
-        private string? _currentOutputPath;
+        private IVideoEncoder _encoder;
+        private string _currentOutputPath;
         private DateTime _recordingStartTime;
         private DateTime _lastSegmentTime;
         private int _frameCount;
@@ -20,27 +18,28 @@ namespace camera.CameraV3.Recording
         private bool _isRecording;
         private bool _isPaused;
         private bool _isDisposed;
-        private readonly object _lock = new object();
+        private int _currentQuality = 30;
+        private readonly object _lock = new();
 
         public bool IsRecording => _isRecording;
         public bool IsPaused => _isPaused;
-        public string? CurrentOutputPath => _currentOutputPath;
+        public string CurrentOutputPath => _currentOutputPath;
         public DateTime RecordingStartTime => _recordingStartTime;
 
-        public event EventHandler? RecordingStarted;
-        public event EventHandler? RecordingStopped;
-        public event EventHandler? RecordingPaused;
-        public event EventHandler? RecordingResumed;
-        public event EventHandler<Exception>? RecordingError;
+        public event EventHandler RecordingStarted;
+        public event EventHandler RecordingStopped;
+        public event EventHandler RecordingPaused;
+        public event EventHandler RecordingResumed;
+        public event EventHandler<Exception> RecordingError;
 
-        public FFmpegVideoRecorder(RecordingOptions options, string? ffmpegPath = null)
+        public FFmpegVideoRecorder(RecordingOptions options, string ffmpegPath = null)
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
             _ffmpegPath = ffmpegPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
-            _skipInterval = Math.Max(1, (int)options.Fps / Math.Max(1, (int)options.RecordFps));
+            _skipInterval = Math.Max(1, (int)options.Fps / Math.Max(1, options.RecordFps));
         }
 
-        public bool StartRecording(string outputPath, int width, int height, double fps)
+        public bool StartRecording(string outputPath, int width, int height, double fps, int quality)
         {
             lock (_lock)
             {
@@ -48,18 +47,22 @@ namespace camera.CameraV3.Recording
 
                 try
                 {
-                    _currentOutputPath = outputPath;
+                    _currentQuality = quality;
+                    _currentOutputPath = string.IsNullOrEmpty(outputPath) ? GenerateOutputPath() : outputPath;
                     _recordingStartTime = DateTime.Now;
                     _lastSegmentTime = _recordingStartTime;
                     _frameCount = 0;
 
+                    // 重新计算跳帧率（如果 fps 发生改变）
+                    _skipInterval = Math.Max(1, width > 0 ? (int)fps / Math.Max(1, _options.RecordFps) : 30 / 15);
+
                     _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                        width, height, fps, outputPath, _ffmpegPath);
+                        width, height, _options.RecordFps, quality, _currentOutputPath, _ffmpegPath);
 
                     _isRecording = true;
                     _isPaused = false;
 
-                    Logger.LogInfo($"[FFmpegRecorder] 开始录制: {outputPath}");
+                    Logger.LogInfo($"[FFmpegRecorder] 开始录制到文件: {_currentOutputPath}");
                     RecordingStarted?.Invoke(this, EventArgs.Empty);
                     return true;
                 }
@@ -114,6 +117,7 @@ namespace camera.CameraV3.Recording
             {
                 if (!_isRecording || _isPaused || _encoder == null) return;
 
+                // 录制跳帧降频，减少 CPU 编码负载
                 _frameCount++;
                 if (_frameCount < _skipInterval) return;
                 _frameCount = 0;
@@ -125,7 +129,7 @@ namespace camera.CameraV3.Recording
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogWarning($"[FFmpegRecorder] 录制帧失败: {ex.Message}");
+                    Logger.LogWarning($"[FFmpegRecorder] 录制单帧失败: {ex.Message}");
                 }
             }
         }
@@ -137,7 +141,7 @@ namespace camera.CameraV3.Recording
             var elapsed = timestamp - _lastSegmentTime;
             if (elapsed >= _options.SegmentDuration)
             {
-                Logger.LogInfo($"[FFmpegRecorder] 分段时间到，创建新文件");
+                Logger.LogInfo($"[FFmpegRecorder] 录像分段计时达标 ({_options.SegmentDuration.TotalMinutes} 分钟)，切换到新文件...");
                 RotateSegment();
                 _lastSegmentTime = timestamp;
             }
@@ -152,26 +156,28 @@ namespace camera.CameraV3.Recording
 
             string newPath = GenerateOutputPath();
             _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                _options.Width, _options.Height, _options.Fps, newPath, _ffmpegPath);
+                _encoder.Width, _encoder.Height, _options.RecordFps, _currentQuality, newPath, _ffmpegPath);
             _currentOutputPath = newPath;
         }
 
         private string GenerateOutputPath()
         {
-            string fileName = _options.FileNamePattern
-                .Replace("{CameraIndex}", _options.CameraIndex.ToString())
-                .Replace("{Timestamp}", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-
+            DateTime now = DateTime.Now;
+            string dateStr = now.ToString("yyyyMMdd");
+            string timeStr = now.ToString("HH-mm-ss") + ".mp4";
+            
             string directory = string.IsNullOrEmpty(_options.SaveDirectory)
                 ? AppDomain.CurrentDomain.BaseDirectory
                 : _options.SaveDirectory;
 
-            if (!Directory.Exists(directory))
+            // 保持 V2 精确文件结构：SaveDirectory/Index/Date/Time.mp4
+            string fullDir = Path.Combine(directory, _options.CameraIndex.ToString(), dateStr);
+            if (!Directory.Exists(fullDir))
             {
-                Directory.CreateDirectory(directory);
+                Directory.CreateDirectory(fullDir);
             }
 
-            return Path.Combine(directory, fileName);
+            return Path.Combine(fullDir, timeStr);
         }
 
         private void Cleanup()

@@ -2,7 +2,7 @@ using OpenCvSharp;
 using System;
 using System.Collections.Generic;
 
-namespace camera.CameraV3.Abstractions
+namespace camera.Pipeline
 {
     public interface IFramePipeline
     {
