@@ -55,14 +55,15 @@ namespace camera.Preview
                 int targetWidth = Math.Min(MaxWidth, frame.Width);
                 if (!IsHighDefinition && frame.Width > targetWidth)
                 {
-                    previewFrame = new Mat();
                     double ratio = (double)targetWidth / frame.Width;
                     int newHeight = (int)(frame.Height * ratio);
+                    previewFrame = Infrastructure.MatPool.Rent(targetWidth, newHeight, frame.Type());
                     Cv2.Resize(frame, previewFrame, new Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Lanczos4);
                 }
                 else
                 {
-                    previewFrame = frame.Clone();
+                    previewFrame = Infrastructure.MatPool.Rent(frame.Width, frame.Height, frame.Type());
+                    frame.CopyTo(previewFrame);
                 }
 
                 if (previewFrame != null)
@@ -73,7 +74,10 @@ namespace camera.Preview
             catch (Exception ex)
             {
                 Logger.LogError($"[PreviewController] 生成预览帧失败", ex);
-                previewFrame?.Dispose();
+                if (previewFrame != null)
+                {
+                    Infrastructure.MatPool.Return(previewFrame);
+                }
             }
         }
 

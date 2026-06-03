@@ -188,7 +188,7 @@ namespace camera.Encoding
             Mat yuvFrame = null;
             try
             {
-                yuvFrame = new Mat();
+                yuvFrame = Infrastructure.MatPool.Rent(frame.Width, frame.Height * 3 / 2, MatType.CV_8UC1);
                 Cv2.CvtColor(frame, yuvFrame, ColorConversionCodes.BGR2YUV_I420);
 
                 int frameSize = (int)yuvFrame.Total() * yuvFrame.ElemSize();
@@ -214,7 +214,10 @@ namespace camera.Encoding
                 {
                     ArrayPool<byte>.Shared.Return(rentedArray);
                 }
-                yuvFrame?.Dispose();
+                if (yuvFrame != null)
+                {
+                    Infrastructure.MatPool.Return(yuvFrame);
+                }
             }
         }
 

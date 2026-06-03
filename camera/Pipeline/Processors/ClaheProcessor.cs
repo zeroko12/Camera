@@ -13,7 +13,7 @@ namespace camera.Pipeline.Processors
         {
             if (frame == null || frame.Empty()) return;
 
-            Mat output = new Mat();
+            Mat output = null;
             Mat[] channels = null;
             Mat enhancedL = null;
             Mat resizedL = null;
@@ -22,6 +22,8 @@ namespace camera.Pipeline.Processors
 
             try
             {
+                output = Infrastructure.MatPool.Rent(frame.Width, frame.Height, frame.Type());
+
                 // 转换到LAB颜色空间
                 Cv2.CvtColor(frame, output, ColorConversionCodes.BGR2Lab);
 
@@ -30,21 +32,19 @@ namespace camera.Pipeline.Processors
 
                 // 对L通道应用CLAHE
                 clahe = Cv2.CreateCLAHE(3.0, new OpenCvSharp.Size(8, 8));
-                enhancedL = new Mat();
+                enhancedL = Infrastructure.MatPool.Rent(channels[0].Width, channels[0].Height, channels[0].Type());
                 clahe.Apply(channels[0], enhancedL);
 
                 // 创建一个与原始L通道大小相同的Mat
-                resizedL = new Mat();
+                resizedL = Infrastructure.MatPool.Rent(channels[0].Width, channels[0].Height, channels[0].Type());
                 Cv2.Resize(enhancedL, resizedL, channels[0].Size(), 0, 0, InterpolationFlags.Linear);
 
                 // 使用双线性插值混合原始L通道和增强后的L通道
-                blendedL = new Mat();
+                blendedL = Infrastructure.MatPool.Rent(channels[0].Width, channels[0].Height, channels[0].Type());
                 Cv2.AddWeighted(channels[0], 0.5, resizedL, 0.5, 0, blendedL);
 
-                // 用混合后的L通道替换原始L通道
-                channels[0].Dispose();
-                channels[0] = blendedL;
-                blendedL = null; // 避免被双重释放
+                // 将混合后的数据拷贝回 channels[0]
+                blendedL.CopyTo(channels[0]);
 
                 // 合并通道
                 Cv2.Merge(channels, output);
@@ -62,11 +62,11 @@ namespace camera.Pipeline.Processors
                         channel?.Dispose();
                     }
                 }
-                enhancedL?.Dispose();
-                resizedL?.Dispose();
-                blendedL?.Dispose();
+                if (enhancedL != null) Infrastructure.MatPool.Return(enhancedL);
+                if (resizedL != null) Infrastructure.MatPool.Return(resizedL);
+                if (blendedL != null) Infrastructure.MatPool.Return(blendedL);
                 clahe?.Dispose();
-                output.Dispose();
+                if (output != null) Infrastructure.MatPool.Return(output);
             }
         }
     }

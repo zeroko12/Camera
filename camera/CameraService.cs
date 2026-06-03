@@ -132,7 +132,7 @@ namespace camera
                 {
                     if (oldFrame != null && oldFrame != value)
                     {
-                        oldFrame.Dispose();
+                        Infrastructure.MatPool.Return(oldFrame);
                     }
                 }
             }
@@ -319,13 +319,13 @@ namespace camera
             {
                 if (Application.Current == null)
                 {
-                    previewFrame?.Dispose();
+                    if (previewFrame != null) Infrastructure.MatPool.Return(previewFrame);
                     return;
                 }
 
                 Application.Current.Dispatcher.BeginInvoke(() =>
                 {
-                    Frame = previewFrame; // 自动处理旧帧 Dispose
+                    Frame = previewFrame; // 自动处理旧帧到 MatPool
                 });
             };
 
@@ -527,10 +527,11 @@ namespace camera
 
                     try
                     {
-                        tempFrame = new Mat();
+                        tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
                         if (!cap.Read(tempFrame) || tempFrame.Empty())
                         {
-                            tempFrame?.Dispose();
+                            Infrastructure.MatPool.Return(tempFrame);
+                            tempFrame = null;
                             _continuousReadFailCount++;
                             if (_continuousReadFailCount > 30)
                             {
@@ -570,7 +571,7 @@ namespace camera
                     }
                     finally
                     {
-                        tempFrame?.Dispose();
+                        if (tempFrame != null) Infrastructure.MatPool.Return(tempFrame);
                     }
 
                     if (Application.Current == null)

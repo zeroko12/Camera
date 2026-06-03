@@ -18,13 +18,17 @@ namespace camera.Preview
 
             lock (_lock)
             {
+                Mat smallFrame = null;
+                Mat grayFrame = null;
+                Mat diff = null;
+
                 try
                 {
                     // 1. 创建缩小的灰度图（320x240，节省计算量和内存）
-                    using var smallFrame = new Mat();
+                    smallFrame = Infrastructure.MatPool.Rent(320, 240, frame.Type());
                     Cv2.Resize(frame, smallFrame, new Size(320, 240), 0, 0, InterpolationFlags.Linear);
 
-                    var grayFrame = new Mat();
+                    grayFrame = Infrastructure.MatPool.Rent(320, 240, MatType.CV_8UC1);
                     Cv2.CvtColor(smallFrame, grayFrame, ColorConversionCodes.BGR2GRAY);
 
                     if (_lastGrayFrame == null || _lastGrayFrame.Empty())
@@ -35,13 +39,13 @@ namespace camera.Preview
 
                     if (_lastGrayFrame.Size() != grayFrame.Size())
                     {
-                        _lastGrayFrame.Dispose();
+                        Infrastructure.MatPool.Return(_lastGrayFrame);
                         _lastGrayFrame = grayFrame; // 接管引用
                         return true;
                     }
 
                     // 2. 计算差分
-                    using var diff = new Mat();
+                    diff = Infrastructure.MatPool.Rent(320, 240, MatType.CV_8UC1);
                     Cv2.Absdiff(grayFrame, _lastGrayFrame, diff);
 
                     Scalar meanDiff = Cv2.Mean(diff);
@@ -49,18 +53,24 @@ namespace camera.Preview
 
                     if (diffValue > Threshold)
                     {
-                        _lastGrayFrame.Dispose();
+                        Infrastructure.MatPool.Return(_lastGrayFrame);
                         _lastGrayFrame = grayFrame; // 更新缓存帧
                         return true;
                     }
 
-                    grayFrame.Dispose(); // 未发生变化，释放当前帧
+                    Infrastructure.MatPool.Return(grayFrame); // 未发生变化，释放当前帧到池中
                     return false;
                 }
                 catch (Exception ex)
                 {
                     Logger.LogWarning($"[SceneChangeDetector] 检测画面变化时发生异常: {ex.Message}");
+                    if (grayFrame != null) Infrastructure.MatPool.Return(grayFrame);
                     return true;
+                }
+                finally
+                {
+                    if (smallFrame != null) Infrastructure.MatPool.Return(smallFrame);
+                    if (diff != null) Infrastructure.MatPool.Return(diff);
                 }
             }
         }
@@ -69,8 +79,11 @@ namespace camera.Preview
         {
             lock (_lock)
             {
-                _lastGrayFrame?.Dispose();
-                _lastGrayFrame = null;
+                if (_lastGrayFrame != null)
+                {
+                    Infrastructure.MatPool.Return(_lastGrayFrame);
+                    _lastGrayFrame = null;
+                }
             }
         }
 
