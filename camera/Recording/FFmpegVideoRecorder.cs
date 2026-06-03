@@ -181,9 +181,10 @@ namespace camera.Recording
                     }
                 }
 
-                // 录制跳帧降频，减少 CPU 编码负载
+                // 动态计算跳帧间隔以响应运行时录像帧率（RecordFps）的调节，与 V2 原理一致
+                int currentSkipInterval = Math.Max(1, _options.Fps > 0 ? (int)_options.Fps / Math.Max(1, _options.RecordFps) : 30 / 15);
                 _frameCount++;
-                if (_frameCount < _skipInterval) return;
+                if (_frameCount < currentSkipInterval) return;
                 _frameCount = 0;
 
                 try
