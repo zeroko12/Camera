@@ -44,16 +44,33 @@ namespace camera
         {
             try
             {
-                Logger.LogInfo("创建主窗口...");
-                var window = Container.Resolve<MainWindow>();
-                Logger.LogInfo("主窗口创建成功");
-                return window;
+                // 询问用户是否打开测试窗口
+                var result = MessageBox.Show(
+                    "是否打开 CameraServiceV3 测试窗口？\n\n点击「是」打开测试窗口\n点击「否」打开主窗口",
+                    "启动选择",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    Logger.LogInfo("创建测试窗口...");
+                    var testWindow = new TestWindowV3();
+                    Logger.LogInfo("测试窗口创建成功");
+                    return testWindow;
+                }
+                else
+                {
+                    Logger.LogInfo("创建主窗口...");
+                    var window = Container.Resolve<MainWindow>();
+                    Logger.LogInfo("主窗口创建成功");
+                    return window;
+                }
             }
             catch (Exception ex)
             {
-                Logger.LogFatal("创建主窗口失败", ex);
+                Logger.LogFatal("创建窗口失败", ex);
                 MessageBox.Show(
-                    $"创建主窗口失败！\n\n错误: {ex.Message}\n\n日志位置: {Logger.GetLogFilePath()}",
+                    $"创建窗口失败！\n\n错误: {ex.Message}\n\n日志位置: {Logger.GetLogFilePath()}",
                     "初始化错误",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
