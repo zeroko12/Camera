@@ -1,4 +1,4 @@
-﻿using FastHotKeyForWPF;
+using FastHotKeyForWPF;
 using ImTools;
 using System;
 using System.Collections.Generic;
@@ -556,8 +556,8 @@ namespace camera.Views
             CanClickThrough = bool.Parse(ConfigurationManager.GetSetting("CanClickThrough") ?? "false");
             this.Topmost = bool.Parse(ConfigurationManager.GetSetting("Topmost") ?? "true");
             topMostButton.IsChecked = this.Topmost;
-            double width = double.Parse(ConfigurationManager.GetSetting("OriginWidth") ?? "900");
-            double height = double.Parse(ConfigurationManager.GetSetting("OriginHeight") ?? "480");
+            double width = double.Parse(ConfigurationManager.GetSetting("WindowWidth") ?? "900");
+            double height = double.Parse(ConfigurationManager.GetSetting("WindowHeight") ?? "480");
             double left = double.Parse(ConfigurationManager.GetSetting("WindowLeft") ?? "100");
             double top = double.Parse(ConfigurationManager.GetSetting("WindowTop") ?? "100");
             double MinWindowWidth = double.Parse(ConfigurationManager.GetSetting("MinWindowWidth") ?? "450");

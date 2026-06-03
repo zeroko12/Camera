@@ -21,6 +21,12 @@ namespace camera.Recording
         private int _currentQuality = 30;
         private readonly object _lock = new();
 
+        // 故障自愈控制参数（与 V2 对齐）
+        private int _initFailCount = 0;
+        private DateTime _lastInitAttempt = DateTime.MinValue;
+        private static readonly TimeSpan InitCooldown = TimeSpan.FromSeconds(10);
+        private const int MaxInitRetries = 3;
+
         public bool IsRecording => _isRecording;
         public bool IsPaused => _isPaused;
         public string CurrentOutputPath => _currentOutputPath;
@@ -53,7 +59,11 @@ namespace camera.Recording
                     _lastSegmentTime = _recordingStartTime;
                     _frameCount = 0;
 
-                    // 重新计算跳帧率（如果 fps 发生改变）
+                    // 重置自愈计数器
+                    _initFailCount = 0;
+                    _lastInitAttempt = DateTime.MinValue;
+
+                    // 重新计算跳帧率
                     _skipInterval = Math.Max(1, width > 0 ? (int)fps / Math.Max(1, _options.RecordFps) : 30 / 15);
 
                     _encoder = VideoEncoderFactory.CreateWithAutoFallback(
@@ -115,7 +125,61 @@ namespace camera.Recording
         {
             lock (_lock)
             {
-                if (!_isRecording || _isPaused || _encoder == null) return;
+                if (!_isRecording || _isPaused) return;
+
+                // 核心自愈逻辑：若编码进程崩溃，执行冷却退避并尝试重启拉起
+                if (_encoder == null || !_encoder.IsInitialized)
+                {
+                    if ((DateTime.Now - _lastInitAttempt) < InitCooldown)
+                    {
+                        return; // 冷却时间内，静默跳过
+                    }
+
+                    if (_initFailCount >= MaxInitRetries)
+                    {
+                        if (_initFailCount == MaxInitRetries)
+                        {
+                            Logger.LogError($"[FFmpegRecorder] 编码器连续崩溃达到上限 {MaxInitRetries} 次，停止重试。");
+                            _initFailCount++;
+                        }
+                        return;
+                    }
+
+                    _lastInitAttempt = DateTime.Now;
+                    Logger.LogWarning($"[FFmpegRecorder] 检测到编码器已断开，尝试自动重新拉起 (第 {_initFailCount + 1}/{MaxInitRetries} 次)...");
+
+                    try
+                    {
+                        if (_encoder != null)
+                        {
+                            try { _encoder.Dispose(); } catch { }
+                            _encoder = null;
+                        }
+
+                        // 使用新路径重新拉起，避免损坏已有视频
+                        _currentOutputPath = GenerateOutputPath();
+                        _encoder = VideoEncoderFactory.CreateWithAutoFallback(
+                            frame.Width, frame.Height, _options.RecordFps, _currentQuality, _currentOutputPath, _ffmpegPath);
+
+                        if (_encoder != null && _encoder.IsInitialized)
+                        {
+                            _initFailCount = 0;
+                            Logger.LogInfo($"[FFmpegRecorder] 编码进程重连成功: {_currentOutputPath}");
+                        }
+                        else
+                        {
+                            _initFailCount++;
+                            Logger.LogError($"[FFmpegRecorder] 编码进程重连失败");
+                            return;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _initFailCount++;
+                        Logger.LogError($"[FFmpegRecorder] 编码器自愈重建发生异常", ex);
+                        return;
+                    }
+                }
 
                 // 录制跳帧降频，减少 CPU 编码负载
                 _frameCount++;
@@ -125,11 +189,19 @@ namespace camera.Recording
                 try
                 {
                     CheckSegment(timestamp);
-                    _encoder.EncodeFrame(frame, timestamp);
+                    
+                    // 尝试写入管道，若失败（管道破裂等），销毁编码器，触发下帧的自愈重启
+                    bool success = _encoder.EncodeFrame(frame, timestamp);
+                    if (!success)
+                    {
+                        Logger.LogWarning($"[FFmpegRecorder] 视频帧编码写入失败，可能是管道意外关闭。销毁编码器以触发自愈。");
+                        try { _encoder.Dispose(); } catch { }
+                        _encoder = null;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogWarning($"[FFmpegRecorder] 录制单帧失败: {ex.Message}");
+                    Logger.LogWarning($"[FFmpegRecorder] 录制单帧发生异常: {ex.Message}");
                 }
             }
         }
