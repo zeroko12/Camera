@@ -25,6 +25,8 @@ namespace camera
             obj.SetValue(SourceMatProperty, value);
         }
 
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, System.Reflection.PropertyInfo> _propertyCache = new();
+
         private static void OnSourceMatChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             if (d == null) return;
@@ -37,8 +39,17 @@ namespace camera
 
             try
             {
-                var sourceProp = d.GetType().GetProperty("Source");
-                if (sourceProp == null || !sourceProp.CanWrite) return;
+                var type = d.GetType();
+                if (!_propertyCache.TryGetValue(type, out var sourceProp))
+                {
+                    sourceProp = type.GetProperty("Source");
+                    if (sourceProp != null && sourceProp.CanWrite)
+                    {
+                        _propertyCache[type] = sourceProp;
+                    }
+                }
+
+                if (sourceProp == null) return;
 
                 var wb = sourceProp.GetValue(d) as WriteableBitmap;
                 
@@ -72,8 +83,17 @@ namespace camera
 
         private static void SetSourceProperty(DependencyObject d, ImageSource value)
         {
-            var sourceProp = d.GetType().GetProperty("Source");
-            if (sourceProp != null && sourceProp.CanWrite)
+            var type = d.GetType();
+            if (!_propertyCache.TryGetValue(type, out var sourceProp))
+            {
+                sourceProp = type.GetProperty("Source");
+                if (sourceProp != null && sourceProp.CanWrite)
+                {
+                    _propertyCache[type] = sourceProp;
+                }
+            }
+
+            if (sourceProp != null)
             {
                 sourceProp.SetValue(d, value);
             }

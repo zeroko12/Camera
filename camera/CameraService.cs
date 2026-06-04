@@ -287,6 +287,12 @@ namespace camera
                         Width = w;
                         Height = h;
                         ChangeCameraInfo();
+
+                        // 实时保存分辨率配置，防止重置或关闭未保存
+                        if (Index >= 0)
+                        {
+                            ConfigurationManager.SaveSetting($"Camera_{Index}_Resolution", value);
+                        }
                     }
                 }
             }
@@ -302,6 +308,12 @@ namespace camera
                 {
                     if (_timestampOverlayProcessor != null)
                         _timestampOverlayProcessor.FontScale = value;
+
+                    // 实时保存水印字体大小
+                    if (Index >= 0)
+                    {
+                        ConfigurationManager.SaveSetting($"Camera_{Index}_OverlayTextSize", value.ToString());
+                    }
                 }
             }
         }
@@ -316,6 +328,12 @@ namespace camera
                 {
                     if (_timestampOverlayProcessor != null)
                         _timestampOverlayProcessor.CustomText = value;
+
+                    // 实时保存自定义水印文字内容
+                    if (Index >= 0)
+                    {
+                        ConfigurationManager.SaveSetting($"Camera_{Index}_CustomText", value ?? "");
+                    }
                 }
             }
         }

@@ -184,7 +184,6 @@ namespace camera.Encoding
             if (!IsInitialized || _ffmpegProcess == null || !_ffmpegProcess.StandardInput.BaseStream.CanWrite)
                 return false;
 
-            byte[] rentedArray = null;
             Mat yuvFrame = null;
             Mat resizedFrame = null;
             try
@@ -206,12 +205,12 @@ namespace camera.Encoding
 
                 int frameSize = (int)yuvFrame.Total() * yuvFrame.ElemSize();
                 
-                // ArrayPool<byte> 是 .NET 标准的高频缓冲区管理方案
-                // 参考: https://learn.microsoft.com/en-us/dotnet/api/system.buffers.arraypool-1
-                rentedArray = ArrayPool<byte>.Shared.Rent(frameSize);
-                Marshal.Copy(yuvFrame.Data, rentedArray, 0, frameSize);
-
-                _ffmpegProcess.StandardInput.BaseStream.Write(rentedArray, 0, frameSize);
+                // 优化：利用 ReadOnlySpan 直接包装 native 指针，实现完全零拷贝写入，消除托管堆拷贝开销
+                unsafe
+                {
+                    var span = new ReadOnlySpan<byte>((void*)yuvFrame.Data, frameSize);
+                    _ffmpegProcess.StandardInput.BaseStream.Write(span);
+                }
                 _ffmpegProcess.StandardInput.BaseStream.Flush();
 
                 return true;
@@ -223,10 +222,6 @@ namespace camera.Encoding
             }
             finally
             {
-                if (rentedArray != null)
-                {
-                    ArrayPool<byte>.Shared.Return(rentedArray);
-                }
                 if (yuvFrame != null)
                 {
                     Infrastructure.MatPool.Return(yuvFrame);
