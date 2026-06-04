@@ -9,7 +9,7 @@ namespace camera.Preview
         private readonly object _lock = new();
 
         public double Threshold { get; set; } = 8.0;
-        public bool Enabled { get; set; } = true;
+        public bool Enabled { get; set; } = false; // 默认关闭，以保证水印文字、大小、亮度等参数能够实时在预览界面响应并降低CPU开销
 
         public bool DetectChange(Mat frame)
         {

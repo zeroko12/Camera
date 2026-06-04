@@ -186,10 +186,23 @@ namespace camera.Encoding
 
             byte[] rentedArray = null;
             Mat yuvFrame = null;
+            Mat resizedFrame = null;
             try
             {
-                yuvFrame = Infrastructure.MatPool.Rent(frame.Width, frame.Height * 3 / 2, MatType.CV_8UC1);
-                Cv2.CvtColor(frame, yuvFrame, ColorConversionCodes.BGR2YUV_I420);
+                // ═══ 关键修复: 帧尺寸校验 ═══
+                // FFmpeg 以 -s {Width}x{Height} 启动，期望每帧的原始数据大小精确匹配。
+                // 如果实际帧尺寸不一致（如摄像头返回的分辨率与设定值有偏差），
+                // 原始字节会按错误的行宽解析，导致严重花屏。
+                Mat sourceFrame = frame;
+                if (frame.Width != Width || frame.Height != Height)
+                {
+                    resizedFrame = Infrastructure.MatPool.Rent(Width, Height, frame.Type());
+                    Cv2.Resize(frame, resizedFrame, new OpenCvSharp.Size(Width, Height));
+                    sourceFrame = resizedFrame;
+                }
+
+                yuvFrame = Infrastructure.MatPool.Rent(sourceFrame.Width, sourceFrame.Height * 3 / 2, MatType.CV_8UC1);
+                Cv2.CvtColor(sourceFrame, yuvFrame, ColorConversionCodes.BGR2YUV_I420);
 
                 int frameSize = (int)yuvFrame.Total() * yuvFrame.ElemSize();
                 
@@ -217,6 +230,10 @@ namespace camera.Encoding
                 if (yuvFrame != null)
                 {
                     Infrastructure.MatPool.Return(yuvFrame);
+                }
+                if (resizedFrame != null)
+                {
+                    Infrastructure.MatPool.Return(resizedFrame);
                 }
             }
         }

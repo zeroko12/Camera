@@ -266,6 +266,94 @@ namespace camera
             }
         }
 
+        private System.Collections.ObjectModel.ObservableCollection<string> _supportedResolutions = new();
+        public System.Collections.ObjectModel.ObservableCollection<string> SupportedResolutions
+        {
+            get => _supportedResolutions;
+            set => SetProperty(ref _supportedResolutions, value);
+        }
+
+        private string _selectedResolution = "";
+        public string SelectedResolution
+        {
+            get => _selectedResolution;
+            set
+            {
+                if (SetProperty(ref _selectedResolution, value) && !string.IsNullOrEmpty(value))
+                {
+                    var parts = value.Split('x');
+                    if (parts.Length == 2 && double.TryParse(parts[0], out double w) && double.TryParse(parts[1], out double h))
+                    {
+                        Width = w;
+                        Height = h;
+                        ChangeCameraInfo();
+                    }
+                }
+            }
+        }
+
+        private double _overlayTextSize = 0.3;
+        public double OverlayTextSize
+        {
+            get => _overlayTextSize;
+            set
+            {
+                if (SetProperty(ref _overlayTextSize, value))
+                {
+                    if (_timestampOverlayProcessor != null)
+                        _timestampOverlayProcessor.FontScale = value;
+                }
+            }
+        }
+
+        private string _customOverlayText = "";
+        public string CustomOverlayText
+        {
+            get => _customOverlayText;
+            set
+            {
+                if (SetProperty(ref _customOverlayText, value))
+                {
+                    if (_timestampOverlayProcessor != null)
+                        _timestampOverlayProcessor.CustomText = value;
+                }
+            }
+        }
+
+        public string ActiveCodec => _recorder?.ActiveCodec ?? "None";
+
+        public bool IsCodecDowngraded
+        {
+            get
+            {
+                if (_recorder == null || !isSave) return false;
+                string codec = ActiveCodec.ToLower();
+                return codec.Contains("libx264") || codec.Contains("mpeg4") || codec == "none" || codec == "";
+            }
+        }
+
+        private bool _isPreviewEnabled = true;
+        public bool IsPreviewEnabled
+        {
+            get => _isPreviewEnabled;
+            set
+            {
+                if (SetProperty(ref _isPreviewEnabled, value))
+                {
+                    if (_previewController != null)
+                        _previewController.IsEnabled = value;
+                }
+            }
+        }
+
+        public bool IsConnected => _continuousReadFailCount <= 5;
+
+        public void UpdateActiveCodecStatus()
+        {
+            RaisePropertyChanged(nameof(ActiveCodec));
+            RaisePropertyChanged(nameof(IsCodecDowngraded));
+        }
+
         #endregion
 
         #region 事件定义
@@ -371,6 +459,9 @@ namespace camera
 
             Logger.LogInfo($"摄像头默认配置: {defaultWidth}x{defaultHeight} @ {defaultFps}fps");
 
+            // 清理旧的分辨率列表并确保 UI 线程安全
+            Application.Current?.Dispatcher.Invoke(() => SupportedResolutions.Clear());
+
             foreach (var (width, height) in testResolutions)
             {
                 try
@@ -385,11 +476,20 @@ namespace camera
 
                     if (Math.Abs(actualWidth - width) < 10 && Math.Abs(actualHeight - height) < 10)
                     {
-                        bestWidth = (int)actualWidth;
-                        bestHeight = (int)actualHeight;
-                        bestFps = actualFps > 0 ? actualFps : 30;
-                        Logger.LogInfo($"摄像头支持分辨率: {bestWidth}x{bestHeight} @ {bestFps}fps");
-                        break;
+                        string resStr = $"{width}x{height}";
+                        Application.Current?.Dispatcher.Invoke(() =>
+                        {
+                            if (!SupportedResolutions.Contains(resStr))
+                                SupportedResolutions.Add(resStr);
+                        });
+
+                        if (bestWidth == 0 || bestHeight == 0)
+                        {
+                            bestWidth = (int)actualWidth;
+                            bestHeight = (int)actualHeight;
+                            bestFps = actualFps > 0 ? actualFps : 30;
+                            Logger.LogInfo($"摄像头支持的最大分辨率: {bestWidth}x{bestHeight} @ {bestFps}fps");
+                        }
                     }
                 }
                 catch { }
@@ -400,12 +500,20 @@ namespace camera
                 bestWidth = (int)defaultWidth;
                 bestHeight = (int)defaultHeight;
                 bestFps = defaultFps > 0 ? defaultFps : 30;
+                string resStr = $"{bestWidth}x{bestHeight}";
+                Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    if (!SupportedResolutions.Contains(resStr))
+                        SupportedResolutions.Add(resStr);
+                });
                 Logger.LogInfo($"使用摄像头默认分辨率: {bestWidth}x{bestHeight} @ {bestFps}fps");
             }
 
             FpsOrigin = bestFps;
             WidthOrigin = bestWidth;
             HeightOrigin = bestHeight;
+            _selectedResolution = $"{bestWidth}x{bestHeight}";
+            RaisePropertyChanged(nameof(SelectedResolution));
 
             Logger.LogInfo($"最终摄像头配置: {WidthOrigin}x{HeightOrigin} @ {FpsOrigin}fps");
         }
@@ -456,6 +564,7 @@ namespace camera
                 }
 
                 this.Index = index;
+                this.Name = $"通道 {index}";
                 _recordingOptions.CameraIndex = index;
 
                 ShowVideoInfo();
@@ -532,7 +641,30 @@ namespace camera
                         {
                             Infrastructure.MatPool.Return(tempFrame);
                             tempFrame = null;
+                            bool wasConnectedInFail = _continuousReadFailCount <= 5;
                             _continuousReadFailCount++;
+                            if (wasConnectedInFail != (_continuousReadFailCount <= 5))
+                            {
+                                RaisePropertyChanged(nameof(IsConnected));
+                            }
+
+                            if (_continuousReadFailCount > 5)
+                            {
+                                // 生成并推送断开连接的警示帧
+                                tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
+                                tempFrame.SetTo(new Scalar(20, 20, 20)); // 暗灰底色
+                                string errorMsg = $"通道 {Index} - 设备已断开";
+                                const HersheyFonts font = HersheyFonts.HersheySimplex;
+                                double fontScale = Math.Max(0.4, 0.6 * (Width / 640.0));
+                                int thickness = Math.Max(1, (int)(2 * (Width / 640.0)));
+                                OpenCvSharp.Size textSize = Cv2.GetTextSize(errorMsg, font, fontScale, thickness, out _);
+                                var textOrg = new OpenCvSharp.Point((Width - textSize.Width) / 2, (Height + textSize.Height) / 2);
+                                Cv2.PutText(tempFrame, errorMsg, textOrg, font, fontScale, new Scalar(0, 0, 255), thickness, LineTypes.AntiAlias);
+
+                                // 推送至预览，使 UI 渲染显示
+                                _previewController.UpdateFrame(tempFrame, DateTime.Now);
+                            }
+
                             if (_continuousReadFailCount > 30)
                             {
                                 Logger.LogWarning($"摄像头 {Index} 连续读取失败超过 30 次，底层连接断开，尝试自动重新初始化...");
@@ -546,7 +678,12 @@ namespace camera
                             continue;
                         }
 
+                        bool wasConnectedInSuccess = _continuousReadFailCount <= 5;
                         _continuousReadFailCount = 0;
+                        if (wasConnectedInSuccess != (_continuousReadFailCount <= 5))
+                        {
+                            RaisePropertyChanged(nameof(IsConnected));
+                        }
 
                         // 兼容性事件通知
                         FrameChanged?.Invoke(tempFrame);
@@ -766,28 +903,62 @@ namespace camera
 
         public void ChangeCameraInfo()
         {
-            cap.Set(VideoCaptureProperties.FrameWidth, Width);
-            cap.Set(VideoCaptureProperties.FrameHeight, Height);
-            cap.Set(VideoCaptureProperties.Fps, Fps);
-
-            double actualWidth = cap.Get(VideoCaptureProperties.FrameWidth);
-            double actualHeight = cap.Get(VideoCaptureProperties.FrameHeight);
-            double actualFps = cap.Get(VideoCaptureProperties.Fps);
-            Debug.WriteLine($"设置的分辨率: {Width}x{Height}, 实际分辨率: {actualWidth}x{actualHeight}");
-            Debug.WriteLine($"设置的帧率: {Fps}, 实际帧率: {actualFps}");
-
-            if (cap.IsOpened())
+            lock (_lockObject)
             {
+                if (cap == null) return;
+                
+                Logger.LogInfo($"[CameraService #{Index}] 正在修改分辨率为 {Width}x{Height}...");
+                
+                // 停止采集循环并等待其结束
                 _isCapturing = false;
-                cap.Release();
-                cap = new VideoCapture(0);
-                if (!cap.IsOpened())
+                Thread.Sleep(200); 
+
+                try
                 {
-                    Debug.WriteLine("重新打开摄像头失败");
-                    return;
+                    if (cap.IsOpened())
+                    {
+                        cap.Release();
+                    }
+                    cap.Dispose();
                 }
-                _previewController.SetCameraFps(Fps);
-                RefreshFrame();
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"释放旧采集器异常: {ex.Message}");
+                }
+
+                // 重新创建 VideoCapture
+                try
+                {
+                    cap = new VideoCapture(Index);
+                    if (_preferredFormat == CaptureFormat.YUY2)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+                    else if (_preferredFormat == CaptureFormat.NV12)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
+                    else
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+
+                    cap.Set(VideoCaptureProperties.FrameWidth, Width);
+                    cap.Set(VideoCaptureProperties.FrameHeight, Height);
+                    cap.Set(VideoCaptureProperties.Fps, Fps);
+
+                    double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
+                    double actualH = cap.Get(VideoCaptureProperties.FrameHeight);
+                    double actualFps = cap.Get(VideoCaptureProperties.Fps);
+                    Logger.LogInfo($"[CameraService #{Index}] 重连配置: {actualW}x{actualH} @ {actualFps}fps");
+
+                    if (!cap.IsOpened())
+                    {
+                        Logger.LogError($"[CameraService #{Index}] 重新打开摄像头失败");
+                        return;
+                    }
+
+                    _previewController.SetCameraFps(Fps);
+                    RefreshFrame();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[CameraService #{Index}] 修改分辨率发生异常", ex);
+                }
             }
         }
 

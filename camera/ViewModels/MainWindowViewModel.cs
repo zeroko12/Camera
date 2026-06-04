@@ -3,7 +3,9 @@ using MaterialDesignColors;
 using Prism.Commands;
 using Prism.Mvvm;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
@@ -258,7 +260,80 @@ namespace camera.ViewModels
         public int MaxPreviewWidth
         {
             get { return _MaxPreviewWidth; }
-            set { SetProperty(ref _MaxPreviewWidth, value); OnMaxPreviewWidthChanged(); }
+            set { SetProperty(ref _MaxPreviewWidth, value); OnMaxPreviewWidthChanged(); RaisePropertyChanged(nameof(SelectedPreviewWidth)); }
+        }
+
+        public ObservableCollection<string> PreviewWidthOptions { get; } = new();
+
+        /// <summary>
+        /// 从所有摄像头的 SupportedResolutions 中提取宽度，构建预览宽度选项列表。
+        /// 格式与采集分辨率一致，如 "1920x1080"、"1280x720"。
+        /// </summary>
+        public void RefreshPreviewWidthOptions()
+        {
+            if (Application.Current == null) return;
+
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var allResolutions = new HashSet<string>();
+                foreach (var cam in Cameras)
+                {
+                    foreach (var res in cam.SupportedResolutions)
+                    {
+                        allResolutions.Add(res);
+                    }
+                }
+
+                PreviewWidthOptions.Clear();
+                // 按宽度降序排列
+                var sorted = allResolutions
+                    .Select(r => { var p = r.Split('x'); return (Label: r, Width: int.TryParse(p[0], out int w) ? w : 0); })
+                    .Where(x => x.Width > 0)
+                    .OrderByDescending(x => x.Width)
+                    .ToList();
+
+                foreach (var item in sorted)
+                {
+                    PreviewWidthOptions.Add(item.Label);
+                }
+
+                // 如果当前选中值不在列表中，自动选择最接近的
+                if (!string.IsNullOrEmpty(SelectedPreviewWidth) && !PreviewWidthOptions.Contains(SelectedPreviewWidth))
+                {
+                    RaisePropertyChanged(nameof(SelectedPreviewWidth));
+                }
+            });
+        }
+
+        public string SelectedPreviewWidth
+        {
+            get
+            {
+                // 找到宽度最接近 MaxPreviewWidth 的选项
+                string best = null;
+                int bestDiff = int.MaxValue;
+                foreach (var opt in PreviewWidthOptions)
+                {
+                    var parts = opt.Split('x');
+                    if (parts.Length >= 1 && int.TryParse(parts[0], out int w))
+                    {
+                        int diff = Math.Abs(w - _MaxPreviewWidth);
+                        if (diff < bestDiff) { bestDiff = diff; best = opt; }
+                    }
+                }
+                return best;
+            }
+            set
+            {
+                if (value != null)
+                {
+                    var parts = value.Split('x');
+                    if (parts.Length >= 1 && int.TryParse(parts[0], out int w))
+                    {
+                        MaxPreviewWidth = w;
+                    }
+                }
+            }
         }
 
         private void OnMaxPreviewWidthChanged()
@@ -346,8 +421,7 @@ namespace camera.ViewModels
         {
             init();
             LoadSettings();
-
-
+            InitializePeriodicTimer();
         }
 
 
@@ -396,6 +470,8 @@ namespace camera.ViewModels
                 MaxFps = (int)Cameras[0].Fps;
                 if (MaxFps <= 0) MaxFps = 30;
                 Logger.LogInfo($"摄像头最大帧率: {MaxFps}fps");
+                SelectedConfigCamera = Cameras[0];
+                RefreshPreviewWidthOptions();
             }
 
             if (Cameras.Count == 0)
@@ -477,14 +553,422 @@ namespace camera.ViewModels
         void ExecuteViewPlayback()
         {
             if (Cameras.Count == 0)
-                MessageBox.Show("未连接上摄像头");
-
-            string saveDirectory = Cameras[0].saveDirectory;
-            if (!string.IsNullOrEmpty(saveDirectory))
             {
-                Process.Start("explorer.exe", saveDirectory);
+                MessageBox.Show("当前未连接摄像头，无法查看回放。");
+                return;
+            }
+
+            IsPlaybackMode = true;
+            if (PlaybackSelectedCamera == null)
+            {
+                PlaybackSelectedCamera = Cameras[0];
+            }
+            LoadPlaybackFiles();
+        }
+
+        private DelegateCommand _backToMonitoringCommand;
+        public DelegateCommand BackToMonitoringCommand =>
+            _backToMonitoringCommand ?? (_backToMonitoringCommand = new DelegateCommand(() => IsPlaybackMode = false));
+
+        private DelegateCommand _openRecordingFolderCommand;
+        public DelegateCommand OpenRecordingFolderCommand =>
+            _openRecordingFolderCommand ?? (_openRecordingFolderCommand = new DelegateCommand(() =>
+            {
+                try
+                {
+                    string baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SavedVideos");
+                    if (!Directory.Exists(baseDir))
+                    {
+                        Directory.CreateDirectory(baseDir);
+                    }
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = baseDir,
+                        UseShellExecute = true
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"打开录像文件夹失败: {ex.Message}", ex);
+                }
+            }));
+
+        #region 回放功能相关的属性与命令
+
+        private bool _isPlaybackMode = false;
+        public bool IsPlaybackMode
+        {
+            get => _isPlaybackMode;
+            set
+            {
+                if (SetProperty(ref _isPlaybackMode, value))
+                {
+                    if (value)
+                    {
+                        foreach (var cam in Cameras)
+                        {
+                            cam.IsPreviewEnabled = false;
+                        }
+                    }
+                    else
+                    {
+                        foreach (var cam in Cameras)
+                        {
+                            cam.IsPreviewEnabled = true;
+                        }
+                        PlaybackUrl = null;
+                    }
+                }
             }
         }
+
+        private DateTime _playbackSelectedDate = DateTime.Today;
+        public DateTime PlaybackSelectedDate
+        {
+            get => _playbackSelectedDate;
+            set
+            {
+                if (SetProperty(ref _playbackSelectedDate, value))
+                {
+                    LoadPlaybackFiles();
+                }
+            }
+        }
+
+        private CameraService _playbackSelectedCamera;
+        public CameraService PlaybackSelectedCamera
+        {
+            get => _playbackSelectedCamera;
+            set
+            {
+                if (SetProperty(ref _playbackSelectedCamera, value))
+                {
+                    LoadPlaybackFiles();
+                }
+            }
+        }
+
+        private double _playbackSpeed = 1.0;
+        public double PlaybackSpeed
+        {
+            get => _playbackSpeed;
+            set => SetProperty(ref _playbackSpeed, value);
+        }
+
+        private string _playbackUrl;
+        public string PlaybackUrl
+        {
+            get => _playbackUrl;
+            set => SetProperty(ref _playbackUrl, value);
+        }
+
+        public ObservableCollection<PlaybackFileModel> PlaybackFiles { get; } = new();
+
+        public event Action<TimeSpan> PlaybackPositionRequest;
+
+        private DelegateCommand<double?> _timelineClickCommand;
+        public DelegateCommand<double?> TimelineClickCommand =>
+            _timelineClickCommand ?? (_timelineClickCommand = new DelegateCommand<double?>(ExecuteTimelineClickCommand));
+
+        private void ExecuteTimelineClickCommand(double? percent)
+        {
+            if (percent == null || PlaybackFiles.Count == 0) return;
+            double totalSecondsInDay = 24.0 * 3600.0;
+            double clickedSeconds = percent.Value * totalSecondsInDay;
+            TimeSpan clickedTime = TimeSpan.FromSeconds(clickedSeconds);
+
+            PlaybackFileModel targetFile = null;
+            foreach (var file in PlaybackFiles)
+            {
+                TimeSpan fileStart = file.StartTime.TimeOfDay;
+                TimeSpan fileEnd = file.EndTime.TimeOfDay;
+                if (clickedTime >= fileStart && clickedTime <= fileEnd)
+                {
+                    targetFile = file;
+                    break;
+                }
+            }
+
+            if (targetFile != null)
+            {
+                if (PlaybackUrl != targetFile.FilePath)
+                {
+                    PlaybackUrl = targetFile.FilePath;
+                }
+                TimeSpan offset = clickedTime - targetFile.StartTime.TimeOfDay;
+                PlaybackPositionRequest?.Invoke(offset);
+            }
+            else
+            {
+                PlaybackFileModel nextFile = null;
+                foreach (var file in PlaybackFiles)
+                {
+                    if (file.StartTime.TimeOfDay >= clickedTime)
+                    {
+                        if (nextFile == null || file.StartTime.TimeOfDay < nextFile.StartTime.TimeOfDay)
+                        {
+                            nextFile = file;
+                        }
+                    }
+                }
+                if (nextFile != null)
+                {
+                    PlaybackUrl = nextFile.FilePath;
+                    PlaybackPositionRequest?.Invoke(TimeSpan.Zero);
+                }
+            }
+        }
+
+        private DelegateCommand<string> _setPlaybackSpeedCommand;
+        public DelegateCommand<string> SetPlaybackSpeedCommand =>
+            _setPlaybackSpeedCommand ?? (_setPlaybackSpeedCommand = new DelegateCommand<string>(speedStr =>
+            {
+                if (double.TryParse(speedStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double speed))
+                    PlaybackSpeed = speed;
+            }));
+
+        private void LoadPlaybackFiles()
+        {
+            PlaybackFiles.Clear();
+            if (PlaybackSelectedCamera == null) return;
+
+            string camDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, PlaybackSelectedCamera.saveDirectory, PlaybackSelectedCamera.Index.ToString(), PlaybackSelectedDate.ToString("yyyyMMdd"));
+            if (!Directory.Exists(camDir))
+            {
+                RaisePropertyChanged(nameof(PlaybackFiles));
+                PlaybackUrl = null;
+                return;
+            }
+
+            var files = Directory.GetFiles(camDir, "*.mp4");
+            var list = new System.Collections.Generic.List<PlaybackFileModel>();
+            foreach (var file in files)
+            {
+                try
+                {
+                    string fileName = Path.GetFileNameWithoutExtension(file);
+                    var parts = fileName.Split('-');
+                    if (parts.Length == 3 && int.TryParse(parts[0], out int hh) && int.TryParse(parts[1], out int mm) && int.TryParse(parts[2], out int ss))
+                    {
+                        var startTime = new DateTime(PlaybackSelectedDate.Year, PlaybackSelectedDate.Month, PlaybackSelectedDate.Day, hh, mm, ss);
+                        TimeSpan duration = TimeSpan.FromMinutes(SaveInterval);
+                        try
+                        {
+                            using (var cap = new OpenCvSharp.VideoCapture(file))
+                            {
+                                if (cap.IsOpened())
+                                {
+                                    double fc = cap.Get(OpenCvSharp.VideoCaptureProperties.FrameCount);
+                                    double fps = cap.Get(OpenCvSharp.VideoCaptureProperties.Fps);
+                                    if (fps > 0 && fc > 0)
+                                    {
+                                        duration = TimeSpan.FromSeconds(fc / fps);
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+
+                        list.Add(new PlaybackFileModel
+                        {
+                            FilePath = file,
+                            StartTime = startTime,
+                            Duration = duration
+                        });
+                    }
+                }
+                catch { }
+            }
+
+            list.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
+            foreach (var item in list)
+            {
+                PlaybackFiles.Add(item);
+            }
+
+            RaisePropertyChanged(nameof(PlaybackFiles));
+
+            if (PlaybackFiles.Count > 0)
+            {
+                PlaybackUrl = PlaybackFiles[0].FilePath;
+            }
+            else
+            {
+                PlaybackUrl = null;
+            }
+        }
+
+        #endregion
+
+        #region 通道配置与状态
+
+        private CameraService _selectedConfigCamera;
+        public CameraService SelectedConfigCamera
+        {
+            get => _selectedConfigCamera;
+            set
+            {
+                if (SetProperty(ref _selectedConfigCamera, value))
+                {
+                    RaisePropertyChanged(nameof(IsGpuEncodingActive));
+                    RaisePropertyChanged(nameof(IsCpuEncodingActive));
+                    RaisePropertyChanged(nameof(IsEncodingInactive));
+                }
+            }
+        }
+
+        public bool IsGpuEncodingActive => SelectedConfigCamera != null && isSave && !SelectedConfigCamera.IsCodecDowngraded;
+        public bool IsCpuEncodingActive => SelectedConfigCamera != null && isSave && SelectedConfigCamera.IsCodecDowngraded;
+        public bool IsEncodingInactive => !isSave;
+
+        #endregion
+
+        #region 运维报警与定时器
+
+        private DispatcherTimer _periodicTimer;
+
+        private string _diskSpaceWarningText = "等待计算...";
+        public string DiskSpaceWarningText
+        {
+            get => _diskSpaceWarningText;
+            set => SetProperty(ref _diskSpaceWarningText, value);
+        }
+
+        private void InitializePeriodicTimer()
+        {
+            _periodicTimer = new DispatcherTimer();
+            _periodicTimer.Interval = TimeSpan.FromSeconds(10);
+            _periodicTimer.Tick += PeriodicTimer_Tick;
+            _periodicTimer.Start();
+            
+            // 立即执行一次
+            UpdateDiskRecordingStatus();
+            UpdateActiveCodecStatus();
+        }
+
+        private void PeriodicTimer_Tick(object sender, EventArgs e)
+        {
+            UpdateDiskRecordingStatus();
+            UpdateActiveCodecStatus();
+        }
+
+        private void UpdateDiskRecordingStatus()
+        {
+            try
+            {
+                double totalMbPerSec = 0.0;
+                double potentialMbPerSec = 0.0;
+                int activeSavingCamerasCount = 0;
+
+                foreach (var cam in Cameras)
+                {
+                    double w = cam.Width > 0 ? cam.Width : 1920;
+                    double h = cam.Height > 0 ? cam.Height : 1080;
+                    double fps = cam.RecordFps > 0 ? cam.RecordFps : 10;
+                    double pixelsPerSec = w * h * fps;
+                    
+                    double crfFactor = (51 - cam.Quality) / 21.0;
+                    if (crfFactor < 0.05) crfFactor = 0.05;
+                    
+                    double camMbPerSec = (pixelsPerSec / (1920.0 * 1080.0 * 10.0)) * 0.25 * crfFactor;
+                    
+                    potentialMbPerSec += camMbPerSec;
+                    if (isSave && cam.isSave)
+                    {
+                        totalMbPerSec += camMbPerSec;
+                        activeSavingCamerasCount++;
+                    }
+                }
+
+                string drive = Path.GetPathRoot(AppDomain.CurrentDomain.BaseDirectory);
+                DriveInfo driveInfo = new DriveInfo(drive);
+                double availableGB = driveInfo.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0);
+                double availableMB = driveInfo.AvailableFreeSpace / (1024.0 * 1024.0);
+
+                if (isSave && activeSavingCamerasCount > 0 && totalMbPerSec > 0)
+                {
+                    double hoursLeft = availableMB / (totalMbPerSec * 3600.0);
+                    DiskSpaceWarningText = $"磁盘剩余: {availableGB:F1} GB, 预计录制: {hoursLeft:F1} 小时";
+                }
+                else
+                {
+                    double hoursLeft = availableMB / (potentialMbPerSec * 3600.0);
+                    DiskSpaceWarningText = $"录像未开启 (开启后预计录制: {hoursLeft:F1} 小时)";
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"计算磁盘预计时间异常: {ex.Message}");
+                DiskSpaceWarningText = "磁盘计算异常";
+            }
+        }
+
+        private void UpdateActiveCodecStatus()
+        {
+            foreach (var cam in Cameras)
+            {
+                cam.UpdateActiveCodecStatus();
+            }
+            
+            RaisePropertyChanged(nameof(IsGpuEncodingActive));
+            RaisePropertyChanged(nameof(IsCpuEncodingActive));
+            RaisePropertyChanged(nameof(IsEncodingInactive));
+        }
+
+        public void OnDeviceChangeNotification()
+        {
+            Logger.LogInfo("检测到 USB 设备变动，正在执行设备状态检查...");
+            
+            foreach (var cam in Cameras)
+            {
+                if (cam.Index >= 0 && !cam.IsConnected)
+                {
+                    Logger.LogInfo($"尝试重新连接断开的摄像头 #{cam.Index}...");
+                    Task.Run(() => cam.ChangeCameraInfo());
+                }
+            }
+
+            int nextIndex = Cameras.Count;
+            Task.Run(() =>
+            {
+                while (nextIndex < 8)
+                {
+                    System.Threading.Thread.Sleep(600);
+                    var newCam = new CameraService();
+                    if (newCam.StartCapture(nextIndex))
+                    {
+                        Application.Current?.Dispatcher.Invoke(() =>
+                        {
+                            newCam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{nextIndex}_CustomText") ?? $"通道 {nextIndex}";
+                            newCam.OverlayTextSize = double.Parse(ConfigurationManager.GetSetting($"Camera_{nextIndex}_OverlayTextSize") ?? "0.3");
+                            string savedRes = ConfigurationManager.GetSetting($"Camera_{nextIndex}_Resolution");
+                            if (!string.IsNullOrEmpty(savedRes))
+                            {
+                                newCam.SelectedResolution = savedRes;
+                            }
+
+                            Cameras.Add(newCam);
+                            newCam.DiskSpaceLow += Camera_DiskSpaceLow;
+                            
+                            if (SelectedConfigCamera == null)
+                            {
+                                SelectedConfigCamera = newCam;
+                            }
+                        });
+                        Logger.LogInfo($"✓ 检测到新插入摄像头 #{nextIndex}，已自动添加到监控网格");
+                        RefreshPreviewWidthOptions();
+                        nextIndex++;
+                    }
+                    else
+                    {
+                        newCam.Dispose();
+                        break;
+                    }
+                }
+            });
+        }
+
+        #endregion
 
 
         #region 配置相关
@@ -527,6 +1011,17 @@ namespace camera.ViewModels
             Luminance = double.Parse(ConfigurationManager.GetSetting("Luminance") ?? "0.0");
             IsGrayHomogenization = bool.Parse(ConfigurationManager.GetSetting("IsGrayHomogenization") ?? "false");
 
+            foreach (var cam in Cameras)
+            {
+                cam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{cam.Index}_CustomText") ?? $"通道 {cam.Index}";
+                cam.OverlayTextSize = double.Parse(ConfigurationManager.GetSetting($"Camera_{cam.Index}_OverlayTextSize") ?? "0.3");
+                string savedRes = ConfigurationManager.GetSetting($"Camera_{cam.Index}_Resolution");
+                if (!string.IsNullOrEmpty(savedRes))
+                {
+                    cam.SelectedResolution = savedRes;
+                }
+            }
+
             // 探测根目录下可能存在的 LOGO 图片文件
             string possibleLogoPng = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.png");
             string possibleLogoJpg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.jpg");
@@ -568,6 +1063,13 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("Contrast", this.Contrast.ToString());
             ConfigurationManager.SaveSetting("Luminance", this.Luminance.ToString());
             ConfigurationManager.SaveSetting("IsGrayHomogenization", this.IsGrayHomogenization.ToString());
+
+            foreach (var cam in Cameras)
+            {
+                ConfigurationManager.SaveSetting($"Camera_{cam.Index}_CustomText", cam.CustomOverlayText ?? "");
+                ConfigurationManager.SaveSetting($"Camera_{cam.Index}_OverlayTextSize", cam.OverlayTextSize.ToString());
+                ConfigurationManager.SaveSetting($"Camera_{cam.Index}_Resolution", cam.SelectedResolution ?? "");
+            }
         }
 
         #endregion
@@ -591,6 +1093,12 @@ namespace camera.ViewModels
             {
                 try
                 {
+                    if (_periodicTimer != null)
+                    {
+                        _periodicTimer.Stop();
+                        _periodicTimer = null;
+                    }
+
                     // 取消所有事件订阅并释放所有 CameraService
                     if (Cameras != null)
                     {
@@ -620,5 +1128,13 @@ namespace camera.ViewModels
         }
 
         #endregion
+    }
+
+    public class PlaybackFileModel
+    {
+        public string FilePath { get; set; }
+        public DateTime StartTime { get; set; }
+        public TimeSpan Duration { get; set; }
+        public DateTime EndTime => StartTime + Duration;
     }
 }

@@ -55,6 +55,7 @@ namespace camera.Recording
         public bool IsPaused => _isPaused;
         public string CurrentOutputPath => _currentOutputPath;
         public DateTime RecordingStartTime => _recordingStartTime;
+        public string ActiveCodec => _encoder?.Codec ?? "None";
 
         public event EventHandler RecordingStarted;
         public event EventHandler RecordingStopped;

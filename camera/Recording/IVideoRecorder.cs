@@ -9,6 +9,7 @@ namespace camera.Recording
         bool IsPaused { get; }
         string CurrentOutputPath { get; }
         DateTime RecordingStartTime { get; }
+        string ActiveCodec { get; }
 
         event EventHandler RecordingStarted;
         event EventHandler RecordingStopped;
