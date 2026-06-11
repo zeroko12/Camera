@@ -28,6 +28,10 @@ namespace camera.Views
         private double OriginWidth = 900; // 设置宽度
         private double OriginHeight = 480; // 设置高度
 
+        private double _normalWidth = 900;
+        private double _normalHeight = 480;
+        private GridLength _normalRightColumnWidth = GridLength.Auto;
+
         private double AspectRatio = 12.0 / 9.0;
 
         public bool CanClickThrough { get; set; } = false;
@@ -57,6 +61,7 @@ namespace camera.Views
             AspectRatio = this.Width / this.Height;
 
             Loaded += MainWindow_Loaded;
+            StateChanged += MainWindow_StateChanged;
 
             // 移除以下行 
             //this.KeyDown += MainWindow_KeyDown;
@@ -480,6 +485,8 @@ namespace camera.Views
             // 直接应用新的尺寸，不需要额外的判断
             this.Width = newWidth;
             this.Height = newHeight;
+            _normalWidth = newWidth;
+            _normalHeight = newHeight;
         }
 
         private void ToggleMaximize()
@@ -531,6 +538,8 @@ namespace camera.Views
             // 设置新的宽度和高度
             this.Width = newWidth;
             this.Height = newHeight;
+            _normalWidth = newWidth;
+            _normalHeight = newHeight;
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
@@ -583,6 +592,10 @@ namespace camera.Views
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
         {
+            if (this.WindowState == WindowState.Maximized)
+            {
+                return;
+            }
             if (e.NewSize.Width / e.NewSize.Height > AspectRatio)
             {
                 this.Width = this.Height * AspectRatio;
@@ -590,6 +603,58 @@ namespace camera.Views
             else
             {
                 this.Height = this.Width / AspectRatio;
+            }
+        }
+
+        private void MainWindow_StateChanged(object sender, EventArgs e)
+        {
+            if (this.Content is Grid rootGrid)
+            {
+                if (this.WindowState == WindowState.Maximized)
+                {
+                    if (rootGrid.ColumnDefinitions.Count > 1)
+                    {
+                        _normalRightColumnWidth = rootGrid.ColumnDefinitions[1].Width;
+                        rootGrid.ColumnDefinitions[1].Width = new GridLength(0);
+                    }
+
+                    this.ClearValue(WidthProperty);
+                    this.ClearValue(HeightProperty);
+
+                    MainBorder.Margin = new Thickness(0);
+                    MainBorder.BorderThickness = new Thickness(0);
+                    MainBorder.Effect = null;
+
+                    if (MainBorder.Child is Border innerBorder)
+                    {
+                        innerBorder.CornerRadius = new CornerRadius(0);
+                    }
+
+                    TitleBar.Margin = new Thickness(0);
+                    WindowResizeGrip.Visibility = Visibility.Collapsed;
+                }
+                else if (this.WindowState == WindowState.Normal)
+                {
+                    if (rootGrid.ColumnDefinitions.Count > 1)
+                    {
+                        rootGrid.ColumnDefinitions[1].Width = _normalRightColumnWidth;
+                    }
+
+                    this.Width = _normalWidth;
+                    this.Height = _normalHeight;
+
+                    MainBorder.Margin = new Thickness(10, 2, 2, 10);
+                    MainBorder.BorderThickness = new Thickness(1);
+                    MainBorder.Effect = (System.Windows.Media.Effects.Effect)FindResource("EffectShadow3");
+
+                    if (MainBorder.Child is Border innerBorder)
+                    {
+                        innerBorder.CornerRadius = new CornerRadius(5);
+                    }
+
+                    TitleBar.Margin = new Thickness(10, 0, 0, 10);
+                    WindowResizeGrip.Visibility = Visibility.Visible;
+                }
             }
         }
 
@@ -673,14 +738,18 @@ namespace camera.Views
             this.Height = height;
             this.Left = left;
             this.Top = top;
+            this._normalWidth = width;
+            this._normalHeight = height;
         }
 
         private void SaveSettings()
         {
             ConfigurationManager.SaveSetting("CanClickThrough", CanClickThrough.ToString());
             ConfigurationManager.SaveSetting("Topmost", this.Topmost.ToString());
-            ConfigurationManager.SaveSetting("WindowWidth", this.Width.ToString());
-            ConfigurationManager.SaveSetting("WindowHeight", this.Height.ToString());
+            double widthToSave = this.WindowState == WindowState.Maximized ? _normalWidth : this.Width;
+            double heightToSave = this.WindowState == WindowState.Maximized ? _normalHeight : this.Height;
+            ConfigurationManager.SaveSetting("WindowWidth", widthToSave.ToString());
+            ConfigurationManager.SaveSetting("WindowHeight", heightToSave.ToString());
             ConfigurationManager.SaveSetting("WindowLeft", this.Left.ToString());
             ConfigurationManager.SaveSetting("WindowTop", this.Top.ToString());
             ConfigurationManager.SaveSetting("MinWindowWidth", this.MinWindowWidth.ToString());
