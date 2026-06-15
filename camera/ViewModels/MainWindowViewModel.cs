@@ -427,42 +427,52 @@ namespace camera.ViewModels
 
         void init()
         {
-            Logger.LogInfo("开始初始化摄像头...");
-            int index = 0;
+            Logger.LogInfo("开始初始化摄像头 (使用 DirectShow 设备枚举)...");
+            var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
 
-            while (true)
+            // 为了防止 USB 探测顺序颠倒，按 DevicePath 排序保证排序一致性
+            devices.Sort((a, b) => string.Compare(a.DevicePath, b.DevicePath, StringComparison.OrdinalIgnoreCase));
+
+            Logger.LogInfo($"物理探测完成，共找到 {devices.Count} 个接入的摄像头设备");
+
+            foreach (var device in devices)
             {
                 try
                 {
-                    // 分时初始化：防止 4 路摄像头同时请求 USB 带宽和 GPU 资源导致系统卡死
-                    if (index > 0)
-                    {
-                        System.Threading.Thread.Sleep(600);
-                    }
-
-                    Logger.LogInfo($"尝试打开摄像头 #{index}...");
+                    Logger.LogInfo($"开始初始化物理通道: #{device.Index} - {device.Name} (唯一路径: {device.DevicePath})");
                     var camera = new CameraService();
 
-                    if (!camera.StartCapture(index))
+                    // StartCapture 启动该相机，即使被占用也总是返回 true
+                    if (camera.StartCapture(device.Index))
                     {
-                        Logger.LogInfo($"摄像头 #{index} 打开失败或不存在，停止扫描");
-                        camera.Dispose(); // 释放失败的摄像头
-                        break;
-                    }
+                        camera.Name = device.Name; // 使用物理设备名称显示
+                        Cameras.Add(camera);
+                        camera.DiskSpaceLow += Camera_DiskSpaceLow;
 
-                    Cameras.Add(camera);
-                    camera.DiskSpaceLow += Camera_DiskSpaceLow;
-                    Logger.LogInfo($"✓ 摄像头 #{index} 初始化成功");
-                    index++;
+                        Logger.LogInfo($"✓ 摄像头 #{device.Index} ({device.Name}) 加载成功 (当前在线: {camera.IsConnected})");
+
+                        // 分时初始化：若成功开启，为防抢带宽延时 600ms，否则仅 50ms 
+                        if (camera.IsConnected)
+                        {
+                            System.Threading.Thread.Sleep(600);
+                        }
+                        else
+                        {
+                            System.Threading.Thread.Sleep(50);
+                        }
+                    }
+                    else
+                    {
+                        camera.Dispose();
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError($"初始化摄像头 #{index} 时发生异常", ex);
-                    break;
+                    Logger.LogError($"加载物理摄像头 #{device.Index} 时发生异常", ex);
                 }
             }
 
-            Logger.LogInfo($"摄像头初始化完成，共找到 {Cameras.Count} 个摄像头");
+            Logger.LogInfo($"摄像头初始化完成，共找到 {Cameras.Count} 个活动/占位摄像头");
 
             // 从第一个摄像头获取实际帧率作为滑块上限
             if (Cameras.Count > 0)

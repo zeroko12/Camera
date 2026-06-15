@@ -165,8 +165,9 @@ namespace camera.Views
 
         protected override void OnClosing(CancelEventArgs e)
         {
-            if (_isRealExit)
+            if (_isRealExit || !this.IsLoaded)
             {
+                _isRealExit = true;
                 if (_notifyIcon != null)
                 {
                     _notifyIcon.Visible = false;

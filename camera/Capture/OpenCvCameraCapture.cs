@@ -37,7 +37,7 @@ namespace camera.Capture
 
                 Logger.LogInfo("[OpenCV] 正在打开摄像头索引 " + index);
 
-                _cap = new VideoCapture(index);
+                _cap = new VideoCapture(index, VideoCaptureAPIs.DSHOW);
                 if (!_cap.IsOpened())
                 {
                     Logger.LogWarning("[OpenCV] 无法打开摄像头 " + index);

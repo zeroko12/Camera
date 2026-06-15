@@ -19,7 +19,7 @@ namespace camera
         #region 私有核心组件
 
         private VideoCapture cap;
-        private double FpsOrigin, WidthOrigin, HeightOrigin;
+        private double FpsOrigin = 15, WidthOrigin = 1280, HeightOrigin = 720;
         private volatile bool _isCapturing = false;
         private int _continuousReadFailCount = 0;
         private long _frameCount = 0;
@@ -541,7 +541,7 @@ namespace camera
             try
             {
                 Logger.LogInfo($"正在打开摄像头索引 {index}...");
-                cap = new VideoCapture(index);
+                cap = new VideoCapture(index, VideoCaptureAPIs.DSHOW);
 
                 bool formatSet = false;
                 if (!_formatChecked || _preferredFormat == CaptureFormat.YUY2)
@@ -575,15 +575,21 @@ namespace camera
                 }
                 _formatChecked = true;
 
-                if (!cap.IsOpened())
-                {
-                    Logger.LogWarning($"摄像头 {index} 无法打开（IsOpened 返回 false）");
-                    return false;
-                }
-
                 this.Index = index;
                 this.Name = $"通道 {index}";
                 _recordingOptions.CameraIndex = index;
+
+                if (!cap.IsOpened())
+                {
+                    Logger.LogWarning($"摄像头 {index} 无法打开（IsOpened 返回 false），将作为占位通道并在后台自动重试");
+                    Fps = 15;
+                    Width = 1280;
+                    Height = 720;
+                    _previewController.SetCameraFps(Fps);
+                    _continuousReadFailCount = 6; // 直接显示警告帧
+                    RefreshFrame();
+                    return true;
+                }
 
                 ShowVideoInfo();
                 Fps = FpsOrigin;
@@ -615,7 +621,7 @@ namespace camera
                     cap.Dispose();
                 }
 
-                cap = new VideoCapture(Index);
+                cap = new VideoCapture(Index, VideoCaptureAPIs.DSHOW);
                 if (_preferredFormat == CaptureFormat.YUY2)
                     cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
                 else if (_preferredFormat == CaptureFormat.NV12)
@@ -631,6 +637,24 @@ namespace camera
                 {
                     _continuousReadFailCount = 0;
                     Logger.LogInfo($"摄像头 {Index} 系统自恢复重置成功。");
+                    if (SupportedResolutions.Count == 0)
+                    {
+                        ShowVideoInfo();
+                        Fps = FpsOrigin;
+                        Width = WidthOrigin;
+                        Height = HeightOrigin;
+                        _previewController.SetCameraFps(Fps);
+                    }
+                    else
+                    {
+                        double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
+                        double actualH = cap.Get(VideoCaptureProperties.FrameHeight);
+                        if (actualW > 0 && actualH > 0)
+                        {
+                            Width = actualW;
+                            Height = actualH;
+                        }
+                    }
                 }
             }
             catch (Exception ex)
@@ -671,7 +695,9 @@ namespace camera
                                 // 生成并推送断开连接的警示帧
                                 tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
                                 tempFrame.SetTo(new Scalar(20, 20, 20)); // 暗灰底色
-                                string errorMsg = $"通道 {Index} - 设备已断开";
+                                string errorMsg = (cap == null || !cap.IsOpened())
+                                     ? $"通道 {Index} - 设备占用中或未就绪"
+                                     : $"通道 {Index} - 设备连接已断开";
                                 const HersheyFonts font = HersheyFonts.HersheySimplex;
                                 double fontScale = Math.Max(0.4, 0.6 * (Width / 640.0));
                                 int thickness = Math.Max(1, (int)(2 * (Width / 640.0)));
@@ -947,7 +973,7 @@ namespace camera
                 // 重新创建 VideoCapture
                 try
                 {
-                    cap = new VideoCapture(Index);
+                    cap = new VideoCapture(Index, VideoCaptureAPIs.DSHOW);
                     if (_preferredFormat == CaptureFormat.YUY2)
                         cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
                     else if (_preferredFormat == CaptureFormat.NV12)
@@ -968,6 +994,19 @@ namespace camera
                     {
                         Logger.LogError($"[CameraService #{Index}] 重新打开摄像头失败");
                         return;
+                    }
+
+                    if (actualW > 0 && actualH > 0)
+                    {
+                        Width = actualW;
+                        Height = actualH;
+                        
+                        string actualResStr = $"{(int)actualW}x{(int)actualH}";
+                        if (_selectedResolution != actualResStr)
+                        {
+                            _selectedResolution = actualResStr;
+                            RaisePropertyChanged(nameof(SelectedResolution));
+                        }
                     }
 
                     _previewController.SetCameraFps(Fps);
