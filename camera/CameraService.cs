@@ -148,6 +148,13 @@ namespace camera
             set => SetProperty(ref _Name, value);
         }
 
+        private string _devicePath = "";
+        public string DevicePath
+        {
+            get => _devicePath;
+            set => SetProperty(ref _devicePath, value);
+        }
+
         private int _Index = -1;
         public int Index
         {
@@ -639,6 +646,22 @@ namespace camera
         {
             try
             {
+                if (!string.IsNullOrEmpty(DevicePath))
+                {
+                    var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
+                    var match = devices.Find(d => d.DevicePath == DevicePath);
+                    if (match == null)
+                    {
+                        Logger.LogWarning($"[CameraService] 尝试自恢复重连摄像头 {Name}，但未在系统列表中找到匹配的物理设备，跳过重连尝试");
+                        return;
+                    }
+                    if (Index != match.Index)
+                    {
+                        Logger.LogInfo($"[CameraService] 摄像头 {Name} 索引自适应纠正: {Index} -> {match.Index}");
+                        Index = match.Index;
+                    }
+                }
+
                 if (cap != null)
                 {
                     if (cap.IsOpened())
@@ -707,7 +730,7 @@ namespace camera
                     try
                     {
                         tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
-                        if (!cap.Read(tempFrame) || tempFrame.Empty())
+                        if (cap == null || cap.IsDisposed || !cap.IsOpened() || !cap.Read(tempFrame) || tempFrame.Empty())
                         {
                             Infrastructure.MatPool.Return(tempFrame);
                             tempFrame = null;
@@ -729,8 +752,8 @@ namespace camera
                                     tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
                                     tempFrame.SetTo(new Scalar(20, 20, 20)); // 暗灰底色
                                     string errorMsg = (cap == null || !cap.IsOpened())
-                                         ? $"通道 {Index} - 设备占用中或未就绪"
-                                         : $"通道 {Index} - 设备连接已断开";
+                                         ? $"Channel {Index} - Device Occupied / Not Ready"
+                                         : $"Channel {Index} - Connection Disconnected";
                                     const HersheyFonts font = HersheyFonts.HersheySimplex;
                                     double fontScale = Math.Max(0.4, 0.6 * (Width / 640.0));
                                     int thickness = Math.Max(1, (int)(2 * (Width / 640.0)));
@@ -1036,6 +1059,25 @@ namespace camera
                 // 重新创建 VideoCapture
                 try
                 {
+                    if (!string.IsNullOrEmpty(DevicePath))
+                    {
+                        var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
+                        var match = devices.Find(d => d.DevicePath == DevicePath);
+                        if (match == null)
+                        {
+                            Logger.LogWarning($"[CameraService] 尝试修改摄像头 {Name} 分辨率或重载，但该物理设备已被移除，中止操作");
+                            _continuousReadFailCount = 6;
+                            RaisePropertyChanged(nameof(IsConnected));
+                            RefreshFrame();
+                            return;
+                        }
+                        if (Index != match.Index)
+                        {
+                            Logger.LogInfo($"[CameraService] 摄像头 {Name} 索引自适应纠正: {Index} -> {match.Index}");
+                            Index = match.Index;
+                        }
+                    }
+
                     cap = new VideoCapture(Index, VideoCaptureAPIs.DSHOW);
                     if (_preferredFormat == CaptureFormat.YUY2)
                         cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));

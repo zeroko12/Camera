@@ -446,6 +446,7 @@ namespace camera.ViewModels
                     if (camera.StartCapture(device.Index))
                     {
                         camera.Name = device.Name; // 使用物理设备名称显示
+                        camera.DevicePath = device.DevicePath; // 绑定唯一硬件路径
                         Cameras.Add(camera);
                         camera.DiskSpaceLow += Camera_DiskSpaceLow;
 
@@ -992,52 +993,109 @@ namespace camera.ViewModels
         public void OnDeviceChangeNotification()
         {
             Logger.LogInfo("检测到 USB 设备变动，正在执行设备状态检查...");
-            
-            foreach (var cam in Cameras)
-            {
-                if (cam.Index >= 0 && !cam.IsConnected)
-                {
-                    Logger.LogInfo($"尝试重新连接断开的摄像头 #{cam.Index}...");
-                    Task.Run(() => cam.ChangeCameraInfo());
-                }
-            }
 
-            int nextIndex = Cameras.Count;
+            // 在 UI 线程快速拷贝当前已有的 Camera 实例快照，避免多线程并发修改集合异常
+            List<CameraService> existingCamerasSnapshot = null;
+            Application.Current?.Dispatcher.Invoke(() =>
+            {
+                existingCamerasSnapshot = Cameras.ToList();
+            });
+
+            if (existingCamerasSnapshot == null) return;
+            
+            // 异步后台运行设备变动处理，防止阻塞 UI
             Task.Run(() =>
             {
-                while (nextIndex < 8)
+                try
                 {
-                    System.Threading.Thread.Sleep(600);
-                    var newCam = new CameraService();
-                    if (newCam.StartCapture(nextIndex))
+                    // 延迟 500ms 等待 OS 完成 USB 端口的重新挂载
+                    System.Threading.Thread.Sleep(500);
+
+                    var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
+                    // 按 DevicePath 排序保持与 init() 一致的策略
+                    devices.Sort((a, b) => string.Compare(a.DevicePath, b.DevicePath, StringComparison.OrdinalIgnoreCase));
+
+                    // 1. 检查和更新已有摄像头状态
+                    foreach (var cam in existingCamerasSnapshot)
                     {
-                        Application.Current?.Dispatcher.Invoke(() =>
+                        if (string.IsNullOrEmpty(cam.DevicePath)) continue;
+
+                        var match = devices.Find(d => d.DevicePath == cam.DevicePath);
+                        if (match != null)
                         {
-                            newCam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{nextIndex}_CustomText") ?? $"通道 {nextIndex}";
-                            newCam.OverlayTextSize = double.Parse(ConfigurationManager.GetSetting($"Camera_{nextIndex}_OverlayTextSize") ?? "0.3");
-                            string savedRes = ConfigurationManager.GetSetting($"Camera_{nextIndex}_Resolution");
-                            if (!string.IsNullOrEmpty(savedRes))
+                            // 物理设备在线，检查索引是否发生漂移
+                            if (cam.Index != match.Index)
                             {
-                                newCam.SelectedResolution = savedRes;
+                                Logger.LogInfo($"[OnDeviceChangeNotification] 摄像头 {cam.Name} 索引纠正: {cam.Index} -> {match.Index}");
+                                cam.Index = match.Index;
                             }
 
-                            Cameras.Add(newCam);
-                            newCam.DiskSpaceLow += Camera_DiskSpaceLow;
-                            
-                            if (SelectedConfigCamera == null)
+                            if (!cam.IsConnected)
                             {
-                                SelectedConfigCamera = newCam;
+                                Logger.LogInfo($"尝试自动恢复断开后重新插回的摄像头 {cam.Name} (索引: {cam.Index})...");
+                                Task.Run(() => cam.ChangeCameraInfo());
                             }
-                        });
-                        Logger.LogInfo($"✓ 检测到新插入摄像头 #{nextIndex}，已自动添加到监控网格");
-                        RefreshPreviewWidthOptions();
-                        nextIndex++;
+                        }
+                        else
+                        {
+                            Logger.LogWarning($"[OnDeviceChangeNotification] 摄像头 {cam.Name} (路径: {cam.DevicePath}) 处于离线状态");
+                        }
                     }
-                    else
+
+                    // 2. 检查是否有新插入的摄像头
+                    foreach (var device in devices)
                     {
-                        newCam.Dispose();
-                        break;
+                        bool exists = existingCamerasSnapshot.Any(c => c.DevicePath == device.DevicePath);
+
+                        if (!exists)
+                        {
+                            // 限制最多 8 路监控通道
+                            int currentCount = 0;
+                            Application.Current?.Dispatcher.Invoke(() =>
+                            {
+                                currentCount = Cameras.Count;
+                            });
+                            
+                            if (currentCount >= 8) break;
+
+                            Logger.LogInfo($"检测到全新接入的摄像头: {device.Name} (唯一路径: {device.DevicePath})，尝试添加...");
+                            var newCam = new CameraService();
+                            newCam.DevicePath = device.DevicePath;
+                            newCam.Name = device.Name;
+
+                            if (newCam.StartCapture(device.Index))
+                            {
+                                Application.Current?.Dispatcher.Invoke(() =>
+                                {
+                                    newCam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{device.Index}_CustomText") ?? device.Name;
+                                    newCam.OverlayTextSize = double.Parse(ConfigurationManager.GetSetting($"Camera_{device.Index}_OverlayTextSize") ?? "0.3");
+                                    string savedRes = ConfigurationManager.GetSetting($"Camera_{device.Index}_Resolution");
+                                    if (!string.IsNullOrEmpty(savedRes))
+                                    {
+                                        newCam.SelectedResolution = savedRes;
+                                    }
+
+                                    Cameras.Add(newCam);
+                                    newCam.DiskSpaceLow += Camera_DiskSpaceLow;
+
+                                    if (SelectedConfigCamera == null)
+                                    {
+                                        SelectedConfigCamera = newCam;
+                                    }
+                                });
+                                Logger.LogInfo($"✓ 全新接入的摄像头 {device.Name} 已成功加载并加入网格");
+                                RefreshPreviewWidthOptions();
+                            }
+                            else
+                            {
+                                newCam.Dispose();
+                            }
+                        }
                     }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError("自适应更新热拔插设备状态发生异常", ex);
                 }
             });
         }
