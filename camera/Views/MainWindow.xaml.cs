@@ -773,16 +773,22 @@ namespace camera.Views
 
         private void Play_Click(object sender, RoutedEventArgs e)
         {
+            var vm = this.DataContext as MainWindowViewModel;
+            if (vm != null) vm.PlaybackState = "Playing";
             PlaybackPlayer?.Play();
         }
 
         private void Pause_Click(object sender, RoutedEventArgs e)
         {
+            var vm = this.DataContext as MainWindowViewModel;
+            if (vm != null) vm.PlaybackState = "Paused";
             PlaybackPlayer?.Pause();
         }
 
         private void Stop_Click(object sender, RoutedEventArgs e)
         {
+            var vm = this.DataContext as MainWindowViewModel;
+            if (vm != null) vm.PlaybackState = "Stopped";
             PlaybackPlayer?.Stop();
         }
 
@@ -817,6 +823,7 @@ namespace camera.Views
                         PlaybackPlayer.Stop();
                         PlaybackPlayer.Source = null;
                     }
+                    vm.PlaybackState = "Stopped";
                 }
             }
             else if (e.PropertyName == nameof(MainWindowViewModel.PlaybackUrl))
@@ -827,12 +834,14 @@ namespace camera.Views
                     {
                         PlaybackPlayer.Source = null;
                         HideOrResetCursor();
+                        vm.PlaybackState = "Stopped";
                     }
                     else
                     {
                         PlaybackPlayer.Source = new Uri(vm.PlaybackUrl);
                         PlaybackPlayer.Play();
                         PlaybackPlayer.SpeedRatio = vm.PlaybackSpeed;
+                        vm.PlaybackState = "Playing";
                     }
                 }
             }
@@ -844,6 +853,23 @@ namespace camera.Views
             if (vm != null && PlaybackPlayer != null)
             {
                 PlaybackPlayer.SpeedRatio = vm.PlaybackSpeed;
+            }
+        }
+
+        private void PlaybackPlayer_MediaEnded(object sender, RoutedEventArgs e)
+        {
+            var vm = this.DataContext as MainWindowViewModel;
+            if (vm != null)
+            {
+                vm.PlayNextFile();
+                if (vm.PlaybackState == "Stopped")
+                {
+                    PlaybackPlayer?.Stop();
+                }
+            }
+            else
+            {
+                PlaybackPlayer?.Stop();
             }
         }
 

@@ -231,17 +231,55 @@
 
                         <!-- 通道选择 -->
                         <TextBlock Grid.Row="2" Text="选择监控通道" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,5" />
-                        <ListBox Grid.Row="3" ItemsSource="{Binding Cameras}" SelectedItem="{Binding PlaybackSelectedCamera, Mode=TwoWay}" DisplayMemberPath="Name" Background="Transparent" BorderThickness="0" SelectionMode="Single">
+                        <ListBox Grid.Row="3" ItemsSource="{Binding Cameras}" SelectedItem="{Binding PlaybackSelectedCamera, Mode=TwoWay}" Background="Transparent" BorderThickness="0" SelectionMode="Single">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                        <Setter Property="Foreground" Value="Black" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                        <Run Text="{Binding Name, Mode=OneWay}" />
+                                        <Run Text=" (" />
+                                        <Run Text="{Binding CustomOverlayText, Mode=OneWay}">
+                                            <Run.Style>
+                                                <Style TargetType="Run">
+                                                    <Setter Property="Foreground" Value="Gray" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                            <Setter Property="Foreground" Value="#555555" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Run.Style>
+                                        </Run>
+                                        <Run Text=")" />
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem">
                                     <Setter Property="Padding" Value="10,8" />
                                     <Setter Property="Margin" Value="0,2" />
                                     <Setter Property="BorderThickness" Value="1" />
                                     <Setter Property="BorderBrush" Value="Transparent" />
+                                    <Setter Property="ToolTip">
+                                        <Setter.Value>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Name, StringFormat='通道: {0}'}" FontWeight="Bold" />
+                                                <TextBlock Text="{Binding CustomOverlayText, StringFormat='自定义水印: {0}'}" />
+                                            </StackPanel>
+                                        </Setter.Value>
+                                    </Setter>
                                     <Style.Triggers>
                                         <Trigger Property="IsSelected" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource PrimaryBrush}" />
-                                            <Setter Property="Foreground" Value="White" />
                                         </Trigger>
                                     </Style.Triggers>
                                 </Style>
@@ -264,7 +302,8 @@
                             x:Name="PlaybackPlayer" 
                             LoadedBehavior="Manual" 
                             UnloadedBehavior="Stop"
-                            MediaOpened="PlaybackPlayer_MediaOpened" />
+                            MediaOpened="PlaybackPlayer_MediaOpened" 
+                            MediaEnded="PlaybackPlayer_MediaEnded" />
                     </Border>
 
                     <!-- 控制按钮栏 -->
@@ -277,20 +316,41 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0" Orientation="Horizontal">
-                                <Button Content="播放" Click="Play_Click" Style="{StaticResource ButtonPrimary.Small}" Margin="0,0,5,0" />
-                                <Button Content="暂停" Click="Pause_Click" Style="{StaticResource ButtonDefault.Small}" Margin="0,0,5,0" />
-                                <Button Content="停止" Click="Stop_Click" Style="{StaticResource ButtonDanger.Small}" />
+                                <Button Content="播放" Click="Play_Click" Style="{StaticResource ButtonPrimary.Small}" Margin="0,0,5,0" IsEnabled="{c:Binding 'PlaybackState != &quot;Playing&quot;'}" />
+                                <Button Content="暂停" Click="Pause_Click" Style="{StaticResource ButtonDefault.Small}" Margin="0,0,5,0" IsEnabled="{c:Binding 'PlaybackState == &quot;Playing&quot;'}" />
+                                <Button Content="停止" Click="Stop_Click" Style="{StaticResource ButtonDanger.Small}" IsEnabled="{c:Binding 'PlaybackState != &quot;Stopped&quot;'}" />
+                                
+                                <!-- 播放状态文字展示 -->
+                                <TextBlock FontWeight="Bold" Margin="15,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="已停止" />
+                                            <Setter Property="Foreground" Value="#7F8C8D" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding PlaybackState}" Value="Playing">
+                                                    <Setter Property="Text" Value="播放中" />
+                                                    <Setter Property="Foreground" Value="#27AE60" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding PlaybackState}" Value="Paused">
+                                                    <Setter Property="Text" Value="已暂停" />
+                                                    <Setter Property="Foreground" Value="#E67E22" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding PlaybackState}" Value="Stopped">
+                                                    <Setter Property="Text" Value="已停止" />
+                                                    <Setter Property="Foreground" Value="#7F8C8D" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </StackPanel>
 
                             <!-- 倍速控制 -->
-                            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="播放倍速:" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,10,0" />
-                                <hc:ButtonGroup>
-                                    <RadioButton Content="0.5x" Command="{Binding SetPlaybackSpeedCommand}" CommandParameter="0.5" IsChecked="{c:Binding 'PlaybackSpeed == 0.5', Mode=OneWay}" />
-                                    <RadioButton Content="1.0x" Command="{Binding SetPlaybackSpeedCommand}" CommandParameter="1.0" IsChecked="{c:Binding 'PlaybackSpeed == 1.0', Mode=OneWay}" />
-                                    <RadioButton Content="2.0x" Command="{Binding SetPlaybackSpeedCommand}" CommandParameter="2.0" IsChecked="{c:Binding 'PlaybackSpeed == 2.0', Mode=OneWay}" />
-                                    <RadioButton Content="4.0x" Command="{Binding SetPlaybackSpeedCommand}" CommandParameter="4.0" IsChecked="{c:Binding 'PlaybackSpeed == 4.0', Mode=OneWay}" />
-                                </hc:ButtonGroup>
+                                <Button Content="-" Command="{Binding SpeedDownCommand}" IsEnabled="{c:Binding 'PlaybackSpeed > 0.5'}" Style="{StaticResource ButtonDefault.Small}" Padding="8,2" Height="24" MinWidth="24" VerticalAlignment="Center" ToolTip="减速" />
+                                <TextBlock Text="{Binding PlaybackSpeed, StringFormat='{}{0:F1}x'}" FontWeight="Bold" Width="45" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryTextBrush}" Margin="5,0" />
+                                <Button Content="+" Command="{Binding SpeedUpCommand}" IsEnabled="{c:Binding 'PlaybackSpeed &lt; 32.0'}" Style="{StaticResource ButtonDefault.Small}" Padding="8,2" Height="24" MinWidth="24" VerticalAlignment="Center" ToolTip="加速" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -663,15 +723,15 @@
                                                 Margin="4"
                                                 HorizontalAlignment="Center"
                                                 FontSize="11"
-                                                ToolTip="仅影响UI预览画面的显示宽度，不影响录像质量。降低可减少CPU占用。">
-                                                预览显示宽度
+                                                ToolTip="仅影响UI预览画面的显示分辨率，不影响录像质量。降低可减少CPU占用。">
+                                                预览显示分辨率
                                             </TextBlock>
                                             <ComboBox
                                                 Margin="5"
                                                 Style="{StaticResource ComboBoxExtend}"
                                                 ItemsSource="{Binding PreviewWidthOptions}"
                                                 SelectedItem="{Binding SelectedPreviewWidth, Mode=TwoWay}"
-                                                ToolTip="UI预览画面的最大显示宽度，不影响录像分辨率" />
+                                                ToolTip="UI预览画面的显示分辨率，不影响录像分辨率" />
                                             <Separator />
                                             <TextBlock
                                                 Margin="4"

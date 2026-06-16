@@ -672,6 +672,13 @@ namespace camera.ViewModels
             set => SetProperty(ref _playbackUrl, value);
         }
 
+        private string _playbackState = "Stopped";
+        public string PlaybackState
+        {
+            get => _playbackState;
+            set => SetProperty(ref _playbackState, value);
+        }
+
         public ObservableCollection<PlaybackFileModel> PlaybackFiles { get; } = new();
 
         public event Action<TimeSpan> PlaybackPositionRequest;
@@ -729,6 +736,35 @@ namespace camera.ViewModels
             }
         }
 
+        public void PlayNextFile()
+        {
+            if (PlaybackFiles.Count == 0 || string.IsNullOrEmpty(PlaybackUrl))
+            {
+                PlaybackState = "Stopped";
+                return;
+            }
+
+            int currentIndex = -1;
+            for (int i = 0; i < PlaybackFiles.Count; i++)
+            {
+                if (PlaybackFiles[i].FilePath == PlaybackUrl)
+                {
+                    currentIndex = i;
+                    break;
+                }
+            }
+
+            if (currentIndex >= 0 && currentIndex + 1 < PlaybackFiles.Count)
+            {
+                PlaybackUrl = PlaybackFiles[currentIndex + 1].FilePath;
+                PlaybackState = "Playing";
+            }
+            else
+            {
+                PlaybackState = "Stopped";
+            }
+        }
+
         private DelegateCommand<string> _setPlaybackSpeedCommand;
         public DelegateCommand<string> SetPlaybackSpeedCommand =>
             _setPlaybackSpeedCommand ?? (_setPlaybackSpeedCommand = new DelegateCommand<string>(speedStr =>
@@ -736,6 +772,34 @@ namespace camera.ViewModels
                 if (double.TryParse(speedStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double speed))
                     PlaybackSpeed = speed;
             }));
+
+        private DelegateCommand _speedUpCommand;
+        public DelegateCommand SpeedUpCommand =>
+            _speedUpCommand ?? (_speedUpCommand = new DelegateCommand(ExecuteSpeedUpCommand));
+
+        private void ExecuteSpeedUpCommand()
+        {
+            if (PlaybackSpeed < 1.0) PlaybackSpeed = 1.0;
+            else if (PlaybackSpeed < 2.0) PlaybackSpeed = 2.0;
+            else if (PlaybackSpeed < 4.0) PlaybackSpeed = 4.0;
+            else if (PlaybackSpeed < 8.0) PlaybackSpeed = 8.0;
+            else if (PlaybackSpeed < 16.0) PlaybackSpeed = 16.0;
+            else if (PlaybackSpeed < 32.0) PlaybackSpeed = 32.0;
+        }
+
+        private DelegateCommand _speedDownCommand;
+        public DelegateCommand SpeedDownCommand =>
+            _speedDownCommand ?? (_speedDownCommand = new DelegateCommand(ExecuteSpeedDownCommand));
+
+        private void ExecuteSpeedDownCommand()
+        {
+            if (PlaybackSpeed > 16.0) PlaybackSpeed = 16.0;
+            else if (PlaybackSpeed > 8.0) PlaybackSpeed = 8.0;
+            else if (PlaybackSpeed > 4.0) PlaybackSpeed = 4.0;
+            else if (PlaybackSpeed > 2.0) PlaybackSpeed = 2.0;
+            else if (PlaybackSpeed > 1.0) PlaybackSpeed = 1.0;
+            else if (PlaybackSpeed > 0.5) PlaybackSpeed = 0.5;
+        }
 
         private void LoadPlaybackFiles()
         {
