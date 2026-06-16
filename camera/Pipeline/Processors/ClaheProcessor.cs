@@ -3,11 +3,14 @@ using System;
 
 namespace camera.Pipeline.Processors
 {
-    public class ClaheProcessor : IFrameProcessor
+    public class ClaheProcessor : IFrameProcessor, IDisposable
     {
         public string Name => "Clahe";
         public bool Enabled { get; set; } = false;
         public int Order { get; set; } = 10;
+
+        private CLAHE _clahe;
+        private readonly object _lock = new();
 
         public void Process(Mat frame, DateTime timestamp)
         {
@@ -16,9 +19,6 @@ namespace camera.Pipeline.Processors
             Mat output = null;
             Mat[] channels = null;
             Mat enhancedL = null;
-            Mat resizedL = null;
-            Mat blendedL = null;
-            CLAHE clahe = null;
 
             try
             {
@@ -31,20 +31,22 @@ namespace camera.Pipeline.Processors
                 channels = Cv2.Split(output);
 
                 // 对L通道应用CLAHE
-                clahe = Cv2.CreateCLAHE(3.0, new OpenCvSharp.Size(8, 8));
+                if (_clahe == null)
+                {
+                    lock (_lock)
+                    {
+                        if (_clahe == null)
+                        {
+                            _clahe = Cv2.CreateCLAHE(3.0, new OpenCvSharp.Size(8, 8));
+                        }
+                    }
+                }
+
                 enhancedL = Infrastructure.MatPool.Rent(channels[0].Width, channels[0].Height, channels[0].Type());
-                clahe.Apply(channels[0], enhancedL);
+                _clahe.Apply(channels[0], enhancedL);
 
-                // 创建一个与原始L通道大小相同的Mat
-                resizedL = Infrastructure.MatPool.Rent(channels[0].Width, channels[0].Height, channels[0].Type());
-                Cv2.Resize(enhancedL, resizedL, channels[0].Size(), 0, 0, InterpolationFlags.Linear);
-
-                // 使用双线性插值混合原始L通道和增强后的L通道
-                blendedL = Infrastructure.MatPool.Rent(channels[0].Width, channels[0].Height, channels[0].Type());
-                Cv2.AddWeighted(channels[0], 0.5, resizedL, 0.5, 0, blendedL);
-
-                // 将混合后的数据拷贝回 channels[0]
-                blendedL.CopyTo(channels[0]);
+                // 使用双线性插值混合原始L通道和增强后的L通道，直接原地更新到 channels[0]
+                Cv2.AddWeighted(channels[0], 0.5, enhancedL, 0.5, 0, channels[0]);
 
                 // 合并通道
                 Cv2.Merge(channels, output);
@@ -63,10 +65,16 @@ namespace camera.Pipeline.Processors
                     }
                 }
                 if (enhancedL != null) Infrastructure.MatPool.Return(enhancedL);
-                if (resizedL != null) Infrastructure.MatPool.Return(resizedL);
-                if (blendedL != null) Infrastructure.MatPool.Return(blendedL);
-                clahe?.Dispose();
                 if (output != null) Infrastructure.MatPool.Return(output);
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_lock)
+            {
+                _clahe?.Dispose();
+                _clahe = null;
             }
         }
     }

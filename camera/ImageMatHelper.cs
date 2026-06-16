@@ -1,5 +1,7 @@
 using OpenCvSharp;
 using System;
+using System.Collections.Concurrent;
+using System.Linq.Expressions;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -25,7 +27,8 @@ namespace camera
             obj.SetValue(SourceMatProperty, value);
         }
 
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, System.Reflection.PropertyInfo> _propertyCache = new();
+        private static readonly ConcurrentDictionary<Type, Func<DependencyObject, ImageSource>> _getters = new();
+        private static readonly ConcurrentDictionary<Type, Action<DependencyObject, ImageSource>> _setters = new();
 
         private static void OnSourceMatChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
@@ -40,18 +43,46 @@ namespace camera
             try
             {
                 var type = d.GetType();
-                if (!_propertyCache.TryGetValue(type, out var sourceProp))
+                
+                if (!_getters.TryGetValue(type, out var getter))
                 {
-                    sourceProp = type.GetProperty("Source");
-                    if (sourceProp != null && sourceProp.CanWrite)
+                    var prop = type.GetProperty("Source");
+                    if (prop != null && prop.CanRead)
                     {
-                        _propertyCache[type] = sourceProp;
+                        var targetExp = System.Linq.Expressions.Expression.Parameter(typeof(DependencyObject), "target");
+                        var castTarget = System.Linq.Expressions.Expression.Convert(targetExp, type);
+                        var getProp = System.Linq.Expressions.Expression.Property(castTarget, prop);
+                        var castResult = System.Linq.Expressions.Expression.Convert(getProp, typeof(ImageSource));
+                        getter = System.Linq.Expressions.Expression.Lambda<Func<DependencyObject, ImageSource>>(
+                            castResult, targetExp
+                        ).Compile();
+                        _getters[type] = getter;
                     }
                 }
 
-                if (sourceProp == null) return;
+                if (!_setters.TryGetValue(type, out var setter))
+                {
+                    var prop = type.GetProperty("Source");
+                    if (prop != null && prop.CanWrite)
+                    {
+                        var targetExp = System.Linq.Expressions.Expression.Parameter(typeof(DependencyObject), "target");
+                        var valueExp = System.Linq.Expressions.Expression.Parameter(typeof(ImageSource), "value");
+                        var castTarget = System.Linq.Expressions.Expression.Convert(targetExp, type);
+                        var castValue = System.Linq.Expressions.Expression.Convert(valueExp, prop.PropertyType);
+                        var assign = System.Linq.Expressions.Expression.Assign(
+                            System.Linq.Expressions.Expression.Property(castTarget, prop),
+                            castValue
+                        );
+                        setter = System.Linq.Expressions.Expression.Lambda<Action<DependencyObject, ImageSource>>(
+                            assign, targetExp, valueExp
+                        ).Compile();
+                        _setters[type] = setter;
+                    }
+                }
 
-                var wb = sourceProp.GetValue(d) as WriteableBitmap;
+                if (getter == null || setter == null) return;
+
+                var wb = getter(d) as WriteableBitmap;
                 
                 var format = mat.Channels() switch
                 {
@@ -70,7 +101,7 @@ namespace camera
                         96,
                         format,
                         null);
-                    sourceProp.SetValue(d, wb);
+                    setter(d, wb);
                 }
 
                 OpenCvSharp.WpfExtensions.WriteableBitmapConverter.ToWriteableBitmap(mat, wb);
@@ -84,19 +115,27 @@ namespace camera
         private static void SetSourceProperty(DependencyObject d, ImageSource value)
         {
             var type = d.GetType();
-            if (!_propertyCache.TryGetValue(type, out var sourceProp))
+            if (!_setters.TryGetValue(type, out var setter))
             {
-                sourceProp = type.GetProperty("Source");
-                if (sourceProp != null && sourceProp.CanWrite)
+                var prop = type.GetProperty("Source");
+                if (prop != null && prop.CanWrite)
                 {
-                    _propertyCache[type] = sourceProp;
+                    var targetExp = System.Linq.Expressions.Expression.Parameter(typeof(DependencyObject), "target");
+                    var valueExp = System.Linq.Expressions.Expression.Parameter(typeof(ImageSource), "value");
+                    var castTarget = System.Linq.Expressions.Expression.Convert(targetExp, type);
+                    var castValue = System.Linq.Expressions.Expression.Convert(valueExp, prop.PropertyType);
+                    var assign = System.Linq.Expressions.Expression.Assign(
+                        System.Linq.Expressions.Expression.Property(castTarget, prop),
+                        castValue
+                    );
+                    setter = System.Linq.Expressions.Expression.Lambda<Action<DependencyObject, ImageSource>>(
+                        assign, targetExp, valueExp
+                    ).Compile();
+                    _setters[type] = setter;
                 }
             }
 
-            if (sourceProp != null)
-            {
-                sourceProp.SetValue(d, value);
-            }
+            setter?.Invoke(d, value);
         }
     }
 }

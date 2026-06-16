@@ -23,6 +23,9 @@ namespace camera
         private volatile bool _isCapturing = false;
         private int _continuousReadFailCount = 0;
         private long _frameCount = 0;
+        // 管道节流计数器：每隔 N 帧才运行一次完整管道（水印叠加+录像）
+        private int _pipelineFrameCount = 0;
+        private DateTime _lastWarningFrameTime = DateTime.MinValue;
 
         private IFramePipeline _pipeline;
         private PreviewController _previewController;
@@ -636,6 +639,7 @@ namespace camera
                 if (cap.IsOpened())
                 {
                     _continuousReadFailCount = 0;
+                    _pipelineFrameCount = 0; // 重连成功，重置节流计数器
                     Logger.LogInfo($"摄像头 {Index} 系统自恢复重置成功。");
                     if (SupportedResolutions.Count == 0)
                     {
@@ -692,21 +696,27 @@ namespace camera
 
                             if (_continuousReadFailCount > 5)
                             {
-                                // 生成并推送断开连接的警示帧
-                                tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
-                                tempFrame.SetTo(new Scalar(20, 20, 20)); // 暗灰底色
-                                string errorMsg = (cap == null || !cap.IsOpened())
-                                     ? $"通道 {Index} - 设备占用中或未就绪"
-                                     : $"通道 {Index} - 设备连接已断开";
-                                const HersheyFonts font = HersheyFonts.HersheySimplex;
-                                double fontScale = Math.Max(0.4, 0.6 * (Width / 640.0));
-                                int thickness = Math.Max(1, (int)(2 * (Width / 640.0)));
-                                OpenCvSharp.Size textSize = Cv2.GetTextSize(errorMsg, font, fontScale, thickness, out _);
-                                var textOrg = new OpenCvSharp.Point((Width - textSize.Width) / 2, (Height + textSize.Height) / 2);
-                                Cv2.PutText(tempFrame, errorMsg, textOrg, font, fontScale, new Scalar(0, 0, 255), thickness, LineTypes.AntiAlias);
+                                DateTime now = DateTime.Now;
+                                if (now - _lastWarningFrameTime >= TimeSpan.FromSeconds(2.0))
+                                {
+                                    _lastWarningFrameTime = now;
 
-                                // 推送至预览，使 UI 渲染显示
-                                _previewController.UpdateFrame(tempFrame, DateTime.Now);
+                                    // 生成并推送断开连接的警示帧
+                                    tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
+                                    tempFrame.SetTo(new Scalar(20, 20, 20)); // 暗灰底色
+                                    string errorMsg = (cap == null || !cap.IsOpened())
+                                         ? $"通道 {Index} - 设备占用中或未就绪"
+                                         : $"通道 {Index} - 设备连接已断开";
+                                    const HersheyFonts font = HersheyFonts.HersheySimplex;
+                                    double fontScale = Math.Max(0.4, 0.6 * (Width / 640.0));
+                                    int thickness = Math.Max(1, (int)(2 * (Width / 640.0)));
+                                    OpenCvSharp.Size textSize = Cv2.GetTextSize(errorMsg, font, fontScale, thickness, out _);
+                                    var textOrg = new OpenCvSharp.Point((Width - textSize.Width) / 2, (Height + textSize.Height) / 2);
+                                    Cv2.PutText(tempFrame, errorMsg, textOrg, font, fontScale, new Scalar(0, 0, 255), thickness, LineTypes.AntiAlias);
+
+                                    // 推送至预览，使 UI 渲染显示
+                                    _previewController.UpdateFrame(tempFrame, DateTime.Now);
+                                }
                             }
 
                             if (_continuousReadFailCount > 30)
@@ -724,26 +734,47 @@ namespace camera
 
                         bool wasConnectedInSuccess = _continuousReadFailCount <= 5;
                         _continuousReadFailCount = 0;
+                        _lastWarningFrameTime = DateTime.MinValue;
                         if (wasConnectedInSuccess != (_continuousReadFailCount <= 5))
                         {
                             RaisePropertyChanged(nameof(IsConnected));
                         }
 
-                        // 兼容性事件通知
-                        FrameChanged?.Invoke(tempFrame);
 
-                        // 执行责任链图像处理管道
-                        _pipeline.Process(tempFrame, DateTime.Now);
+                        // ═══ 管道节流：只在"录制帧"位置运行完整管道 ═══
+                        // 相机以 Fps(如30fps)读帧，目的是清空USB缓冲区避免积压；
+                        // 但水印叠加、BGR→YUV、录像写入只需在 RecordFps(如10fps)频率执行，
+                        // 其余帧直接丢弃，节省约 66% 的管道 CPU 开销。
+                        int targetPipelineFps = Math.Max(1, RecordFps);
+                        int pipelineSkipInterval = Math.Max(1, (int)Math.Round(Fps / (double)targetPipelineFps));
 
-                        // 将处理后的图像传递给预览控制器
-                        _previewController.UpdateFrame(tempFrame, DateTime.Now);
-
-                        // 磁盘检查计数
-                        _frameCount++;
-                        if (_frameCount % 100 == 0)
+                        _pipelineFrameCount++;
+                        if (_pipelineFrameCount < pipelineSkipInterval)
                         {
-                            _frameCount = 0;
-                            CheckDiskSpace();
+                            // 丢弃此帧：仅用于清空 USB 缓冲区，不做任何处理
+                            Infrastructure.MatPool.Return(tempFrame);
+                            tempFrame = null;
+                        }
+                        else
+                        {
+                            _pipelineFrameCount = 0;
+
+                            // 兼容性事件通知
+                            FrameChanged?.Invoke(tempFrame);
+
+                            // 执行责任链图像处理管道（含水印叠加 + 录像写入）
+                            _pipeline.Process(tempFrame, DateTime.Now);
+
+                            // 将处理后的图像传递给预览控制器
+                            _previewController.UpdateFrame(tempFrame, DateTime.Now);
+
+                            // 磁盘检查计数
+                            _frameCount++;
+                            if (_frameCount % 100 == 0)
+                            {
+                                _frameCount = 0;
+                                CheckDiskSpace();
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -801,12 +832,19 @@ namespace camera
 
             _recordingOptions.Width = (int)Width;
             _recordingOptions.Height = (int)Height;
-            _recordingOptions.Fps = Fps;
+            // ⚠️ 关键: 这里设置的是"管道帧率"（= RecordFps），而非相机原始帧率(Fps)。
+            // 原因: RefreshFrame 中已按 RecordFps 对管道进行节流，
+            //       录制器实际接收到的帧率 ≈ RecordFps，而非 Fps。
+            // 若仍填 Fps(如30)，则录制器内部 skipInterval = 30/10 = 3，
+            // 会在节流后再跳 2/3 帧，导致实际录制帧率仅约 RecordFps/3 ≈ 3fps。
+            // 填 RecordFps(如10) 则 skipInterval = 10/10 = 1，接收什么就录什么。
+            _recordingOptions.Fps = Math.Max(1, RecordFps);
             _recordingOptions.RecordFps = RecordFps;
             _recordingOptions.SaveDirectory = saveDirectory;
             _recordingOptions.SegmentDuration = SaveInterval;
 
             _recorder.StartRecording(null, (int)Width, (int)Height, Fps, Quality);
+
         }
 
         private void StopSaving()
@@ -955,6 +993,7 @@ namespace camera
                 
                 // 停止采集循环并等待其结束
                 _isCapturing = false;
+                _pipelineFrameCount = 0; // 重置节流计数器，避免切换后残留旧计数
                 Thread.Sleep(200); 
 
                 try
@@ -1057,6 +1096,8 @@ namespace camera
 
                     _recorder?.Dispose();
                     _previewController?.Dispose();
+                    _claheProcessor?.Dispose();
+                    _timestampOverlayProcessor?.Dispose();
 
                     if (cap != null)
                     {

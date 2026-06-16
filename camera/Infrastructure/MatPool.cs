@@ -1,18 +1,43 @@
 using OpenCvSharp;
 using System.Collections.Concurrent;
+using System.Threading;
 
 namespace camera.Infrastructure
 {
     public static class MatPool
     {
-        // 规格键 (Width, Height, Type) -> 缓存队列
-        private static readonly ConcurrentDictionary<(int Width, int Height, MatType Type), ConcurrentQueue<Mat>> _pools = new();
+        private class PoolQueue
+        {
+            public readonly ConcurrentQueue<Mat> Queue = new();
+            private int _count = 0;
+
+            public int Count => Volatile.Read(ref _count);
+
+            public void Enqueue(Mat mat)
+            {
+                Queue.Enqueue(mat);
+                Interlocked.Increment(ref _count);
+            }
+
+            public bool TryDequeue(out Mat mat)
+            {
+                if (Queue.TryDequeue(out mat))
+                {
+                    Interlocked.Decrement(ref _count);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        // 规格键 (Width, Height, Type) -> 缓存队列包装类
+        private static readonly ConcurrentDictionary<(int Width, int Height, MatType Type), PoolQueue> _pools = new();
         private const int MaxPoolSizePerSpec = 8; // 每种分辨率规格最大缓存数量
 
         public static Mat Rent(int width, int height, MatType type)
         {
             var key = (width, height, type);
-            if (_pools.TryGetValue(key, out var queue) && queue.TryDequeue(out var mat))
+            if (_pools.TryGetValue(key, out var pool) && pool.TryDequeue(out var mat))
             {
                 if (mat != null && !mat.IsDisposed)
                 {
@@ -27,11 +52,11 @@ namespace camera.Infrastructure
             if (mat == null || mat.IsDisposed) return;
 
             var key = (mat.Width, mat.Height, mat.Type());
-            var queue = _pools.GetOrAdd(key, _ => new ConcurrentQueue<Mat>());
+            var pool = _pools.GetOrAdd(key, _ => new PoolQueue());
 
-            if (queue.Count < MaxPoolSizePerSpec)
+            if (pool.Count < MaxPoolSizePerSpec)
             {
-                queue.Enqueue(mat);
+                pool.Enqueue(mat);
             }
             else
             {

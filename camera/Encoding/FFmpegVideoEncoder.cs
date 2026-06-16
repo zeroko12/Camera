@@ -155,18 +155,25 @@ namespace camera.Encoding
         /// </summary>
         private string GetEncoderArguments(string codec, int quality)
         {
+            // quality 参数含义: 值越大 → 压缩率越高 → 文件越小 → 质量越低
+            // 用户界面范围通常为 20~51
+            // 对 QSV global_quality: 1(最优质)~51(最差)，直接映射
+            // 对 NVENC qp: 0(最优质)~51(最差)，直接映射  
+            // 对 libx264 CRF: 0(最优质)~51(最差)，直接映射
+            int clampedQuality = Math.Clamp(quality, 18, 51);
+
             return codec switch
             {
-                // NVIDIA NVENC — p1 预设（最快）+ 低延迟调优
-                "h264_nvenc" => $"-c:v h264_nvenc -preset p1 -tune ll",
-                // AMD AMF — 速度优先模式
-                "h264_amf" => $"-c:v h264_amf -quality speed",
-                // Intel QSV — 最快预设
-                "h264_qsv" => $"-c:v h264_qsv -preset veryfast",
+                // NVIDIA NVENC — p1 预设（最快）+ 低延迟调优 + CQP 质量控制
+                "h264_nvenc" => $"-c:v h264_nvenc -preset p1 -tune ll -rc constqp -qp {clampedQuality}",
+                // AMD AMF — 速度优先模式 + CQP 质量控制
+                "h264_amf" => $"-c:v h264_amf -quality speed -rc cqp -qp_i {clampedQuality} -qp_p {clampedQuality}",
+                // Intel QSV — 最快预设 + global_quality 控制（ICQ 模式，比 CQP 更高效）
+                "h264_qsv" => $"-c:v h264_qsv -preset veryfast -global_quality {clampedQuality} -look_ahead 0",
                 // libx264 — CPU 软件编码，ultrafast + zerolatency + CRF 控制质量
-                "libx264" => $"-c:v libx264 -preset ultrafast -tune zerolatency -crf {Math.Clamp(quality, 26, 31)}",
+                "libx264" => $"-c:v libx264 -preset ultrafast -tune zerolatency -crf {clampedQuality}",
                 // mpeg4 — 最终兜底方案（兼容性最好但质量/压缩率最差）
-                "mpeg4" => $"-c:v mpeg4 -threads 0 -q:v {Math.Clamp(quality / 6, 3, 6)}",
+                "mpeg4" => $"-c:v mpeg4 -threads 0 -q:v {Math.Clamp(quality / 6, 3, 8)}",
                 _ => $"-c:v mpeg4 -threads 0 -q:v 4"
             };
         }

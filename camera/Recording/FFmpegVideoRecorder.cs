@@ -114,15 +114,23 @@ namespace camera.Recording
 
         public void StopRecording()
         {
+            // ═══ 死锁修复：先在锁内设置停止标志，再在锁外执行阻塞清理 ═══
+            // 问题根因: 帧采集线程在 RecordFrame 中持锁 → 同时 StopRecording 在锁内
+            //           调用 Flush→WaitForExit(8000)，两者互相等待形成死锁。
+            // 修复方案: 锁内只修改状态标志（原子操作），锁外执行所有阻塞 I/O。
+            bool wasRecording;
             lock (_lock)
             {
-                if (!_isRecording) return;
-
-                Logger.LogInfo("[FFmpegRecorder] 停止录制");
-                _isRecording = false;
-                Cleanup();
-                RecordingStopped?.Invoke(this, EventArgs.Empty);
+                wasRecording = _isRecording;
+                if (!wasRecording) return;
+                _isRecording = false; // 让 RecordFrame 不再进入录制逻辑
+                _isPaused = false;
             }
+
+            // 锁外执行：Cleanup 内部会 WaitForExit(8000)，必须在锁外调用
+            Logger.LogInfo("[FFmpegRecorder] 停止录制");
+            CleanupOutsideLock();
+            RecordingStopped?.Invoke(this, EventArgs.Empty);
         }
 
         public void Pause()
@@ -324,8 +332,38 @@ namespace camera.Recording
             return Path.Combine(fullDir, timeStr);
         }
 
+
         /// <summary>
-        /// 清理编码器资源。通过 Flush 确保 FFmpeg 正常关闭以生成可播放的文件。
+        /// 清理编码器资源（必须在锁外调用）。
+        /// 通过 Flush 确保 FFmpeg 正常关闭以生成可播放的文件。
+        /// 注意：此方法会阻塞等待 FFmpeg 进程退出（最长 8 秒），
+        ///       因此严禁在持有 _lock 的情况下调用，否则会与 RecordFrame 线程形成死锁。
+        /// </summary>
+        private void CleanupOutsideLock()
+        {
+            IVideoEncoder encoderToDispose;
+            lock (_lock)
+            {
+                encoderToDispose = _encoder;
+                _encoder = null;          // 立即置空，让 RecordFrame 不再使用旧编码器
+                _isRecording = false;
+                _isPaused = false;
+            }
+
+            // 在锁外执行阻塞的 Flush（内部 WaitForExit 最长 8 秒）
+            if (encoderToDispose != null)
+            {
+                try
+                {
+                    encoderToDispose.Flush();
+                    encoderToDispose.Dispose();
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// 清理编码器资源（仅供已持锁的内部路径，如 RotateSegment 调用）。
         /// </summary>
         private void Cleanup()
         {
@@ -347,7 +385,14 @@ namespace camera.Recording
         {
             if (_isDisposed) return;
             _isDisposed = true;
-            StopRecording();
+            // 先设置停止标志
+            lock (_lock)
+            {
+                _isRecording = false;
+                _isPaused = false;
+            }
+            // 锁外清理
+            CleanupOutsideLock();
         }
     }
 }

@@ -58,7 +58,7 @@ namespace camera.Preview
                     double ratio = (double)targetWidth / frame.Width;
                     int newHeight = (int)(frame.Height * ratio);
                     previewFrame = Infrastructure.MatPool.Rent(targetWidth, newHeight, frame.Type());
-                    Cv2.Resize(frame, previewFrame, new Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Lanczos4);
+                    Cv2.Resize(frame, previewFrame, new Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Area);
                 }
                 else
                 {

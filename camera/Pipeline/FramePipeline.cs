@@ -9,32 +9,31 @@ namespace camera.Pipeline
     {
         private readonly List<IFrameProcessor> _processors = new();
         private readonly object _lock = new();
+        private volatile IFrameProcessor[] _cachedSortedProcessors = Array.Empty<IFrameProcessor>();
 
-        public IReadOnlyList<IFrameProcessor> Processors
-        {
-            get
-            {
-                lock (_lock)
-                {
-                    return _processors.OrderBy(p => p.Order).ToList();
-                }
-            }
-        }
+        public IReadOnlyList<IFrameProcessor> Processors => _cachedSortedProcessors;
 
         public IFramePipeline AddProcessor(IFrameProcessor processor)
         {
             lock (_lock)
             {
                 _processors.Add(processor);
+                RebuildCache();
             }
             return this;
         }
 
+        private void RebuildCache()
+        {
+            _cachedSortedProcessors = _processors.OrderBy(p => p.Order).ToArray();
+        }
+
         public void Process(Mat frame, DateTime timestamp)
         {
-            var activeProcessors = Processors;
-            foreach (var processor in activeProcessors)
+            var activeProcessors = _cachedSortedProcessors; // Thread-safe snapshot copy
+            for (int i = 0; i < activeProcessors.Length; i++)
             {
+                var processor = activeProcessors[i];
                 if (processor.Enabled)
                 {
                     try

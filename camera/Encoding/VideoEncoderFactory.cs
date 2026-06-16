@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text.RegularExpressions;
 
 namespace camera.Encoding
 {
@@ -40,7 +41,8 @@ namespace camera.Encoding
 
         private static int _maxNvencSessions = 2;
         private static int _maxAmfSessions = 3;
-        private static int _maxQsvSessions = 2;
+        // QSV 默认值在静态构造函数中通过 CPU 自动检测覆盖，此处 4 仅为字段声明的占位保守值
+        private static int _maxQsvSessions = 4;
 
         public static int MaxNvencSessions
         {
@@ -60,6 +62,11 @@ namespace camera.Encoding
 
         static VideoEncoderFactory()
         {
+            // 第一步：根据 CPU 型号自动推断 QSV 上限
+            _maxQsvSessions = DetectQsvSessionLimit();
+
+            // 第二步：App.config 显式配置可覆盖自动检测值
+            // 约定：MaxQsvSessions=0 表示「使用自动检测」，正数表示强制覆盖
             TryLoadEncoderLimitsFromConfig();
         }
 
@@ -68,14 +75,114 @@ namespace camera.Encoding
             try
             {
                 var config = System.Configuration.ConfigurationManager.AppSettings;
-                if (int.TryParse(config["MaxNvencSessions"], out int nvenc))
-                    _maxNvencSessions = Math.Max(1, nvenc);
-                if (int.TryParse(config["MaxAmfSessions"], out int amf))
-                    _maxAmfSessions = Math.Max(1, amf);
-                if (int.TryParse(config["MaxQsvSessions"], out int qsv))
-                    _maxQsvSessions = Math.Max(1, qsv);
+                if (int.TryParse(config["MaxNvencSessions"], out int nvenc) && nvenc > 0)
+                    _maxNvencSessions = nvenc;
+                if (int.TryParse(config["MaxAmfSessions"], out int amf) && amf > 0)
+                    _maxAmfSessions = amf;
+                // qsv=0 时保留自动检测结果；正数则强制覆盖
+                if (int.TryParse(config["MaxQsvSessions"], out int qsv) && qsv > 0)
+                    _maxQsvSessions = qsv;
             }
             catch { }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // QSV 并发上限自动检测
+        // 原理: 从注册表读取 CPU 型号字符串，按 Intel 代际规则推断
+        // 参考: Intel ARK 数据库各代 Quick Sync 能力说明
+        //       https://ark.intel.com (Quick Sync Video 支持矩阵)
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 自动检测当前 CPU 能支持的 QSV 最大并发会话数。
+        /// 通过注册表读取 CPU 品牌字符串，按 Intel 代际和产品线映射到合理上限。
+        /// 若检测失败，返回保守默认值 4。
+        /// </summary>
+        private static int DetectQsvSessionLimit()
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+                string cpuName = key?.GetValue("ProcessorNameString")?.ToString()?.Trim() ?? "";
+
+                if (!string.IsNullOrEmpty(cpuName))
+                {
+                    int limit = GetQsvLimitFromCpuName(cpuName);
+                    Logger.LogInfo($"[EncoderFactory] CPU: {cpuName} → QSV 并发上限自动设置为 {limit}");
+                    return limit;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[EncoderFactory] CPU 型号检测失败: {ex.Message}，使用保守默认值 4");
+            }
+            return 4;
+        }
+
+        /// <summary>
+        /// 根据 CPU 型号字符串推断 QSV 最大并发会话数。
+        /// 
+        /// 分类依据:
+        ///   Intel Arc 独显          → 16  (专用媒体引擎，会话数远高于 iGPU)
+        ///   Intel 12代+ / N100系列  → 8   (Alder/Raptor Lake，iGPU EU 大幅提升)
+        ///   Intel 11代 Tiger Lake   → 8   (Iris Xe iGPU，Gen12 媒体引擎)
+        ///   Intel 8-10代 UHD        → 6   (Gen9.5/Gen11 iGPU)
+        ///   Intel 6-7代 HD          → 4   (Gen9/Gen9.5 iGPU，限制较多)
+        ///   未知 Intel              → 4   (保守兜底)
+        ///   非 Intel (AMD/其他)     → 0   (不支持 QSV，完全不用)
+        /// </summary>
+        private static int GetQsvLimitFromCpuName(string cpuName)
+        {
+            // ── AMD / 非 Intel: 不支持 QSV ──────────────────────────
+            if (Regex.IsMatch(cpuName, @"\b(AMD|Ryzen|EPYC|Threadripper)\b", RegexOptions.IgnoreCase))
+                return 0;
+
+            // ── Intel Arc 独显 (通常不在 CPU 名称里，但以防万一) ─────
+            if (Regex.IsMatch(cpuName, @"\bArc\b", RegexOptions.IgnoreCase))
+                return 16;
+
+            // ── Intel Alder Lake-N 系列: N100 / N95 / N200 / N305 ──
+            // 特征: 型号为 N + 3位数字，与旧 N3xxx/N4xxx/N5xxx 区分
+            if (Regex.IsMatch(cpuName, @"\bN[1-9]\d{2}\b"))
+                return 8;
+
+            // ── Intel Core Ultra (Meteor Lake / Arrow Lake, 14代+) ──
+            if (Regex.IsMatch(cpuName, @"Core\s+Ultra", RegexOptions.IgnoreCase))
+                return 8;
+
+            // ── Intel Xeon (通常与同代 Core 相当，给保守值) ─────────
+            if (Regex.IsMatch(cpuName, @"\bXeon\b", RegexOptions.IgnoreCase))
+                return 6;
+
+            // ── Intel Core i3/i5/i7/i9 — 按代际解析 ─────────────────
+            // 格式示例:
+            //   12代: i7-12700H, i5-1235U  → 首位数字 ≥ 1 且总位数 ≥ 4
+            //   11代: i7-1165G7, i5-11400  → 首位为 1, 且第2位为1
+            //   10代: i7-10510U, i5-10400  → 首位为 1, 第2位为0
+            //   8-9代: i7-8750H, i5-9600K  → 首位为 8 或 9
+            //   6-7代: i7-6700K, i5-7400   → 首位为 6 或 7
+            var m = Regex.Match(cpuName, @"i[3579]-?(\d)(\d{3,4})");
+            if (m.Success && int.TryParse(m.Groups[1].Value, out int firstDigit))
+            {
+                // 4位型号，首位≥2 → 12代及以上 (如 i7-12700, i5-1235U 首位1但后3位≥200)
+                // 更严格判断：取完整4位数字
+                string fullNum = m.Groups[1].Value + m.Groups[2].Value;
+                if (int.TryParse(fullNum, out int modelNum))
+                {
+                    if (modelNum >= 1200) return 8; // 12代+
+                    if (modelNum >= 1100) return 8; // 11代
+                    if (modelNum >= 1000) return 6; // 10代
+                    if (modelNum >= 800)  return 6; // 8-9代
+                    if (modelNum >= 600)  return 4; // 6-7代
+                }
+                // 3位型号 (老一代, 如 i7-870)
+                if (firstDigit <= 5) return 4;
+            }
+
+            // ── 兜底: 未知 Intel 型号，保守返回 4 ─────────────────────
+            Logger.LogInfo($"[EncoderFactory] 未能识别 CPU 代际，QSV 使用保守值 4");
+            return 4;
         }
 
         // ═══════════════════════════════════════════════════════════
