@@ -289,13 +289,7 @@ namespace camera
                     {
                         Width = w;
                         Height = h;
-                        ChangeCameraInfo();
-
-                        // 实时保存分辨率配置，防止重置或关闭未保存
-                        if (Index >= 0)
-                        {
-                            ConfigurationManager.SaveSetting($"Camera_{Index}_Resolution", value);
-                        }
+                        System.Threading.Tasks.Task.Run(() => ChangeCameraInfo());
                     }
                 }
             }
@@ -533,10 +527,42 @@ namespace camera
             FpsOrigin = bestFps;
             WidthOrigin = bestWidth;
             HeightOrigin = bestHeight;
-            _selectedResolution = $"{bestWidth}x{bestHeight}";
+
+            // 读取已保存的分辨率配置，如果在支持的列表中，则优先应用
+            string savedRes = ConfigurationManager.GetSetting($"Camera_{Index}_Resolution");
+            bool appliedSavedRes = false;
+            if (!string.IsNullOrEmpty(savedRes))
+            {
+                var parts = savedRes.Split('x');
+                if (parts.Length == 2 && double.TryParse(parts[0], out double w) && double.TryParse(parts[1], out double h))
+                {
+                    string resStr = $"{(int)w}x{(int)h}";
+                    if (SupportedResolutions.Contains(resStr))
+                    {
+                        Width = w;
+                        Height = h;
+                        _selectedResolution = resStr;
+                        appliedSavedRes = true;
+                        Logger.LogInfo($"[CameraService #{Index}] 启动时成功加载并应用已保存分辨率: {resStr}");
+                    }
+                }
+            }
+
+            if (!appliedSavedRes)
+            {
+                Width = bestWidth;
+                Height = bestHeight;
+                _selectedResolution = $"{bestWidth}x{bestHeight}";
+                Logger.LogInfo($"[CameraService #{Index}] 未发现有效已保存分辨率，默认使用最大分辨率: {bestWidth}x{bestHeight}");
+            }
+
             RaisePropertyChanged(nameof(SelectedResolution));
 
-            Logger.LogInfo($"最终摄像头配置: {WidthOrigin}x{HeightOrigin} @ {FpsOrigin}fps");
+            // 将摄像头设置回最终确定的分辨率（避免保留探测循环最后一项的值）
+            cap.Set(VideoCaptureProperties.FrameWidth, Width);
+            cap.Set(VideoCaptureProperties.FrameHeight, Height);
+
+            Logger.LogInfo($"[CameraService #{Index}] 最终初始化摄像头配置: {Width}x{Height} @ {FpsOrigin}fps");
         }
 
         public bool StartCapture(int index = 0)
@@ -596,8 +622,6 @@ namespace camera
 
                 ShowVideoInfo();
                 Fps = FpsOrigin;
-                Width = WidthOrigin;
-                Height = HeightOrigin;
 
                 _previewController.SetCameraFps(Fps);
 
@@ -1020,9 +1044,20 @@ namespace camera
                     else
                         cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
 
+                    Thread.Sleep(50);
+
                     cap.Set(VideoCaptureProperties.FrameWidth, Width);
                     cap.Set(VideoCaptureProperties.FrameHeight, Height);
                     cap.Set(VideoCaptureProperties.Fps, Fps);
+
+                    // 强行读取一帧哑帧驱动 DirectShow 内部的 Pin 协商与缓冲区重分配
+                    if (cap.IsOpened())
+                    {
+                        using (Mat dummy = new Mat())
+                        {
+                            cap.Read(dummy);
+                        }
+                    }
 
                     double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
                     double actualH = cap.Get(VideoCaptureProperties.FrameHeight);
@@ -1041,6 +1076,13 @@ namespace camera
                         Height = actualH;
                         
                         string actualResStr = $"{(int)actualW}x{(int)actualH}";
+
+                        // 仅当确定此分辨率被硬件驱动成功应用时，才实时保存配置
+                        if (Index >= 0)
+                        {
+                            ConfigurationManager.SaveSetting($"Camera_{Index}_Resolution", actualResStr);
+                        }
+
                         if (_selectedResolution != actualResStr)
                         {
                             _selectedResolution = actualResStr;
