@@ -576,22 +576,6 @@
                                                     infrastructure:InputBehavior.UpdateOnEnter="True" />
                                             </UniformGrid>
                                             <Separator />
-                                            <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11">
-                                                录制帧率
-                                            </TextBlock>
-                                            <Slider
-                                                hc:TipElement.Placement="Top"
-                                                hc:TipElement.Visibility="Visible"
-                                                IsSnapToTickEnabled="True"
-                                                Maximum="{Binding MaxFps}"
-                                                Minimum="1"
-                                                TickFrequency="1"
-                                                ToolTip="录制帧率，越低越省CPU，监控15fps足够"
-                                                Value="{Binding RecordFps}" />
-                                            <Separator />
                                             <Button
                                                 Margin="5"
                                                 Command="{Binding ViewPlayback}"
@@ -884,6 +868,27 @@
                                                                 SelectedItem="{Binding SelectedResolution, Mode=TwoWay}"
                                                                 Style="{StaticResource ComboBoxExtend}"
                                                                 Margin="0,0,0,3" />
+                                                            
+                                                            <TextBlock Text="录制分辨率:" FontSize="11" Margin="0,2,0,2" ToolTip="保存的视频文件分辨率，低于采集分辨率时会自动缩放以节省空间"/>
+                                                            <ComboBox
+                                                                ItemsSource="{Binding SupportedRecordResolutions}"
+                                                                SelectedItem="{Binding SelectedRecordResolution, Mode=TwoWay}"
+                                                                Style="{StaticResource ComboBoxExtend}"
+                                                                Margin="0,0,0,3" />
+                                                            
+                                                            <Separator Margin="0,2,0,5" />
+                                                            
+                                                            <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                                                                <TextBlock Text="录制帧率:" FontSize="11"/>
+                                                                <TextBlock Text="{Binding RecordFps}" FontSize="11" Foreground="{DynamicResource PrimaryBrush}" Margin="5,0,0,0"/>
+                                                            </StackPanel>
+                                                            <Slider
+                                                                Minimum="1"
+                                                                Maximum="{Binding Fps}"
+                                                                TickFrequency="1"
+                                                                IsSnapToTickEnabled="True"
+                                                                Value="{Binding RecordFps, Mode=TwoWay}"
+                                                                ToolTip="录制帧率，越低越省CPU和存储空间" />
                                                             
                                                             <TextBlock Text="当前采集:" FontSize="10" Foreground="Gray"/>
                                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">

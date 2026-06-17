@@ -61,11 +61,11 @@ namespace camera.Infrastructure
             {
                 if ((bool)e.NewValue)
                 {
-                    element.KeyDown += Element_KeyDown;
+                    element.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(Element_KeyDown), true);
                 }
                 else
                 {
-                    element.KeyDown -= Element_KeyDown;
+                    element.RemoveHandler(UIElement.KeyDownEvent, new KeyEventHandler(Element_KeyDown));
                 }
             }
         }
@@ -78,11 +78,11 @@ namespace camera.Infrastructure
                 {
                     if (e.NewValue != null && e.OldValue == null)
                     {
-                        element.KeyDown += Element_KeyDown;
+                        element.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(Element_KeyDown), true);
                     }
                     else if (e.NewValue == null && e.OldValue != null)
                     {
-                        element.KeyDown -= Element_KeyDown;
+                        element.RemoveHandler(UIElement.KeyDownEvent, new KeyEventHandler(Element_KeyDown));
                     }
                 }
             }

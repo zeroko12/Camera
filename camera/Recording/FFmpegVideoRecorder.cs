@@ -262,7 +262,7 @@ namespace camera.Recording
                 // 使用新路径重新拉起，避免损坏已有视频文件
                 _currentOutputPath = GenerateOutputPath();
                 _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                    frame.Width, frame.Height, _options.RecordFps, CurrentQuality, _currentOutputPath, _ffmpegPath);
+                    _options.Width, _options.Height, _options.RecordFps, CurrentQuality, _currentOutputPath, _ffmpegPath);
 
                 if (_encoder != null && _encoder.IsInitialized)
                 {
@@ -312,18 +312,28 @@ namespace camera.Recording
         {
             if (_encoder == null) return;
 
-            // 缓存参数（Dispose 后不可访问）
-            int width = _encoder.Width;
-            int height = _encoder.Height;
-
             Logger.LogInfo($"[FFmpegRecorder] 分段切换: 关闭 {_currentOutputPath}");
             _encoder.Flush();
             _encoder.Dispose();
 
+            // 如果本分段没有写入任何有效帧，则自动清理删除该空视频文件
+            if (_framesWritten == 0 && !string.IsNullOrEmpty(_currentOutputPath) && File.Exists(_currentOutputPath))
+            {
+                try
+                {
+                    File.Delete(_currentOutputPath);
+                    Logger.LogInfo($"[FFmpegRecorder] 自动清理无数据分段空文件: {_currentOutputPath}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"[FFmpegRecorder] 无法清理删除空视频文件: {ex.Message}");
+                }
+            }
+
             string newPath = GenerateOutputPath();
             Logger.LogInfo($"[FFmpegRecorder] 分段切换: 创建 {newPath}");
             _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                width, height, _options.RecordFps, CurrentQuality, newPath, _ffmpegPath);
+                _options.Width, _options.Height, _options.RecordFps, CurrentQuality, newPath, _ffmpegPath);
             _currentOutputPath = newPath;
             _framesWritten = 0;
         }
@@ -360,12 +370,17 @@ namespace camera.Recording
         private void CleanupOutsideLock()
         {
             IVideoEncoder encoderToDispose;
+            string outputPathToDelete = null;
             lock (_lock)
             {
                 encoderToDispose = _encoder;
                 _encoder = null;          // 立即置空，让 RecordFrame 不再使用旧编码器
                 _isRecording = false;
                 _isPaused = false;
+                if (_framesWritten == 0)
+                {
+                    outputPathToDelete = _currentOutputPath;
+                }
             }
 
             // 在锁外执行阻塞的 Flush（内部 WaitForExit 最长 8 秒）
@@ -378,6 +393,20 @@ namespace camera.Recording
                 }
                 catch { }
             }
+
+            // 删除空文件
+            if (!string.IsNullOrEmpty(outputPathToDelete) && File.Exists(outputPathToDelete))
+            {
+                try
+                {
+                    File.Delete(outputPathToDelete);
+                    Logger.LogInfo($"[FFmpegRecorder] 自动清理无数据空文件: {outputPathToDelete}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"[FFmpegRecorder] 无法清理删除空视频文件: {ex.Message}");
+                }
+            }
         }
 
         /// <summary>
@@ -385,6 +414,7 @@ namespace camera.Recording
         /// </summary>
         private void Cleanup()
         {
+            string outputPathToDelete = null;
             if (_encoder != null)
             {
                 try
@@ -394,9 +424,26 @@ namespace camera.Recording
                 }
                 catch { }
                 _encoder = null;
+                if (_framesWritten == 0)
+                {
+                    outputPathToDelete = _currentOutputPath;
+                }
             }
             _isRecording = false;
             _isPaused = false;
+
+            if (!string.IsNullOrEmpty(outputPathToDelete) && File.Exists(outputPathToDelete))
+            {
+                try
+                {
+                    File.Delete(outputPathToDelete);
+                    Logger.LogInfo($"[FFmpegRecorder] 自动清理无数据空文件: {outputPathToDelete}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"[FFmpegRecorder] 无法清理删除空视频文件: {ex.Message}");
+                }
+            }
         }
 
         public void Dispose()

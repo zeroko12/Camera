@@ -250,10 +250,7 @@ namespace camera.ViewModels
 
         private void OnRecordFpsChanged()
         {
-            foreach (var camera in Cameras)
-            {
-                camera.RecordFps = RecordFps;
-            }
+            // 移到通道配置，不再全局覆盖各个相机的独立配置项
         }
 
         private int _MaxPreviewWidth = 640;
@@ -1074,6 +1071,16 @@ namespace camera.ViewModels
                                     {
                                         newCam.SelectedResolution = savedRes;
                                     }
+                                    string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{device.Index}_RecordResolution");
+                                    if (!string.IsNullOrEmpty(savedRecordRes))
+                                    {
+                                        newCam.SelectedRecordResolution = savedRecordRes;
+                                    }
+                                    string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{device.Index}_RecordFps");
+                                    if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
+                                    {
+                                        newCam.RecordFps = rfps;
+                                    }
 
                                     Cameras.Add(newCam);
                                     newCam.DiskSpaceLow += Camera_DiskSpaceLow;
@@ -1152,6 +1159,16 @@ namespace camera.ViewModels
                 {
                     cam.SelectedResolution = savedRes;
                 }
+                string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{cam.Index}_RecordResolution");
+                if (!string.IsNullOrEmpty(savedRecordRes))
+                {
+                    cam.SelectedRecordResolution = savedRecordRes;
+                }
+                string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{cam.Index}_RecordFps");
+                if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
+                {
+                    cam.RecordFps = rfps;
+                }
             }
 
             // 探测根目录下可能存在的 LOGO 图片文件
@@ -1198,9 +1215,11 @@ namespace camera.ViewModels
 
             foreach (var cam in Cameras)
             {
-                ConfigurationManager.SaveSetting($"Camera_{cam.Index}_CustomText", cam.CustomOverlayText ?? "");
-                ConfigurationManager.SaveSetting($"Camera_{cam.Index}_OverlayTextSize", cam.OverlayTextSize.ToString());
-                ConfigurationManager.SaveSetting($"Camera_{cam.Index}_Resolution", cam.SelectedResolution ?? "");
+                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_CustomText", cam.CustomOverlayText ?? "");
+                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_OverlayTextSize", cam.OverlayTextSize.ToString());
+                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_Resolution", cam.SelectedResolution ?? "");
+                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_RecordResolution", cam.SelectedRecordResolution ?? "与采集分辨率一致");
+                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_RecordFps", cam.RecordFps.ToString());
             }
         }
 

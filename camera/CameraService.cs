@@ -93,6 +93,16 @@ namespace camera
                 {
                     if (_recordingOptions != null)
                         _recordingOptions.RecordFps = clamped;
+
+                    if (Index >= 0)
+                    {
+                        ConfigurationManager.SaveSetting($"Camera_{Index}_RecordFps", clamped.ToString());
+                    }
+
+                    if (isSave)
+                    {
+                        System.Threading.Tasks.Task.Run(() => RestartSaving());
+                    }
                 }
             }
         }
@@ -289,6 +299,44 @@ namespace camera
         {
             get => _supportedResolutions;
             set => SetProperty(ref _supportedResolutions, value);
+        }
+
+        private System.Collections.ObjectModel.ObservableCollection<string> _supportedRecordResolutions = new();
+        public System.Collections.ObjectModel.ObservableCollection<string> SupportedRecordResolutions
+        {
+            get => _supportedRecordResolutions;
+            set => SetProperty(ref _supportedRecordResolutions, value);
+        }
+
+        private string _selectedRecordResolution = "与采集分辨率一致";
+        public string SelectedRecordResolution
+        {
+            get => _selectedRecordResolution;
+            set
+            {
+                if (SetProperty(ref _selectedRecordResolution, value) && !string.IsNullOrEmpty(value))
+                {
+                    if (Index >= 0)
+                    {
+                        ConfigurationManager.SaveSetting($"Camera_{Index}_RecordResolution", value);
+                    }
+                    if (isSave)
+                    {
+                        System.Threading.Tasks.Task.Run(() => RestartSaving());
+                    }
+                }
+            }
+        }
+
+        private void RestartSaving()
+        {
+            lock (_lockObject)
+            {
+                if (!isSave) return;
+                Logger.LogInfo($"[CameraService #{Index}] 正在重启录像以应用新的录像参数...");
+                StopSaving();
+                StartSaving();
+            }
         }
 
         private string _selectedResolution = "";
@@ -490,7 +538,12 @@ namespace camera
             Logger.LogInfo($"摄像头默认配置: {defaultWidth}x{defaultHeight} @ {defaultFps}fps");
 
             // 清理旧的分辨率列表并确保 UI 线程安全
-            Application.Current?.Dispatcher.Invoke(() => SupportedResolutions.Clear());
+            Application.Current?.Dispatcher.Invoke(() =>
+            {
+                SupportedResolutions.Clear();
+                SupportedRecordResolutions.Clear();
+                SupportedRecordResolutions.Add("与采集分辨率一致");
+            });
 
             foreach (var (width, height) in testResolutions)
             {
@@ -511,6 +564,8 @@ namespace camera
                         {
                             if (!SupportedResolutions.Contains(resStr))
                                 SupportedResolutions.Add(resStr);
+                            if (!SupportedRecordResolutions.Contains(resStr))
+                                SupportedRecordResolutions.Add(resStr);
                         });
 
                         if (bestWidth == 0 || bestHeight == 0)
@@ -535,6 +590,8 @@ namespace camera
                 {
                     if (!SupportedResolutions.Contains(resStr))
                         SupportedResolutions.Add(resStr);
+                    if (!SupportedRecordResolutions.Contains(resStr))
+                        SupportedRecordResolutions.Add(resStr);
                 });
                 Logger.LogInfo($"使用摄像头默认分辨率: {bestWidth}x{bestHeight} @ {bestFps}fps");
             }
@@ -572,6 +629,25 @@ namespace camera
             }
 
             RaisePropertyChanged(nameof(SelectedResolution));
+
+            // 读取已保存的录像分辨率配置，如果在支持的列表中，则优先应用
+            string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{Index}_RecordResolution");
+            if (!string.IsNullOrEmpty(savedRecordRes) && SupportedRecordResolutions.Contains(savedRecordRes))
+            {
+                _selectedRecordResolution = savedRecordRes;
+            }
+            else
+            {
+                _selectedRecordResolution = "与采集分辨率一致";
+            }
+            RaisePropertyChanged(nameof(SelectedRecordResolution));
+
+            // 读取已保存的录像帧率配置
+            string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{Index}_RecordFps");
+            if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
+            {
+                RecordFps = rfps;
+            }
 
             // 将摄像头设置回最终确定的分辨率（避免保留探测循环最后一项的值）
             cap.Set(VideoCaptureProperties.FrameWidth, Width);
@@ -886,8 +962,21 @@ namespace camera
                 return;
             }
 
-            _recordingOptions.Width = (int)Width;
-            _recordingOptions.Height = (int)Height;
+            // 解析录像分辨率
+            int recordW = (int)Width;
+            int recordH = (int)Height;
+            if (SelectedRecordResolution != "与采集分辨率一致")
+            {
+                var parts = SelectedRecordResolution.Split('x');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int rw) && int.TryParse(parts[1], out int rh))
+                {
+                    recordW = rw;
+                    recordH = rh;
+                }
+            }
+
+            _recordingOptions.Width = recordW;
+            _recordingOptions.Height = recordH;
             // ⚠️ 关键: 这里设置的是"管道帧率"（= RecordFps），而非相机原始帧率(Fps)。
             // 原因: RefreshFrame 中已按 RecordFps 对管道进行节流，
             //       录制器实际接收到的帧率 ≈ RecordFps，而非 Fps。
@@ -899,7 +988,7 @@ namespace camera
             _recordingOptions.SaveDirectory = saveDirectory;
             _recordingOptions.SegmentDuration = SaveInterval;
 
-            _recorder.StartRecording(null, (int)Width, (int)Height, Fps, Quality);
+            _recorder.StartRecording(null, recordW, recordH, Fps, Quality);
 
         }
 
@@ -1050,6 +1139,14 @@ namespace camera
                 // 停止采集循环并等待其结束
                 _isCapturing = false;
                 _lastPipelineProcessTime = DateTime.MinValue; // 重置节流时间，避免切换后残留旧状态
+
+                // 核心修复：如果当前正在录像，需要先临时停止录像以释放编码器和 FFmpeg 进程
+                bool wasSaving = isSave;
+                if (wasSaving)
+                {
+                    StopSaving();
+                }
+
                 Thread.Sleep(200); 
 
                 try
@@ -1143,6 +1240,12 @@ namespace camera
 
                     _previewController.SetCameraFps(Fps);
                     RefreshFrame();
+
+                    // 重新开启录像
+                    if (wasSaving)
+                    {
+                        StartSaving();
+                    }
                 }
                 catch (Exception ex)
                 {
