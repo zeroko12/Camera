@@ -818,6 +818,88 @@ namespace camera
             }
         }
 
+        private void PushWarningFrame(string errorMsg)
+        {
+            Mat tempFrame = null;
+            try
+            {
+                int w = Width > 0 ? (int)Width : 1280;
+                int h = Height > 0 ? (int)Height : 720;
+                tempFrame = Infrastructure.MatPool.Rent(w, h, MatType.CV_8UC3);
+                tempFrame.SetTo(new Scalar(20, 20, 20)); // 暗灰底色
+                const HersheyFonts font = HersheyFonts.HersheySimplex;
+                double fontScale = Math.Max(0.4, 0.6 * (w / 640.0));
+                int thickness = Math.Max(1, (int)(2 * (w / 640.0)));
+                OpenCvSharp.Size textSize = Cv2.GetTextSize(errorMsg, font, fontScale, thickness, out _);
+                var textOrg = new OpenCvSharp.Point((w - textSize.Width) / 2, (h + textSize.Height) / 2);
+                Cv2.PutText(tempFrame, errorMsg, textOrg, font, fontScale, new Scalar(0, 0, 255), thickness, LineTypes.AntiAlias);
+
+                _previewController.UpdateFrame(tempFrame, DateTime.Now);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[CameraService #{Index}] 推送警告帧异常", ex);
+            }
+            finally
+            {
+                if (tempFrame != null)
+                {
+                    Infrastructure.MatPool.Return(tempFrame);
+                }
+            }
+        }
+
+        public void HandleDeviceRemoved()
+        {
+            lock (_lockObject)
+            {
+                Logger.LogWarning($"[CameraService #{Index}] 设备被拔除，正在执行释放与警示处理...");
+                
+                _isCapturing = false;
+                
+                bool wasConnected = IsConnected;
+                _continuousReadFailCount = 6; // 设置为 6，确保 IsConnected 返回 false
+                if (wasConnected)
+                {
+                    RaisePropertyChanged(nameof(IsConnected));
+                }
+
+                // 立即推送断开警告帧
+                string errorMsg = $"Channel {Index} - Connection Disconnected";
+                PushWarningFrame(errorMsg);
+
+                // 停止录像（如果开启）
+                if (isSave)
+                {
+                    StopSaving();
+                }
+
+                // 异步释放 VideoCapture，防止阻塞调用线程
+                if (cap != null)
+                {
+                    var capToDispose = cap;
+                    cap = null; // 立即置空，防止其他线程继续访问
+                    Task.Run(() =>
+                    {
+                        try
+                        {
+                            Logger.LogInfo($"[CameraService #{Index}] 正在后台释放已拔除设备的 VideoCapture...");
+                            if (capToDispose.IsOpened())
+                            {
+                                capToDispose.Release();
+                            }
+                            capToDispose.Dispose();
+                            Logger.LogInfo($"[CameraService #{Index}] 后台释放已拔除设备的 VideoCapture 完成");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogWarning($"[CameraService #{Index}] 后台释放已拔除设备的 VideoCapture 异常: {ex.Message}");
+                        }
+                    });
+                }
+            }
+        }
+
         private void RefreshFrame()
         {
             _isCapturing = true;
@@ -835,6 +917,10 @@ namespace camera
                     {
                         if (cap == null || cap.IsDisposed || !cap.IsOpened() || !cap.Read(_captureMat) || _captureMat.Empty())
                         {
+                            if (!_isCapturing)
+                            {
+                                break;
+                            }
                             bool wasConnectedInFail = _continuousReadFailCount <= 5;
                             _continuousReadFailCount++;
                             if (wasConnectedInFail != (_continuousReadFailCount <= 5))
@@ -849,21 +935,10 @@ namespace camera
                                 {
                                     _lastWarningFrameTime = now;
 
-                                    // 生成并推送断开连接的警示帧
-                                    tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
-                                    tempFrame.SetTo(new Scalar(20, 20, 20)); // 暗灰底色
                                     string errorMsg = (cap == null || !cap.IsOpened())
                                          ? $"Channel {Index} - Device Occupied / Not Ready"
                                          : $"Channel {Index} - Connection Disconnected";
-                                    const HersheyFonts font = HersheyFonts.HersheySimplex;
-                                    double fontScale = Math.Max(0.4, 0.6 * (Width / 640.0));
-                                    int thickness = Math.Max(1, (int)(2 * (Width / 640.0)));
-                                    OpenCvSharp.Size textSize = Cv2.GetTextSize(errorMsg, font, fontScale, thickness, out _);
-                                    var textOrg = new OpenCvSharp.Point((Width - textSize.Width) / 2, (Height + textSize.Height) / 2);
-                                    Cv2.PutText(tempFrame, errorMsg, textOrg, font, fontScale, new Scalar(0, 0, 255), thickness, LineTypes.AntiAlias);
-
-                                    // 推送至预览，使 UI 渲染显示
-                                    _previewController.UpdateFrame(tempFrame, DateTime.Now);
+                                    PushWarningFrame(errorMsg);
                                 }
                             }
 
@@ -878,6 +953,11 @@ namespace camera
                                 Thread.Sleep(30);
                             }
                             continue;
+                        }
+
+                        if (!_isCapturing)
+                        {
+                            break;
                         }
 
                         bool wasConnectedInSuccess = _continuousReadFailCount <= 5;
@@ -1156,7 +1236,7 @@ namespace camera
         {
             lock (_lockObject)
             {
-                if (cap == null) return;
+                if (cap == null && Index < 0) return;
                 
                 Logger.LogInfo($"[CameraService #{Index}] 正在修改分辨率为 {Width}x{Height}...");
                 
@@ -1175,11 +1255,15 @@ namespace camera
 
                 try
                 {
-                    if (cap.IsOpened())
+                    if (cap != null)
                     {
-                        cap.Release();
+                        if (cap.IsOpened())
+                        {
+                            cap.Release();
+                        }
+                        cap.Dispose();
+                        cap = null;
                     }
-                    cap.Dispose();
                 }
                 catch (Exception ex)
                 {
@@ -1229,6 +1313,14 @@ namespace camera
                         {
                             cap.Read(dummy);
                         }
+
+                        bool wasConnected = IsConnected;
+                        _continuousReadFailCount = 0;
+                        _lastPipelineProcessTime = DateTime.MinValue; // 重置节流时间，避免切换后残留旧状态
+                        if (!wasConnected)
+                        {
+                            RaisePropertyChanged(nameof(IsConnected));
+                        }
                     }
 
                     double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
@@ -1239,6 +1331,7 @@ namespace camera
                     if (!cap.IsOpened())
                     {
                         Logger.LogError($"[CameraService #{Index}] 重新打开摄像头失败");
+                        RefreshFrame();
                         return;
                     }
 
@@ -1274,6 +1367,7 @@ namespace camera
                 catch (Exception ex)
                 {
                     Logger.LogError($"[CameraService #{Index}] 修改分辨率发生异常", ex);
+                    RefreshFrame();
                 }
             }
         }
@@ -1323,12 +1417,25 @@ namespace camera
 
                     if (cap != null)
                     {
-                        if (cap.IsOpened())
-                        {
-                            cap.Release();
-                        }
-                        cap.Dispose();
+                        var capToDispose = cap;
                         cap = null;
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                Logger.LogInfo($"[CameraService #{Index}] 正在后台释放 VideoCapture...");
+                                if (capToDispose.IsOpened())
+                                {
+                                    capToDispose.Release();
+                                }
+                                capToDispose.Dispose();
+                                Logger.LogInfo($"[CameraService #{Index}] 后台释放 VideoCapture 完成");
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogWarning($"[CameraService #{Index}] 后台释放 VideoCapture 异常: {ex.Message}");
+                            }
+                        });
                     }
 
                     if (_Frame != null)

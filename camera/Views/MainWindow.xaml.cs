@@ -144,13 +144,14 @@ namespace camera.Views
         private const int WM_DEVICECHANGE = 0x0219;
         private const int DBT_DEVICEARRIVAL = 0x8000;
         private const int DBT_DEVICEREMOVECOMPLETE = 0x8004;
+        private const int DBT_DEVNODES_CHANGED = 0x0007;
 
         private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (msg == WM_DEVICECHANGE)
             {
                 int eventType = wParam.ToInt32();
-                if (eventType == DBT_DEVICEARRIVAL || eventType == DBT_DEVICEREMOVECOMPLETE)
+                if (eventType == DBT_DEVICEARRIVAL || eventType == DBT_DEVICEREMOVECOMPLETE || eventType == DBT_DEVNODES_CHANGED)
                 {
                     var vm = this.DataContext as MainWindowViewModel;
                     if (vm != null)

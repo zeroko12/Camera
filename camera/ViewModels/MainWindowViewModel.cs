@@ -1060,6 +1060,11 @@ namespace camera.ViewModels
                         else
                         {
                             Logger.LogWarning($"[OnDeviceChangeNotification] 摄像头 {cam.Name} (路径: {cam.DevicePath}) 处于离线状态");
+                            if (cam.IsConnected)
+                            {
+                                Logger.LogWarning($"[OnDeviceChangeNotification] 检测到摄像头 {cam.Name} 被物理拔除，执行离线释放处理");
+                                cam.HandleDeviceRemoved();
+                            }
                         }
                     }
 
