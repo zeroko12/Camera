@@ -69,7 +69,7 @@ namespace camera.Recording
             _ffmpegPath = ffmpegPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
         }
 
-        public bool StartRecording(string outputPath, int width, int height, double fps, int quality)
+        public bool StartRecording(string outputPath, int inputWidth, int inputHeight, int recordWidth, int recordHeight, double fps, int quality)
         {
             lock (_lock)
             {
@@ -87,9 +87,13 @@ namespace camera.Recording
                     _initFailCount = 0;
                     _lastInitAttempt = DateTime.MinValue;
 
+                    _options.InputWidth = inputWidth;
+                    _options.InputHeight = inputHeight;
+                    _options.Width = recordWidth;
+                    _options.Height = recordHeight;
 
                     _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                        width, height, _options.RecordFps, quality, _currentOutputPath, _ffmpegPath);
+                        inputWidth, inputHeight, recordWidth, recordHeight, _options.RecordFps, quality, _currentOutputPath, _ffmpegPath, _options.CustomText, _options.OverlayTextSize);
 
                     _isRecording = true;
                     _isPaused = false;
@@ -262,7 +266,7 @@ namespace camera.Recording
                 // 使用新路径重新拉起，避免损坏已有视频文件
                 _currentOutputPath = GenerateOutputPath();
                 _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                    _options.Width, _options.Height, _options.RecordFps, CurrentQuality, _currentOutputPath, _ffmpegPath);
+                    _options.InputWidth, _options.InputHeight, _options.Width, _options.Height, _options.RecordFps, CurrentQuality, _currentOutputPath, _ffmpegPath, _options.CustomText, _options.OverlayTextSize);
 
                 if (_encoder != null && _encoder.IsInitialized)
                 {
@@ -333,7 +337,7 @@ namespace camera.Recording
             string newPath = GenerateOutputPath();
             Logger.LogInfo($"[FFmpegRecorder] 分段切换: 创建 {newPath}");
             _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                _options.Width, _options.Height, _options.RecordFps, CurrentQuality, newPath, _ffmpegPath);
+                _options.InputWidth, _options.InputHeight, _options.Width, _options.Height, _options.RecordFps, CurrentQuality, newPath, _ffmpegPath, _options.CustomText, _options.OverlayTextSize);
             _currentOutputPath = newPath;
             _framesWritten = 0;
         }

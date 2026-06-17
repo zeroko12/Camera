@@ -31,6 +31,7 @@ namespace camera
         private PreviewController _previewController;
         private FFmpegVideoRecorder _recorder;
         private RecordingOptions _recordingOptions;
+        private System.Windows.Threading.DispatcherTimer _uiTimer;
 
         // 管道内特定的图像处理算子
         private ClaheProcessor _claheProcessor;
@@ -157,6 +158,13 @@ namespace camera
                     }
                 }
             }
+        }
+
+        private string _currentTimeText = "";
+        public string CurrentTimeText
+        {
+            get => _currentTimeText;
+            set => SetProperty(ref _currentTimeText, value);
         }
 
         private string _Name = "test";
@@ -369,11 +377,8 @@ namespace camera
                     if (_timestampOverlayProcessor != null)
                         _timestampOverlayProcessor.FontScale = value;
 
-                    // 实时保存水印字体大小
-                    if (Index >= 0)
-                    {
-                        ConfigurationManager.SaveSetting($"Camera_{Index}_OverlayTextSize", value.ToString());
-                    }
+                    if (_recordingOptions != null)
+                        _recordingOptions.OverlayTextSize = value;
                 }
             }
         }
@@ -389,10 +394,18 @@ namespace camera
                     if (_timestampOverlayProcessor != null)
                         _timestampOverlayProcessor.CustomText = value;
 
+                    if (_recordingOptions != null)
+                        _recordingOptions.CustomText = value;
+
                     // 实时保存自定义水印文字内容
                     if (Index >= 0)
                     {
                         ConfigurationManager.SaveSetting($"Camera_{Index}_CustomText", value ?? "");
+                    }
+
+                    if (isSave)
+                    {
+                        System.Threading.Tasks.Task.Run(() => RestartSaving());
                     }
                 }
             }
@@ -461,7 +474,7 @@ namespace camera
             // 1. 初始化模块参数与流水线
             _claheProcessor = new ClaheProcessor { Enabled = IsGrayHomogenization, Order = 10 };
             _contrastLuminanceProcessor = new ContrastLuminanceProcessor { Contrast = Contrast, Luminance = Luminance, Order = 20 };
-            _timestampOverlayProcessor = new TimestampOverlayProcessor { Enabled = true, Order = 30 };
+            _timestampOverlayProcessor = new TimestampOverlayProcessor { Enabled = false, Order = 30 };
             _recordingProcessor = new RecordingProcessor { Enabled = true, Order = 90 };
 
             _pipeline = FramePipelineBuilder.Create()
@@ -494,6 +507,13 @@ namespace camera
                     Frame = previewFrame; // 自动处理旧帧到 MatPool
                 });
             };
+
+            // 4. 初始化 UI 水印更新定时器
+            _uiTimer = new System.Windows.Threading.DispatcherTimer();
+            _uiTimer.Interval = TimeSpan.FromSeconds(1);
+            _uiTimer.Tick += (s, e) => { CurrentTimeText = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"); };
+            _uiTimer.Start();
+            CurrentTimeText = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
             // 3. 初始化录像选项及录制器
             _recordingOptions = new RecordingOptions
@@ -975,6 +995,8 @@ namespace camera
                 }
             }
 
+            _recordingOptions.InputWidth = (int)Width;
+            _recordingOptions.InputHeight = (int)Height;
             _recordingOptions.Width = recordW;
             _recordingOptions.Height = recordH;
             // ⚠️ 关键: 这里设置的是"管道帧率"（= RecordFps），而非相机原始帧率(Fps)。
@@ -987,8 +1009,10 @@ namespace camera
             _recordingOptions.RecordFps = RecordFps;
             _recordingOptions.SaveDirectory = saveDirectory;
             _recordingOptions.SegmentDuration = SaveInterval;
-
-            _recorder.StartRecording(null, recordW, recordH, Fps, Quality);
+            _recordingOptions.CustomText = CustomOverlayText;
+            _recordingOptions.OverlayTextSize = OverlayTextSize;
+ 
+            _recorder.StartRecording(null, (int)Width, (int)Height, recordW, recordH, Fps, Quality);
 
         }
 
@@ -1281,6 +1305,8 @@ namespace camera
                 try
                 {
                     _isCapturing = false;
+                    _uiTimer?.Stop();
+                    _uiTimer = null;
 
                     if (FrameChanged != null)
                     {

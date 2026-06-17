@@ -17,7 +17,7 @@ namespace camera.Recording
         event EventHandler RecordingResumed;
         event EventHandler<Exception> RecordingError;
 
-        bool StartRecording(string outputPath, int width, int height, double fps, int quality);
+        bool StartRecording(string outputPath, int inputWidth, int inputHeight, int recordWidth, int recordHeight, double fps, int quality);
         void StopRecording();
         void Pause();
         void Resume();

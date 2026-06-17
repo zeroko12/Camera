@@ -333,12 +333,16 @@ namespace camera.Encoding
         /// - mpeg4: 最终兜底（兼容性最好，但质量最差）
         /// </summary>
         public static IVideoEncoder CreateWithAutoFallback(
-            int width,
-            int height,
+            int inputWidth,
+            int inputHeight,
+            int recordWidth,
+            int recordHeight,
             double fps,
             int quality,
             string outputPath = null,
-            string ffmpegPath = null)
+            string ffmpegPath = null,
+            string customText = null,
+            double fontScale = 0.3)
         {
             string resolvedFfmpegPath = ffmpegPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
 
@@ -371,7 +375,7 @@ namespace camera.Encoding
                 try
                 {
                     var encoder = new FFmpegVideoEncoder(resolvedFfmpegPath);
-                    if (encoder.Initialize(width, height, fps, codec, quality, outputPath ?? ""))
+                    if (encoder.Initialize(inputWidth, inputHeight, recordWidth, recordHeight, fps, codec, quality, outputPath ?? "", customText, fontScale))
                     {
                         RegisterSession(codec);
                         return encoder;

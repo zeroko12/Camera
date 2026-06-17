@@ -116,35 +116,12 @@ namespace camera.Infrastructure
                     }
                 }
 
-                // 1. 先清除/转移焦点，迫使复合控件（如 NumericUpDown 内的 TextBox）触发 LostFocus 提交并更新 Value 属性
+                // 1. 先清除/转移焦点，使输入框失去焦点，光标消失并触发 LostFocus
                 if (GetClearFocusOnEnter(d) && d is FrameworkElement element)
                 {
-                    if (element.Focusable)
-                    {
-                        element.Focus();
-                    }
-                    else
-                    {
-                        DependencyObject parent = VisualTreeHelper.GetParent(element);
-                        bool focused = false;
-                        while (parent != null)
-                        {
-                            if (parent is FrameworkElement parentFe && parentFe.Focusable && !(parentFe is System.Windows.Window))
-                            {
-                                parentFe.Focus();
-                                focused = true;
-                                break;
-                            }
-                            parent = VisualTreeHelper.GetParent(parent);
-                        }
-
-                        if (!focused)
-                        {
-                            var focusScope = FocusManager.GetFocusScope(element);
-                            FocusManager.SetFocusedElement(focusScope, null);
-                            Keyboard.ClearFocus();
-                        }
-                    }
+                    var focusScope = FocusManager.GetFocusScope(element);
+                    FocusManager.SetFocusedElement(focusScope, null);
+                    Keyboard.ClearFocus();
                 }
 
                 // 2. 遍历并强制更新当前控件上所有的双向数据绑定属性（此时 Value 已经是最新解析的值了）

@@ -40,6 +40,8 @@ namespace camera.Encoding
         private Mat _yuvBuffer;  // 持久 YUV 转换缓冲区，避免每帧 MatPool Rent/Return
 
         public bool IsInitialized => _ffmpegProcess != null && !_ffmpegProcess.HasExited;
+        public int InputWidth { get; private set; }
+        public int InputHeight { get; private set; }
         public int Width { get; private set; }
         public int Height { get; private set; }
         public double Fps { get; private set; }
@@ -62,15 +64,17 @@ namespace camera.Encoding
         /// 通过独立的探测流程验证。此方法仅负责以指定参数启动实际录制进程，
         /// 并通过短暂的健康检查确认进程没有因参数错误等原因立即退出。
         /// </summary>
-        public bool Initialize(int width, int height, double fps, string codec, int quality, string outputPath)
+        public bool Initialize(int inputWidth, int inputHeight, int recordWidth, int recordHeight, double fps, string codec, int quality, string outputPath, string customText = null, double fontScale = 0.3)
         {
             if (IsInitialized)
             {
                 Flush();
             }
 
-            Width = width;
-            Height = height;
+            InputWidth = inputWidth;
+            InputHeight = inputHeight;
+            Width = recordWidth;
+            Height = recordHeight;
             Fps = fps;
             Codec = codec;
             OutputPath = outputPath;
@@ -78,6 +82,45 @@ namespace camera.Encoding
             try
             {
                 string encoderArgs = GetEncoderArguments(codec, quality);
+                
+                // 构建缩放与水印滤镜参数
+                string vfFilter = "";
+                if (inputWidth != recordWidth || inputHeight != recordHeight)
+                {
+                    vfFilter = $"scale={recordWidth}:{recordHeight}";
+                }
+
+                // 微软雅黑与 Arial 字体备份机制，确保不同语言的 Windows 环境下均不因字体缺失而崩溃
+                string fontPath = "C\\:/Windows/Fonts/msyh.ttc";
+                if (!File.Exists("C:\\Windows\\Fonts\\msyh.ttc"))
+                {
+                    fontPath = "C\\:/Windows/Fonts/arial.ttf";
+                }
+
+                string escapedText = "";
+                if (!string.IsNullOrEmpty(customText))
+                {
+                    escapedText = customText.Replace("'", "'\\''") + " ";
+                }
+
+                // 计算水印字体大小比例（以 0.3 为基准，默认对应 24 像素的字体大小）
+                int fontSize = (int)Math.Round(24.0 * (fontScale / 0.3));
+                if (fontSize < 8) fontSize = 8;
+
+                // 注意：冒号与大括号需要双重甚至三重斜杠转义
+                string drawTextFilter = $"drawtext=fontfile='{fontPath}':text='{escapedText}%{{localtime\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}}':x=20:y=h-40:fontsize={fontSize}:fontcolor=white";
+                
+                if (string.IsNullOrEmpty(vfFilter))
+                {
+                    vfFilter = drawTextFilter;
+                }
+                else
+                {
+                    vfFilter = $"{vfFilter},{drawTextFilter}";
+                }
+
+                string vfArgs = string.IsNullOrEmpty(vfFilter) ? "" : $"-vf \"{vfFilter}\"";
+
                 string fullArgs;
                 // GOP 大小 = 2秒 × fps，确保关键帧间隔合理
                 // 行业标准: OBS 默认 keyint = 2s，FFmpeg 推荐 -g = fps * 2
@@ -85,7 +128,7 @@ namespace camera.Encoding
 
                 if (string.IsNullOrEmpty(outputPath))
                 {
-                    fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {width}x{height} -r {fps} -i - {encoderArgs} -pix_fmt yuv420p -g {gopSize} -f null -";
+                    fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {inputWidth}x{inputHeight} -r {fps} -i - {encoderArgs} {vfArgs} -pix_fmt yuv420p -g {gopSize} -f null -";
                 }
                 else
                 {
@@ -96,7 +139,7 @@ namespace camera.Encoding
                     }
                     // -movflags +faststart: 将 moov atom 移到文件开头，支持渐进式加载和在线播放
                     // -an: 无音频流（纯视频录制）
-                    fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {width}x{height} -r {fps} -i - {encoderArgs} -pix_fmt yuv420p -g {gopSize} -movflags +faststart -an \"{outputPath}\"";
+                    fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {inputWidth}x{inputHeight} -r {fps} -i - {encoderArgs} {vfArgs} -pix_fmt yuv420p -g {gopSize} -movflags +faststart -an \"{outputPath}\"";
                 }
 
                 _ffmpegProcess = new Process
@@ -113,7 +156,7 @@ namespace camera.Encoding
                     }
                 };
 
-                Logger.LogInfo($"[FFmpegEncoder] 启动录制进程: {codec}, {width}x{height} @ {fps}fps");
+                Logger.LogInfo($"[FFmpegEncoder] 启动录制进程: {codec}, 输入规格 {inputWidth}x{inputHeight} -> 输出规格 {recordWidth}x{recordHeight} @ {fps}fps");
                 _ffmpegProcess.Start();
 
                 // 异步读取 stderr 以获取 FFmpeg 进度和错误信息
@@ -192,24 +235,11 @@ namespace camera.Encoding
             if (!IsInitialized || _ffmpegProcess == null || !_ffmpegProcess.StandardInput.BaseStream.CanWrite)
                 return false;
 
-            Mat resizedFrame = null;
             try
             {
-                // ═══ 关键修复: 帧尺寸校验 ═══
-                // FFmpeg 以 -s {Width}x{Height} 启动，期望每帧的原始数据大小精确匹配。
-                // 如果实际帧尺寸不一致（如摄像头返回的分辨率与设定值有偏差），
-                // 原始字节会按错误的行宽解析，导致严重花屏。
-                Mat sourceFrame = frame;
-                if (frame.Width != Width || frame.Height != Height)
-                {
-                    resizedFrame = Infrastructure.MatPool.Rent(Width, Height, frame.Type());
-                    Cv2.Resize(frame, resizedFrame, new OpenCvSharp.Size(Width, Height));
-                    sourceFrame = resizedFrame;
-                }
-
                 // 持久 YUV 缓冲区：避免每帧 MatPool Rent/Return 开销
-                EnsureYuvBuffer(sourceFrame.Width, sourceFrame.Height);
-                Cv2.CvtColor(sourceFrame, _yuvBuffer, ColorConversionCodes.BGR2YUV_I420);
+                EnsureYuvBuffer(frame.Width, frame.Height);
+                Cv2.CvtColor(frame, _yuvBuffer, ColorConversionCodes.BGR2YUV_I420);
 
                 int frameSize = (int)_yuvBuffer.Total() * _yuvBuffer.ElemSize();
                 
@@ -227,13 +257,6 @@ namespace camera.Encoding
             {
                 Logger.LogWarning($"[FFmpegEncoder] 帧写入失败: {ex.Message}");
                 return false;
-            }
-            finally
-            {
-                if (resizedFrame != null)
-                {
-                    Infrastructure.MatPool.Return(resizedFrame);
-                }
             }
         }
 

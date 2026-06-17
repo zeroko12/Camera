@@ -207,6 +207,30 @@ namespace camera.ViewModels
             }
         }
 
+        /// <summary>
+        /// 全局水印大小比例
+        /// </summary>
+        private double _overlayTextSize = 0.3;
+        public double OverlayTextSize
+        {
+            get { return _overlayTextSize; }
+            set
+            {
+                if (SetProperty(ref _overlayTextSize, value))
+                {
+                    OnOverlayTextSizeChanged();
+                }
+            }
+        }
+
+        private void OnOverlayTextSizeChanged()
+        {
+            foreach (var camera in Cameras)
+            {
+                camera.OverlayTextSize = OverlayTextSize;
+            }
+        }
+
         private bool _IsGrayHomogenization = false;
         public bool IsGrayHomogenization
         {
@@ -1149,11 +1173,12 @@ namespace camera.ViewModels
             Contrast = double.Parse(ConfigurationManager.GetSetting("Contrast") ?? "1.0");
             Luminance = double.Parse(ConfigurationManager.GetSetting("Luminance") ?? "0.0");
             IsGrayHomogenization = bool.Parse(ConfigurationManager.GetSetting("IsGrayHomogenization") ?? "false");
+            OverlayTextSize = double.Parse(ConfigurationManager.GetSetting("OverlayTextSize") ?? "0.3");
 
             foreach (var cam in Cameras)
             {
                 cam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{cam.Index}_CustomText") ?? $"通道 {cam.Index}";
-                cam.OverlayTextSize = double.Parse(ConfigurationManager.GetSetting($"Camera_{cam.Index}_OverlayTextSize") ?? "0.3");
+                cam.OverlayTextSize = OverlayTextSize;
                 string savedRes = ConfigurationManager.GetSetting($"Camera_{cam.Index}_Resolution");
                 if (!string.IsNullOrEmpty(savedRes))
                 {
@@ -1212,11 +1237,11 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("Contrast", this.Contrast.ToString());
             ConfigurationManager.SaveSetting("Luminance", this.Luminance.ToString());
             ConfigurationManager.SaveSetting("IsGrayHomogenization", this.IsGrayHomogenization.ToString());
+            ConfigurationManager.SaveSetting("OverlayTextSize", this.OverlayTextSize.ToString());
 
             foreach (var cam in Cameras)
             {
                  ConfigurationManager.SaveSetting($"Camera_{cam.Index}_CustomText", cam.CustomOverlayText ?? "");
-                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_OverlayTextSize", cam.OverlayTextSize.ToString());
                  ConfigurationManager.SaveSetting($"Camera_{cam.Index}_Resolution", cam.SelectedResolution ?? "");
                  ConfigurationManager.SaveSetting($"Camera_{cam.Index}_RecordResolution", cam.SelectedRecordResolution ?? "与采集分辨率一致");
                  ConfigurationManager.SaveSetting($"Camera_{cam.Index}_RecordFps", cam.RecordFps.ToString());
