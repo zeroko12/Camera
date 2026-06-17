@@ -37,6 +37,7 @@ namespace camera.Encoding
         private CancellationTokenSource _cts;
         private Task _errorReadTask;
         private bool _isDisposed;
+        private Mat _yuvBuffer;  // 持久 YUV 转换缓冲区，避免每帧 MatPool Rent/Return
 
         public bool IsInitialized => _ffmpegProcess != null && !_ffmpegProcess.HasExited;
         public int Width { get; private set; }
@@ -191,7 +192,6 @@ namespace camera.Encoding
             if (!IsInitialized || _ffmpegProcess == null || !_ffmpegProcess.StandardInput.BaseStream.CanWrite)
                 return false;
 
-            Mat yuvFrame = null;
             Mat resizedFrame = null;
             try
             {
@@ -207,15 +207,16 @@ namespace camera.Encoding
                     sourceFrame = resizedFrame;
                 }
 
-                yuvFrame = Infrastructure.MatPool.Rent(sourceFrame.Width, sourceFrame.Height * 3 / 2, MatType.CV_8UC1);
-                Cv2.CvtColor(sourceFrame, yuvFrame, ColorConversionCodes.BGR2YUV_I420);
+                // 持久 YUV 缓冲区：避免每帧 MatPool Rent/Return 开销
+                EnsureYuvBuffer(sourceFrame.Width, sourceFrame.Height);
+                Cv2.CvtColor(sourceFrame, _yuvBuffer, ColorConversionCodes.BGR2YUV_I420);
 
-                int frameSize = (int)yuvFrame.Total() * yuvFrame.ElemSize();
+                int frameSize = (int)_yuvBuffer.Total() * _yuvBuffer.ElemSize();
                 
                 // 优化：利用 ReadOnlySpan 直接包装 native 指针，实现完全零拷贝写入，消除托管堆拷贝开销
                 unsafe
                 {
-                    var span = new ReadOnlySpan<byte>((void*)yuvFrame.Data, frameSize);
+                    var span = new ReadOnlySpan<byte>((void*)_yuvBuffer.Data, frameSize);
                     _ffmpegProcess.StandardInput.BaseStream.Write(span);
                 }
                 _ffmpegProcess.StandardInput.BaseStream.Flush();
@@ -229,14 +230,24 @@ namespace camera.Encoding
             }
             finally
             {
-                if (yuvFrame != null)
-                {
-                    Infrastructure.MatPool.Return(yuvFrame);
-                }
                 if (resizedFrame != null)
                 {
                     Infrastructure.MatPool.Return(resizedFrame);
                 }
+            }
+        }
+
+        /// <summary>
+        /// 确保持久 YUV 缓冲区与当前帧尺寸匹配。
+        /// 仅在首次使用或分辨率变化时重新分配。
+        /// </summary>
+        private void EnsureYuvBuffer(int w, int h)
+        {
+            int yuvH = h * 3 / 2;
+            if (_yuvBuffer == null || _yuvBuffer.Width != w || _yuvBuffer.Height != yuvH)
+            {
+                _yuvBuffer?.Dispose();
+                _yuvBuffer = new Mat(yuvH, w, MatType.CV_8UC1);
             }
         }
 
@@ -327,6 +338,10 @@ namespace camera.Encoding
                 VideoEncoderFactory.ReleaseSession(Codec);
                 Codec = "";
             }
+
+            // 释放持久 YUV 缓冲区
+            _yuvBuffer?.Dispose();
+            _yuvBuffer = null;
 
             if (_ffmpegProcess != null)
             {

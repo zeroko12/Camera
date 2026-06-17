@@ -6,8 +6,8 @@ namespace camera.Preview
     public class PreviewController : IPreviewController, IDisposable
     {
         private readonly ISceneChangeDetector _detector;
-        private int _frameCount;
         private double _cameraFps = 30.0;
+        private DateTime _lastPreviewTime = DateTime.MinValue;
         private readonly object _lock = new();
 
         public bool IsEnabled { get; set; } = true;
@@ -34,16 +34,14 @@ namespace camera.Preview
         {
             if (!IsEnabled || frame == null || frame.Empty()) return;
 
-            // UI 节流：跳帧判断
-            int skipInterval;
-            lock (_lock)
-            {
-                skipInterval = Math.Max(1, (int)_cameraFps / Math.Max(1, TargetFps));
-            }
+            // UI 节流：基于时间戳（Wall-clock Time）进行跳帧判断，防止与上游管道形成双重节流导致的帧率减半问题
+            double targetIntervalMs = 1000.0 / Math.Max(1, TargetFps);
+            DateTime now = DateTime.Now;
+            double elapsedMs = (now - _lastPreviewTime).TotalMilliseconds;
 
-            _frameCount++;
-            if (_frameCount < skipInterval) return;
-            _frameCount = 0;
+            // 允许 2.0ms 的极小容差来抵消操作系统的调度抖动
+            if (elapsedMs < targetIntervalMs - 2.0) return;
+            _lastPreviewTime = now;
 
             // 智能画面变化检测
             if (!_detector.DetectChange(frame)) return;

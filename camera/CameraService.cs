@@ -19,13 +19,13 @@ namespace camera
         #region 私有核心组件
 
         private VideoCapture cap;
+        private Mat _captureMat = new();
         private double FpsOrigin = 15, WidthOrigin = 1280, HeightOrigin = 720;
         private volatile bool _isCapturing = false;
         private int _continuousReadFailCount = 0;
         private long _frameCount = 0;
-        // 管道节流计数器：每隔 N 帧才运行一次完整管道（水印叠加+录像）
-        private int _pipelineFrameCount = 0;
         private DateTime _lastWarningFrameTime = DateTime.MinValue;
+        private DateTime _lastPipelineProcessTime = DateTime.MinValue;
 
         private IFramePipeline _pipeline;
         private PreviewController _previewController;
@@ -54,7 +54,15 @@ namespace camera
         public int Quality
         {
             get => _Quality;
-            set => SetProperty(ref _Quality, value);
+            set
+            {
+                if (SetProperty(ref _Quality, value))
+                {
+                    // 将压缩质量同步传递给录制器，使其在下次分段切换时生效
+                    if (_recorder != null)
+                        _recorder.CurrentQuality = value;
+                }
+            }
         }
 
         private int _PreviewFps = 8;
@@ -686,7 +694,7 @@ namespace camera
                 if (cap.IsOpened())
                 {
                     _continuousReadFailCount = 0;
-                    _pipelineFrameCount = 0; // 重连成功，重置节流计数器
+                    _lastPipelineProcessTime = DateTime.MinValue; // 重连成功，重置节流时间
                     Logger.LogInfo($"摄像头 {Index} 系统自恢复重置成功。");
                     if (SupportedResolutions.Count == 0)
                     {
@@ -729,11 +737,8 @@ namespace camera
 
                     try
                     {
-                        tempFrame = Infrastructure.MatPool.Rent((int)Width, (int)Height, MatType.CV_8UC3);
-                        if (cap == null || cap.IsDisposed || !cap.IsOpened() || !cap.Read(tempFrame) || tempFrame.Empty())
+                        if (cap == null || cap.IsDisposed || !cap.IsOpened() || !cap.Read(_captureMat) || _captureMat.Empty())
                         {
-                            Infrastructure.MatPool.Return(tempFrame);
-                            tempFrame = null;
                             bool wasConnectedInFail = _continuousReadFailCount <= 5;
                             _continuousReadFailCount++;
                             if (wasConnectedInFail != (_continuousReadFailCount <= 5))
@@ -788,32 +793,36 @@ namespace camera
                         }
 
 
-                        // ═══ 管道节流：只在"录制帧"位置运行完整管道 ═══
+                        // ═══ 管道节流：基于时间戳（Wall-clock Time）进行跳帧 ═══
                         // 相机以 Fps(如30fps)读帧，目的是清空USB缓冲区避免积压；
-                        // 但水印叠加、BGR→YUV、录像写入只需在 RecordFps(如10fps)频率执行，
-                        // 其余帧直接丢弃，节省约 66% 的管道 CPU 开销。
-                        int targetPipelineFps = Math.Max(1, RecordFps);
-                        int pipelineSkipInterval = Math.Max(1, (int)Math.Round(Fps / (double)targetPipelineFps));
+                        // 如果录像开启，管道节流帧率取 PreviewFps 和 RecordFps 之间的最大值，确保预览依然流畅
+                        int targetPipelineFps = isSave ? Math.Max(PreviewFps, RecordFps) : PreviewFps;
+                        double targetIntervalMs = 1000.0 / Math.Max(1, targetPipelineFps);
+                        DateTime pipelineNow = DateTime.Now;
+                        double elapsedMs = (pipelineNow - _lastPipelineProcessTime).TotalMilliseconds;
 
-                        _pipelineFrameCount++;
-                        if (_pipelineFrameCount < pipelineSkipInterval)
+                        // 允许 2.0ms 的极小容差（Margin）来抵消操作系统的调度抖动
+                        if (elapsedMs < targetIntervalMs - 2.0)
                         {
-                            // 丢弃此帧：仅用于清空 USB 缓冲区，不做任何处理
-                            Infrastructure.MatPool.Return(tempFrame);
-                            tempFrame = null;
+                            // 丢弃此帧：仅用于清空 USB 缓冲区，直接跳过处理，不进行对象池分配与拷贝
+                            continue;
                         }
                         else
                         {
-                            _pipelineFrameCount = 0;
+                            _lastPipelineProcessTime = pipelineNow;
+
+                            // 仅在需要处理时从对象池租借并拷贝图像，大幅减少无用帧的分配与拷贝开销
+                            tempFrame = Infrastructure.MatPool.Rent(_captureMat.Width, _captureMat.Height, _captureMat.Type());
+                            _captureMat.CopyTo(tempFrame);
 
                             // 兼容性事件通知
                             FrameChanged?.Invoke(tempFrame);
 
                             // 执行责任链图像处理管道（含水印叠加 + 录像写入）
-                            _pipeline.Process(tempFrame, DateTime.Now);
+                            _pipeline.Process(tempFrame, pipelineNow);
 
                             // 将处理后的图像传递给预览控制器
-                            _previewController.UpdateFrame(tempFrame, DateTime.Now);
+                            _previewController.UpdateFrame(tempFrame, pipelineNow);
 
                             // 磁盘检查计数
                             _frameCount++;
@@ -1040,7 +1049,7 @@ namespace camera
                 
                 // 停止采集循环并等待其结束
                 _isCapturing = false;
-                _pipelineFrameCount = 0; // 重置节流计数器，避免切换后残留旧计数
+                _lastPipelineProcessTime = DateTime.MinValue; // 重置节流时间，避免切换后残留旧状态
                 Thread.Sleep(200); 
 
                 try
@@ -1197,6 +1206,12 @@ namespace camera
                     {
                         _Frame.Dispose();
                         _Frame = null;
+                    }
+
+                    if (_captureMat != null)
+                    {
+                        _captureMat.Dispose();
+                        _captureMat = null;
                     }
                 }
                 catch (Exception ex)

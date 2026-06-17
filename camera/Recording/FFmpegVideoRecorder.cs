@@ -32,12 +32,12 @@ namespace camera.Recording
         private string _currentOutputPath;
         private DateTime _recordingStartTime;
         private DateTime _lastSegmentTime;
-        private int _frameCount;
-        private int _skipInterval;
-        private bool _isRecording;
-        private bool _isPaused;
+        private int _framesWritten;
+
+        private volatile bool _isRecording;
+        private volatile bool _isPaused;
         private bool _isDisposed;
-        private int _currentQuality = 30;
+        public int CurrentQuality { get; set; } = 30;
         private readonly object _lock = new();
 
         // ═══════════════════════════════════════════════════════════
@@ -67,7 +67,6 @@ namespace camera.Recording
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
             _ffmpegPath = ffmpegPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
-            _skipInterval = Math.Max(1, (int)options.Fps / Math.Max(1, options.RecordFps));
         }
 
         public bool StartRecording(string outputPath, int width, int height, double fps, int quality)
@@ -78,19 +77,16 @@ namespace camera.Recording
 
                 try
                 {
-                    _currentQuality = quality;
+                    CurrentQuality = quality;
                     _currentOutputPath = string.IsNullOrEmpty(outputPath) ? GenerateOutputPath() : outputPath;
                     _recordingStartTime = DateTime.Now;
                     _lastSegmentTime = _recordingStartTime;
-                    _frameCount = 0;
+                    _framesWritten = 0;
 
                     // 重置自愈状态（新录制会话 = 新的重试窗口）
                     _initFailCount = 0;
                     _lastInitAttempt = DateTime.MinValue;
 
-                    // 计算帧率降采样间隔: skipInterval = cameraFps / recordFps
-                    // 例: 30fps 摄像头 / 15fps 录制 = 每 2 帧取 1 帧
-                    _skipInterval = Math.Max(1, width > 0 ? (int)fps / Math.Max(1, _options.RecordFps) : 30 / 15);
 
                     _encoder = VideoEncoderFactory.CreateWithAutoFallback(
                         width, height, _options.RecordFps, quality, _currentOutputPath, _ffmpegPath);
@@ -158,14 +154,19 @@ namespace camera.Recording
         /// <summary>
         /// 录制一帧视频 — 每个摄像头帧都会调用此方法。
         /// 
+        /// 注意: 帧率控制由上游管道（CameraService.RefreshFrame）负责，
+        /// 调用到此方法的帧已经是按 RecordFps 节流后的帧，录制器直接写入即可。
+        /// 
         /// 执行流程:
         /// 1. 自愈检查 → 若编码器崩溃，尝试重连（带冷却和重试上限）
-        /// 2. 帧率降采样 → 按 skipInterval 跳帧以匹配目标录制帧率
-        /// 3. 分段检查 → 若达到分段时长，切换到新文件
-        /// 4. 编码写入 → 通过管道将帧数据发送给 FFmpeg
+        /// 2. 分段检查 → 若达到分段时长，切换到新文件
+        /// 3. 编码写入 → 通过管道将帧数据发送给 FFmpeg
         /// </summary>
         public void RecordFrame(Mat frame, DateTime timestamp)
         {
+            // 快速路径：无锁检查（volatile 读），录制关闭/暂停时直接返回，避免 Monitor.Enter/Exit 开销
+            if (!_isRecording || _isPaused) return;
+
             lock (_lock)
             {
                 if (!_isRecording || _isPaused) return;
@@ -180,25 +181,40 @@ namespace camera.Recording
                     }
                 }
 
-                // ═══ 第二步: 帧率降采样 ═══
-                // 动态计算跳帧间隔以响应运行时录像帧率（RecordFps）的调节
-                int currentSkipInterval = Math.Max(1, _options.Fps > 0 ? (int)_options.Fps / Math.Max(1, _options.RecordFps) : 30 / 15);
-                _frameCount++;
-                if (_frameCount < currentSkipInterval) return;
-                _frameCount = 0;
-
-                // ═══ 第三步: 分段检查 + 编码写入 ═══
+                // ═══ 第二步: 分段检查 + 编码写入 ═══
+                // 帧率降采样已由管道层完成，此处无需再做跳帧
                 try
                 {
                     CheckSegment(timestamp);
                     
-                    bool success = _encoder.EncodeFrame(frame, timestamp);
-                    if (!success)
+                    // 基于时间戳进行帧追赶与同步 (CFR 对准)
+                    double elapsedSeconds = (timestamp - _lastSegmentTime).TotalSeconds;
+                    int expectedFrames = (int)(elapsedSeconds * _options.RecordFps) + 1;
+                    int framesToEncode = expectedFrames - _framesWritten;
+
+                    if (framesToEncode > 0)
                     {
-                        Logger.LogWarning($"[FFmpegRecorder] 帧编码失败（管道可能已断裂），销毁编码器并标记黑名单以触发自愈");
-                        VideoEncoderFactory.MarkAsFailed(_encoder.Codec);
-                        try { _encoder.Dispose(); } catch { }
-                        _encoder = null;
+                        // 容错处理：若发生系统休眠或时钟跳变导致帧数落后过多，进行安全限制，避免一次性写入过多重复帧卡死应用
+                        if (framesToEncode > _options.RecordFps * 5)
+                        {
+                            Logger.LogWarning($"[FFmpegRecorder] 检测到时间跳变或系统休眠，限制帧追赶: elapsed={elapsedSeconds}s, expected={expectedFrames}, written={_framesWritten}. 强制重置.");
+                            framesToEncode = 1;
+                            _framesWritten = expectedFrames - 1;
+                        }
+
+                        for (int i = 0; i < framesToEncode; i++)
+                        {
+                            bool success = _encoder.EncodeFrame(frame, timestamp);
+                            if (!success)
+                            {
+                                Logger.LogWarning($"[FFmpegRecorder] 帧编码失败（管道可能已断裂），销毁编码器并标记黑名单以触发自愈");
+                                VideoEncoderFactory.MarkAsFailed(_encoder.Codec);
+                                try { _encoder.Dispose(); } catch { }
+                                _encoder = null;
+                                break;
+                            }
+                        }
+                        _framesWritten += framesToEncode;
                     }
                 }
                 catch (Exception ex)
@@ -246,12 +262,13 @@ namespace camera.Recording
                 // 使用新路径重新拉起，避免损坏已有视频文件
                 _currentOutputPath = GenerateOutputPath();
                 _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                    frame.Width, frame.Height, _options.RecordFps, _currentQuality, _currentOutputPath, _ffmpegPath);
+                    frame.Width, frame.Height, _options.RecordFps, CurrentQuality, _currentOutputPath, _ffmpegPath);
 
                 if (_encoder != null && _encoder.IsInitialized)
                 {
                     _initFailCount = 0;
                     _lastSegmentTime = DateTime.Now; // 重置分段计时，确保新文件获得完整分段时长
+                    _framesWritten = 0;
                     Logger.LogInfo($"[FFmpegRecorder] 编码器自愈成功: {_currentOutputPath}");
                     return true;
                 }
@@ -306,8 +323,9 @@ namespace camera.Recording
             string newPath = GenerateOutputPath();
             Logger.LogInfo($"[FFmpegRecorder] 分段切换: 创建 {newPath}");
             _encoder = VideoEncoderFactory.CreateWithAutoFallback(
-                width, height, _options.RecordFps, _currentQuality, newPath, _ffmpegPath);
+                width, height, _options.RecordFps, CurrentQuality, newPath, _ffmpegPath);
             _currentOutputPath = newPath;
+            _framesWritten = 0;
         }
 
         /// <summary>
