@@ -2,6 +2,9 @@ using System;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Data;
+using System.Windows.Controls;
+using System.Windows.Media;
+using HandyControl.Controls;
 
 namespace camera.Infrastructure
 {
@@ -61,11 +64,11 @@ namespace camera.Infrastructure
             {
                 if ((bool)e.NewValue)
                 {
-                    element.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(Element_KeyDown), true);
+                    element.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler(Element_KeyDown), true);
                 }
                 else
                 {
-                    element.RemoveHandler(UIElement.KeyDownEvent, new KeyEventHandler(Element_KeyDown));
+                    element.RemoveHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler(Element_KeyDown));
                 }
             }
         }
@@ -78,11 +81,11 @@ namespace camera.Infrastructure
                 {
                     if (e.NewValue != null && e.OldValue == null)
                     {
-                        element.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(Element_KeyDown), true);
+                        element.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler(Element_KeyDown), true);
                     }
                     else if (e.NewValue == null && e.OldValue != null)
                     {
-                        element.RemoveHandler(UIElement.KeyDownEvent, new KeyEventHandler(Element_KeyDown));
+                        element.RemoveHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler(Element_KeyDown));
                     }
                 }
             }
@@ -92,7 +95,59 @@ namespace camera.Infrastructure
         {
             if (e.Key == Key.Enter && sender is DependencyObject d)
             {
-                // 1. 遍历并强制更新当前控件上所有的双向数据绑定属性（如 TextBox.Text, NumericUpDown.Value 等）
+                // 0. 特殊处理 HandyControl.Controls.NumericUpDown，确保内部 TextBox 输入的新文本已解析并设置到 Value
+                if (d is HandyControl.Controls.NumericUpDown numericUpDown)
+                {
+                    var textBox = FindVisualChild<System.Windows.Controls.TextBox>(numericUpDown);
+                    if (textBox != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(textBox.Text))
+                        {
+                            numericUpDown.SetCurrentValue(HandyControl.Controls.NumericUpDown.ValueProperty, 0.0);
+                        }
+                        else if (double.TryParse(textBox.Text, out double val))
+                        {
+                            numericUpDown.SetCurrentValue(HandyControl.Controls.NumericUpDown.ValueProperty, val);
+                        }
+                        else
+                        {
+                            textBox.Text = numericUpDown.Value.ToString();
+                        }
+                    }
+                }
+
+                // 1. 先清除/转移焦点，迫使复合控件（如 NumericUpDown 内的 TextBox）触发 LostFocus 提交并更新 Value 属性
+                if (GetClearFocusOnEnter(d) && d is FrameworkElement element)
+                {
+                    if (element.Focusable)
+                    {
+                        element.Focus();
+                    }
+                    else
+                    {
+                        DependencyObject parent = VisualTreeHelper.GetParent(element);
+                        bool focused = false;
+                        while (parent != null)
+                        {
+                            if (parent is FrameworkElement parentFe && parentFe.Focusable && !(parentFe is System.Windows.Window))
+                            {
+                                parentFe.Focus();
+                                focused = true;
+                                break;
+                            }
+                            parent = VisualTreeHelper.GetParent(parent);
+                        }
+
+                        if (!focused)
+                        {
+                            var focusScope = FocusManager.GetFocusScope(element);
+                            FocusManager.SetFocusedElement(focusScope, null);
+                            Keyboard.ClearFocus();
+                        }
+                    }
+                }
+
+                // 2. 遍历并强制更新当前控件上所有的双向数据绑定属性（此时 Value 已经是最新解析的值了）
                 LocalValueEnumerator enumerator = d.GetLocalValueEnumerator();
                 while (enumerator.MoveNext())
                 {
@@ -100,14 +155,18 @@ namespace camera.Infrastructure
                     if (BindingOperations.IsDataBound(d, entry.Property))
                     {
                         BindingExpression bindingExpression = BindingOperations.GetBindingExpression(d, entry.Property);
-                        if (bindingExpression != null && bindingExpression.ParentBinding.Mode == BindingMode.TwoWay)
+                        if (bindingExpression != null)
                         {
-                            bindingExpression.UpdateSource();
+                            var mode = bindingExpression.ParentBinding.Mode;
+                            if (mode == BindingMode.TwoWay || mode == BindingMode.Default || mode == BindingMode.OneWayToSource)
+                            {
+                                bindingExpression.UpdateSource();
+                            }
                         }
                     }
                 }
 
-                // 2. 执行关联 Command
+                // 3. 执行关联 Command
                 ICommand command = GetEnterCommand(d);
                 if (command != null)
                 {
@@ -118,22 +177,27 @@ namespace camera.Infrastructure
                     }
                 }
 
-                // 3. 清除焦点
-                if (GetClearFocusOnEnter(d) && d is FrameworkElement element)
-                {
-                    FrameworkElement parent = element.Parent as FrameworkElement;
-                    if (parent != null)
-                    {
-                        parent.Focus();
-                    }
-                    else
-                    {
-                        Keyboard.ClearFocus();
-                    }
-                }
-
                 e.Handled = true;
             }
+        }
+
+        private static T FindVisualChild<T>(DependencyObject obj) where T : DependencyObject
+        {
+            if (obj == null) return null;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(obj); i++)
+            {
+                DependencyObject child = VisualTreeHelper.GetChild(obj, i);
+                if (child != null && child is T t)
+                {
+                    return t;
+                }
+                T childOfChild = FindVisualChild<T>(child);
+                if (childOfChild != null)
+                {
+                    return childOfChild;
+                }
+            }
+            return null;
         }
     }
 }
