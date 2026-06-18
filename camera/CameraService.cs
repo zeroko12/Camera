@@ -907,7 +907,45 @@ namespace camera
             Task.Run(() =>
             {
                 Stopwatch stopwatch = new Stopwatch();
-                
+
+                // 本地辅助函数，统一处理设备采集失败时的自愈与通知逻辑
+                void HandleCaptureFailure()
+                {
+                    if (!_isCapturing) return;
+
+                    bool wasConnectedInFail = _continuousReadFailCount <= 5;
+                    _continuousReadFailCount++;
+                    if (wasConnectedInFail != (_continuousReadFailCount <= 5))
+                    {
+                        RaisePropertyChanged(nameof(IsConnected));
+                    }
+
+                    if (_continuousReadFailCount > 5)
+                    {
+                        DateTime now = DateTime.Now;
+                        if (now - _lastWarningFrameTime >= TimeSpan.FromSeconds(2.0))
+                        {
+                            _lastWarningFrameTime = now;
+
+                            string errorMsg = (cap == null || !cap.IsOpened())
+                                 ? $"Channel {Index} - Device Occupied / Not Ready"
+                                 : $"Channel {Index} - Connection Disconnected";
+                            PushWarningFrame(errorMsg);
+                        }
+                    }
+
+                    if (_continuousReadFailCount > 30)
+                    {
+                        Logger.LogWarning($"摄像头 {Index} 连续读取失败超过 30 次，底层连接断开，尝试自动重新初始化...");
+                        Thread.Sleep(1000);
+                        ReopenCamera();
+                    }
+                    else
+                    {
+                        Thread.Sleep(30);
+                    }
+                }
+
                 while (_isCapturing)
                 {
                     stopwatch.Restart();
@@ -915,49 +953,42 @@ namespace camera
 
                     try
                     {
-                        if (cap == null || cap.IsDisposed || !cap.IsOpened() || !cap.Read(_captureMat) || _captureMat.Empty())
+                        if (cap == null || cap.IsDisposed || !cap.IsOpened())
                         {
-                            if (!_isCapturing)
-                            {
-                                break;
-                            }
-                            bool wasConnectedInFail = _continuousReadFailCount <= 5;
-                            _continuousReadFailCount++;
-                            if (wasConnectedInFail != (_continuousReadFailCount <= 5))
-                            {
-                                RaisePropertyChanged(nameof(IsConnected));
-                            }
+                            HandleCaptureFailure();
+                            continue;
+                        }
 
-                            if (_continuousReadFailCount > 5)
-                            {
-                                DateTime now = DateTime.Now;
-                                if (now - _lastWarningFrameTime >= TimeSpan.FromSeconds(2.0))
-                                {
-                                    _lastWarningFrameTime = now;
+                        // ═══ 管道节流：基于时间戳（Wall-clock Time）进行判断 ═══
+                        int targetPipelineFps = isSave ? Math.Max(PreviewFps, RecordFps) : PreviewFps;
+                        double targetIntervalMs = 1000.0 / Math.Max(1, targetPipelineFps);
+                        DateTime pipelineNow = DateTime.Now;
+                        double elapsedMs = (pipelineNow - _lastPipelineProcessTime).TotalMilliseconds;
+                        bool needProcess = elapsedMs >= targetIntervalMs - 2.0;
 
-                                    string errorMsg = (cap == null || !cap.IsOpened())
-                                         ? $"Channel {Index} - Device Occupied / Not Ready"
-                                         : $"Channel {Index} - Connection Disconnected";
-                                    PushWarningFrame(errorMsg);
-                                }
-                            }
-
-                            if (_continuousReadFailCount > 30)
-                            {
-                                Logger.LogWarning($"摄像头 {Index} 连续读取失败超过 30 次，底层连接断开，尝试自动重新初始化...");
-                                Thread.Sleep(1000);
-                                ReopenCamera();
-                            }
-                            else
-                            {
-                                Thread.Sleep(30);
-                            }
+                        // 仅抓取帧（轻量级，清除驱动缓冲区，但不解码图像像素）
+                        if (!cap.Grab())
+                        {
+                            HandleCaptureFailure();
                             continue;
                         }
 
                         if (!_isCapturing)
                         {
                             break;
+                        }
+
+                        if (!needProcess)
+                        {
+                            // 丢弃此帧的解码：仅用于清空 USB 缓冲区以防延迟，直接跳过解码及后续处理
+                            continue;
+                        }
+
+                        // 满足处理周期，对已抓取的帧进行真正解码并填充到 _captureMat (重量级)
+                        if (!cap.Retrieve(_captureMat) || _captureMat.Empty())
+                        {
+                            HandleCaptureFailure();
+                            continue;
                         }
 
                         bool wasConnectedInSuccess = _continuousReadFailCount <= 5;
@@ -968,45 +999,27 @@ namespace camera
                             RaisePropertyChanged(nameof(IsConnected));
                         }
 
+                        _lastPipelineProcessTime = pipelineNow;
 
-                        // ═══ 管道节流：基于时间戳（Wall-clock Time）进行跳帧 ═══
-                        // 相机以 Fps(如30fps)读帧，目的是清空USB缓冲区避免积压；
-                        // 如果录像开启，管道节流帧率取 PreviewFps 和 RecordFps 之间的最大值，确保预览依然流畅
-                        int targetPipelineFps = isSave ? Math.Max(PreviewFps, RecordFps) : PreviewFps;
-                        double targetIntervalMs = 1000.0 / Math.Max(1, targetPipelineFps);
-                        DateTime pipelineNow = DateTime.Now;
-                        double elapsedMs = (pipelineNow - _lastPipelineProcessTime).TotalMilliseconds;
+                        // 仅在需要处理时从对象池租借并拷贝图像，大幅减少无用帧的分配与拷贝开销
+                        tempFrame = Infrastructure.MatPool.Rent(_captureMat.Width, _captureMat.Height, _captureMat.Type());
+                        _captureMat.CopyTo(tempFrame);
 
-                        // 允许 2.0ms 的极小容差（Margin）来抵消操作系统的调度抖动
-                        if (elapsedMs < targetIntervalMs - 2.0)
+                        // 兼容性事件通知
+                        FrameChanged?.Invoke(tempFrame);
+
+                        // 执行责任链图像处理管道（含水印叠加 + 录像写入）
+                        _pipeline.Process(tempFrame, pipelineNow);
+
+                        // 将处理后的图像传递给预览控制器
+                        _previewController.UpdateFrame(tempFrame, pipelineNow);
+
+                        // 磁盘检查计数
+                        _frameCount++;
+                        if (_frameCount % 100 == 0)
                         {
-                            // 丢弃此帧：仅用于清空 USB 缓冲区，直接跳过处理，不进行对象池分配与拷贝
-                            continue;
-                        }
-                        else
-                        {
-                            _lastPipelineProcessTime = pipelineNow;
-
-                            // 仅在需要处理时从对象池租借并拷贝图像，大幅减少无用帧的分配与拷贝开销
-                            tempFrame = Infrastructure.MatPool.Rent(_captureMat.Width, _captureMat.Height, _captureMat.Type());
-                            _captureMat.CopyTo(tempFrame);
-
-                            // 兼容性事件通知
-                            FrameChanged?.Invoke(tempFrame);
-
-                            // 执行责任链图像处理管道（含水印叠加 + 录像写入）
-                            _pipeline.Process(tempFrame, pipelineNow);
-
-                            // 将处理后的图像传递给预览控制器
-                            _previewController.UpdateFrame(tempFrame, pipelineNow);
-
-                            // 磁盘检查计数
-                            _frameCount++;
-                            if (_frameCount % 100 == 0)
-                            {
-                                _frameCount = 0;
-                                CheckDiskSpace();
-                            }
+                            _frameCount = 0;
+                            CheckDiskSpace();
                         }
                     }
                     catch (Exception ex)
