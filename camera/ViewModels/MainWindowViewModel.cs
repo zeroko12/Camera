@@ -462,12 +462,12 @@ namespace camera.ViewModels
                 {
                     Logger.LogInfo($"开始初始化物理通道: #{device.Index} - {device.Name} (唯一路径: {device.DevicePath})");
                     var camera = new CameraService();
+                    camera.DevicePath = device.DevicePath; // 绑定唯一硬件路径
+                    camera.Name = device.Name; // 使用物理设备名称显示
 
                     // StartCapture 启动该相机，即使被占用也总是返回 true
                     if (camera.StartCapture(device.Index))
                     {
-                        camera.Name = device.Name; // 使用物理设备名称显示
-                        camera.DevicePath = device.DevicePath; // 绑定唯一硬件路径
                         Cameras.Add(camera);
                         camera.DiskSpaceLow += Camera_DiskSpaceLow;
 
@@ -1093,19 +1093,20 @@ namespace camera.ViewModels
                             {
                                 Application.Current?.Dispatcher.Invoke(() =>
                                 {
-                                    newCam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{device.Index}_CustomText") ?? device.Name;
-                                    newCam.OverlayTextSize = double.Parse(ConfigurationManager.GetSetting($"Camera_{device.Index}_OverlayTextSize") ?? "0.3");
-                                    string savedRes = ConfigurationManager.GetSetting($"Camera_{device.Index}_Resolution");
+                                    string configKey = CameraService.GetConfigKey(device.DevicePath, device.Index);
+                                    newCam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText") ?? device.Name;
+                                    newCam.OverlayTextSize = double.Parse(ConfigurationManager.GetSetting($"Camera_{configKey}_OverlayTextSize") ?? "0.3");
+                                    string savedRes = ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
                                     if (!string.IsNullOrEmpty(savedRes))
                                     {
                                         newCam.SelectedResolution = savedRes;
                                     }
-                                    string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{device.Index}_RecordResolution");
+                                    string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
                                     if (!string.IsNullOrEmpty(savedRecordRes))
                                     {
                                         newCam.SelectedRecordResolution = savedRecordRes;
                                     }
-                                    string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{device.Index}_RecordFps");
+                                    string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
                                     if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
                                     {
                                         newCam.RecordFps = rfps;
@@ -1182,19 +1183,20 @@ namespace camera.ViewModels
 
             foreach (var cam in Cameras)
             {
-                cam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{cam.Index}_CustomText") ?? $"通道 {cam.Index}";
+                string configKey = cam.GetConfigKey();
+                cam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText") ?? $"通道 {cam.Index}";
                 cam.OverlayTextSize = OverlayTextSize;
-                string savedRes = ConfigurationManager.GetSetting($"Camera_{cam.Index}_Resolution");
+                string savedRes = ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
                 if (!string.IsNullOrEmpty(savedRes))
                 {
                     cam.SelectedResolution = savedRes;
                 }
-                string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{cam.Index}_RecordResolution");
+                string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
                 if (!string.IsNullOrEmpty(savedRecordRes))
                 {
                     cam.SelectedRecordResolution = savedRecordRes;
                 }
-                string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{cam.Index}_RecordFps");
+                string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
                 if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
                 {
                     cam.RecordFps = rfps;
@@ -1246,10 +1248,11 @@ namespace camera.ViewModels
 
             foreach (var cam in Cameras)
             {
-                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_CustomText", cam.CustomOverlayText ?? "");
-                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_Resolution", cam.SelectedResolution ?? "");
-                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_RecordResolution", cam.SelectedRecordResolution ?? "与采集分辨率一致");
-                 ConfigurationManager.SaveSetting($"Camera_{cam.Index}_RecordFps", cam.RecordFps.ToString());
+                 string configKey = cam.GetConfigKey();
+                 ConfigurationManager.SaveSetting($"Camera_{configKey}_CustomText", cam.CustomOverlayText ?? "");
+                 ConfigurationManager.SaveSetting($"Camera_{configKey}_Resolution", cam.SelectedResolution ?? "");
+                 ConfigurationManager.SaveSetting($"Camera_{configKey}_RecordResolution", cam.SelectedRecordResolution ?? "与采集分辨率一致");
+                 ConfigurationManager.SaveSetting($"Camera_{configKey}_RecordFps", cam.RecordFps.ToString());
             }
         }
 

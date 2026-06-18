@@ -97,7 +97,7 @@ namespace camera
 
                     if (Index >= 0)
                     {
-                        ConfigurationManager.SaveSetting($"Camera_{Index}_RecordFps", clamped.ToString());
+                        ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_RecordFps", clamped.ToString());
                     }
 
                     if (isSave)
@@ -186,6 +186,27 @@ namespace camera
         {
             get => _Index;
             set => SetProperty(ref _Index, value);
+        }
+
+        public static string GetConfigKey(string devicePath, int index)
+        {
+            if (string.IsNullOrEmpty(devicePath))
+            {
+                return index.ToString();
+            }
+
+            // Stable DJB2 hash algorithm to get a stable, XML-safe key
+            uint hash = 5381;
+            foreach (char c in devicePath)
+            {
+                hash = ((hash << 5) + hash) + c;
+            }
+            return "Dev_" + hash.ToString("X");
+        }
+
+        public string GetConfigKey()
+        {
+            return GetConfigKey(DevicePath, Index);
         }
 
         public string saveDirectory = "SavedVideos";
@@ -326,7 +347,7 @@ namespace camera
                 {
                     if (Index >= 0)
                     {
-                        ConfigurationManager.SaveSetting($"Camera_{Index}_RecordResolution", value);
+                        ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_RecordResolution", value);
                     }
                     if (isSave)
                     {
@@ -400,7 +421,7 @@ namespace camera
                     // 实时保存自定义水印文字内容
                     if (Index >= 0)
                     {
-                        ConfigurationManager.SaveSetting($"Camera_{Index}_CustomText", value ?? "");
+                        ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_CustomText", value ?? "");
                     }
 
                     if (isSave)
@@ -621,7 +642,7 @@ namespace camera
             HeightOrigin = bestHeight;
 
             // 读取已保存的分辨率配置，如果在支持的列表中，则优先应用
-            string savedRes = ConfigurationManager.GetSetting($"Camera_{Index}_Resolution");
+            string savedRes = ConfigurationManager.GetSetting($"Camera_{GetConfigKey()}_Resolution");
             bool appliedSavedRes = false;
             if (!string.IsNullOrEmpty(savedRes))
             {
@@ -651,7 +672,7 @@ namespace camera
             RaisePropertyChanged(nameof(SelectedResolution));
 
             // 读取已保存的录像分辨率配置，如果在支持的列表中，则优先应用
-            string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{Index}_RecordResolution");
+            string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{GetConfigKey()}_RecordResolution");
             if (!string.IsNullOrEmpty(savedRecordRes) && SupportedRecordResolutions.Contains(savedRecordRes))
             {
                 _selectedRecordResolution = savedRecordRes;
@@ -663,7 +684,7 @@ namespace camera
             RaisePropertyChanged(nameof(SelectedRecordResolution));
 
             // 读取已保存的录像帧率配置
-            string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{Index}_RecordFps");
+            string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{GetConfigKey()}_RecordFps");
             if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
             {
                 RecordFps = rfps;
@@ -811,10 +832,16 @@ namespace camera
                         }
                     }
                 }
+                else
+                {
+                    Logger.LogWarning($"[CameraService] 重新打开摄像头 {Index} 失败，重置连续失败计数以进行下一次周期的尝试");
+                    _continuousReadFailCount = 0;
+                }
             }
             catch (Exception ex)
             {
                 Logger.LogError($"摄像头 {Index} 尝试重新初始化连接时发生异常", ex);
+                _continuousReadFailCount = 0;
             }
         }
 
@@ -1358,7 +1385,7 @@ namespace camera
                         // 仅当确定此分辨率被硬件驱动成功应用时，才实时保存配置
                         if (Index >= 0)
                         {
-                            ConfigurationManager.SaveSetting($"Camera_{Index}_Resolution", actualResStr);
+                            ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_Resolution", actualResStr);
                         }
 
                         if (_selectedResolution != actualResStr)
@@ -1430,25 +1457,21 @@ namespace camera
 
                     if (cap != null)
                     {
-                        var capToDispose = cap;
-                        cap = null;
-                        Task.Run(() =>
+                        try
                         {
-                            try
+                            Logger.LogInfo($"[CameraService #{Index}] 正在同步释放 VideoCapture...");
+                            if (cap.IsOpened())
                             {
-                                Logger.LogInfo($"[CameraService #{Index}] 正在后台释放 VideoCapture...");
-                                if (capToDispose.IsOpened())
-                                {
-                                    capToDispose.Release();
-                                }
-                                capToDispose.Dispose();
-                                Logger.LogInfo($"[CameraService #{Index}] 后台释放 VideoCapture 完成");
+                                cap.Release();
                             }
-                            catch (Exception ex)
-                            {
-                                Logger.LogWarning($"[CameraService #{Index}] 后台释放 VideoCapture 异常: {ex.Message}");
-                            }
-                        });
+                            cap.Dispose();
+                            Logger.LogInfo($"[CameraService #{Index}] 同步释放 VideoCapture 完成");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogWarning($"[CameraService #{Index}] 同步释放 VideoCapture 异常: {ex.Message}");
+                        }
+                        cap = null;
                     }
 
                     if (_Frame != null)
