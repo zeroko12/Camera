@@ -19,7 +19,7 @@ namespace camera
         #region 私有核心组件
 
         private VideoCapture cap;
-        private Mat _captureMat = new();
+        private Task _captureTask;
         private double FpsOrigin = 15, WidthOrigin = 1280, HeightOrigin = 720;
         private volatile bool _isCapturing = false;
         private int _continuousReadFailCount = 0;
@@ -46,6 +46,7 @@ namespace camera
         private readonly object _lockObject = new();
         private static readonly object _diskCleanupLock = new();
         private static DateTime _lastDiskSpaceWarningTime = DateTime.MinValue;
+        private readonly Stopwatch _fpsTimer = new();
 
         #endregion
 
@@ -479,8 +480,8 @@ namespace camera
 
         #region 摄像头采集格式
 
-        private enum CaptureFormat { YUY2, NV12, MJPG }
-        private static CaptureFormat _preferredFormat = CaptureFormat.YUY2;
+        private enum CaptureFormat { MJPG, YUY2, NV12 }
+        private static CaptureFormat _preferredFormat = CaptureFormat.MJPG;
         private static bool _formatChecked = false;
 
         #endregion
@@ -549,6 +550,18 @@ namespace camera
             _recordingProcessor.Recorder = _recorder;
         }
 
+        private static string DecodeFourCC(double fourcc)
+        {
+            int val = (int)fourcc;
+            if (val == 0) return "NONE";
+            char[] chars = new char[4];
+            chars[0] = (char)(val & 0xFF);
+            chars[1] = (char)((val >> 8) & 0xFF);
+            chars[2] = (char)((val >> 16) & 0xFF);
+            chars[3] = (char)((val >> 24) & 0xFF);
+            return new string(chars).Trim('\0').Trim();
+        }
+
         public int getCameraNum()
         {
             return 1;
@@ -592,6 +605,12 @@ namespace camera
                 {
                     cap.Set(VideoCaptureProperties.FrameWidth, width);
                     cap.Set(VideoCaptureProperties.FrameHeight, height);
+                    if (_preferredFormat == CaptureFormat.MJPG)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                    else if (_preferredFormat == CaptureFormat.YUY2)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+                    else
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
                     Thread.Sleep(30);
 
                     double actualWidth = cap.Get(VideoCaptureProperties.FrameWidth);
@@ -693,8 +712,18 @@ namespace camera
             // 将摄像头设置回最终确定的分辨率（避免保留探测循环最后一项的值）
             cap.Set(VideoCaptureProperties.FrameWidth, Width);
             cap.Set(VideoCaptureProperties.FrameHeight, Height);
+            if (_preferredFormat == CaptureFormat.MJPG)
+                cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+            else if (_preferredFormat == CaptureFormat.YUY2)
+                cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+            else
+                cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
 
-            Logger.LogInfo($"[CameraService #{Index}] 最终初始化摄像头配置: {Width}x{Height} @ {FpsOrigin}fps");
+            double finalW = cap.Get(VideoCaptureProperties.FrameWidth);
+            double finalH = cap.Get(VideoCaptureProperties.FrameHeight);
+            double finalFps = cap.Get(VideoCaptureProperties.Fps);
+            double finalFourcc = cap.Get(VideoCaptureProperties.FourCC);
+            Logger.LogInfo($"[CameraService #{Index}] 最终初始化摄像头配置: {finalW}x{finalH} @ {finalFps}fps, 实际格式: {DecodeFourCC(finalFourcc)}");
         }
 
         public bool StartCapture(int index = 0)
@@ -705,15 +734,35 @@ namespace camera
                 cap = new VideoCapture(index, VideoCaptureAPIs.DSHOW);
 
                 bool formatSet = false;
-                if (!_formatChecked || _preferredFormat == CaptureFormat.YUY2)
+                if (!_formatChecked || _preferredFormat == CaptureFormat.MJPG)
+                {
+                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                    Thread.Sleep(50);
+                    if (cap.IsOpened())
+                    {
+                        double fc = cap.Get(VideoCaptureProperties.FourCC);
+                        if (DecodeFourCC(fc) == "MJPG")
+                        {
+                            formatSet = true;
+                            _preferredFormat = CaptureFormat.MJPG;
+                            Logger.LogInfo($"摄像头 {index} 成功协商并使用 MJPG 格式");
+                        }
+                    }
+                }
+
+                if (!formatSet && (!_formatChecked || _preferredFormat == CaptureFormat.YUY2))
                 {
                     cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
                     Thread.Sleep(50);
                     if (cap.IsOpened())
                     {
-                        formatSet = true;
-                        _preferredFormat = CaptureFormat.YUY2;
-                        Logger.LogInfo($"摄像头 {index} 使用 YUY2 格式");
+                        double fc = cap.Get(VideoCaptureProperties.FourCC);
+                        if (DecodeFourCC(fc) == "YUY2")
+                        {
+                            formatSet = true;
+                            _preferredFormat = CaptureFormat.YUY2;
+                            Logger.LogInfo($"摄像头 {index} 成功协商并使用 YUY2 格式");
+                        }
                     }
                 }
 
@@ -723,16 +772,30 @@ namespace camera
                     Thread.Sleep(50);
                     if (cap.IsOpened())
                     {
-                        formatSet = true;
-                        _preferredFormat = CaptureFormat.NV12;
-                        Logger.LogInfo($"摄像头 {index} 使用 NV12 格式");
+                        double fc = cap.Get(VideoCaptureProperties.FourCC);
+                        if (DecodeFourCC(fc) == "NV12")
+                        {
+                            formatSet = true;
+                            _preferredFormat = CaptureFormat.NV12;
+                            Logger.LogInfo($"摄像头 {index} 成功协商并使用 NV12 格式");
+                        }
                     }
                 }
 
                 if (!formatSet)
                 {
-                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
-                    _preferredFormat = CaptureFormat.MJPG;
+                    double currentFC = cap.Get(VideoCaptureProperties.FourCC);
+                    string currentFCStr = DecodeFourCC(currentFC);
+                    if (currentFCStr == "YUY2")
+                        _preferredFormat = CaptureFormat.YUY2;
+                    else if (currentFCStr == "NV12")
+                        _preferredFormat = CaptureFormat.NV12;
+                    else
+                    {
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                        _preferredFormat = CaptureFormat.MJPG;
+                    }
+                    Logger.LogInfo($"摄像头 {index} 协商匹配格式失败，采用驱动当前/默认格式: {DecodeFourCC(cap.Get(VideoCaptureProperties.FourCC))}");
                 }
                 _formatChecked = true;
 
@@ -797,22 +860,31 @@ namespace camera
                 }
 
                 cap = new VideoCapture(Index, VideoCaptureAPIs.DSHOW);
-                if (_preferredFormat == CaptureFormat.YUY2)
-                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
-                else if (_preferredFormat == CaptureFormat.NV12)
-                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
-                else
-                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
-
                 cap.Set(VideoCaptureProperties.FrameWidth, Width);
                 cap.Set(VideoCaptureProperties.FrameHeight, Height);
                 cap.Set(VideoCaptureProperties.Fps, Fps);
+
+                Thread.Sleep(50);
+
+                if (_preferredFormat == CaptureFormat.MJPG)
+                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                else if (_preferredFormat == CaptureFormat.YUY2)
+                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+                else
+                    cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
 
                 if (cap.IsOpened())
                 {
                     _continuousReadFailCount = 0;
                     _lastPipelineProcessTime = DateTime.MinValue; // 重连成功，重置节流时间
-                    Logger.LogInfo($"摄像头 {Index} 系统自恢复重置成功。");
+                    
+                    double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
+                    double actualH = cap.Get(VideoCaptureProperties.FrameHeight);
+                    double actualFps = cap.Get(VideoCaptureProperties.Fps);
+                    double actualFourcc = cap.Get(VideoCaptureProperties.FourCC);
+                    
+                    Logger.LogInfo($"摄像头 {Index} 系统自恢复重置成功。实际参数: {actualW}x{actualH} @ {actualFps}fps, 实际格式: {DecodeFourCC(actualFourcc)}");
+                    
                     if (SupportedResolutions.Count == 0)
                     {
                         ShowVideoInfo();
@@ -823,8 +895,6 @@ namespace camera
                     }
                     else
                     {
-                        double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
-                        double actualH = cap.Get(VideoCaptureProperties.FrameHeight);
                         if (actualW > 0 && actualH > 0)
                         {
                             Width = actualW;
@@ -931,7 +1001,7 @@ namespace camera
         {
             _isCapturing = true;
 
-            Task.Run(() =>
+            _captureTask = Task.Run(() =>
             {
                 Stopwatch stopwatch = new Stopwatch();
 
@@ -993,9 +1063,16 @@ namespace camera
                         double elapsedMs = (pipelineNow - _lastPipelineProcessTime).TotalMilliseconds;
                         bool needProcess = elapsedMs >= targetIntervalMs - 2.0;
 
-                        // 仅抓取帧（轻量级，清除驱动缓冲区，但不解码图像像素）
-                        if (!cap.Grab())
+                        // 从对象池租借 Mat
+                        int w = Width > 0 ? (int)Width : 1280;
+                        int h = Height > 0 ? (int)Height : 720;
+                        tempFrame = Infrastructure.MatPool.Rent(w, h, MatType.CV_8UC3);
+
+                        // 原子读取：读取完即填充到 tempFrame，避免 Grab 和 Retrieve 分步导致的驱动缓冲区竞争撕裂
+                        if (!cap.Read(tempFrame) || tempFrame.Empty())
                         {
+                            Infrastructure.MatPool.Return(tempFrame);
+                            tempFrame = null;
                             HandleCaptureFailure();
                             continue;
                         }
@@ -1007,14 +1084,9 @@ namespace camera
 
                         if (!needProcess)
                         {
-                            // 丢弃此帧的解码：仅用于清空 USB 缓冲区以防延迟，直接跳过解码及后续处理
-                            continue;
-                        }
-
-                        // 满足处理周期，对已抓取的帧进行真正解码并填充到 _captureMat (重量级)
-                        if (!cap.Retrieve(_captureMat) || _captureMat.Empty())
-                        {
-                            HandleCaptureFailure();
+                            // 丢弃此帧的解码结果：仅用于清空 USB 缓冲区以防延迟，直接丢弃
+                            Infrastructure.MatPool.Return(tempFrame);
+                            tempFrame = null;
                             continue;
                         }
 
@@ -1028,10 +1100,6 @@ namespace camera
 
                         _lastPipelineProcessTime = pipelineNow;
 
-                        // 仅在需要处理时从对象池租借并拷贝图像，大幅减少无用帧的分配与拷贝开销
-                        tempFrame = Infrastructure.MatPool.Rent(_captureMat.Width, _captureMat.Height, _captureMat.Type());
-                        _captureMat.CopyTo(tempFrame);
-
                         // 兼容性事件通知
                         FrameChanged?.Invoke(tempFrame);
 
@@ -1041,10 +1109,25 @@ namespace camera
                         // 将处理后的图像传递给预览控制器
                         _previewController.UpdateFrame(tempFrame, pipelineNow);
 
-                        // 磁盘检查计数
+                        // 磁盘检查计数和采集帧率监控
                         _frameCount++;
                         if (_frameCount % 100 == 0)
                         {
+                            if (!_fpsTimer.IsRunning)
+                            {
+                                _fpsTimer.Start();
+                            }
+                            else
+                            {
+                                double sec = _fpsTimer.Elapsed.TotalSeconds;
+                                _fpsTimer.Restart();
+                                if (sec > 0)
+                                {
+                                    double actualCaptureFps = 100.0 / sec;
+                                    Logger.LogInfo($"[CameraService #{Index}] 过去 100 帧的实际物理采集帧率为: {actualCaptureFps:F2} fps");
+                                }
+                            }
+
                             _frameCount = 0;
                             CheckDiskSpace();
                         }
@@ -1291,7 +1374,18 @@ namespace camera
                     StopSaving();
                 }
 
-                Thread.Sleep(200); 
+                try
+                {
+                    if (_captureTask != null)
+                    {
+                        _captureTask.Wait(500);
+                        _captureTask = null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"等待旧采集循环退出异常: {ex.Message}");
+                }
 
                 try
                 {
@@ -1333,18 +1427,18 @@ namespace camera
                     }
 
                     cap = new VideoCapture(Index, VideoCaptureAPIs.DSHOW);
-                    if (_preferredFormat == CaptureFormat.YUY2)
-                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
-                    else if (_preferredFormat == CaptureFormat.NV12)
-                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
-                    else
-                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
-
-                    Thread.Sleep(50);
-
                     cap.Set(VideoCaptureProperties.FrameWidth, Width);
                     cap.Set(VideoCaptureProperties.FrameHeight, Height);
                     cap.Set(VideoCaptureProperties.Fps, Fps);
+
+                    Thread.Sleep(50);
+
+                    if (_preferredFormat == CaptureFormat.MJPG)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                    else if (_preferredFormat == CaptureFormat.YUY2)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+                    else
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
 
                     // 强行读取一帧哑帧驱动 DirectShow 内部的 Pin 协商与缓冲区重分配
                     if (cap.IsOpened())
@@ -1366,7 +1460,8 @@ namespace camera
                     double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
                     double actualH = cap.Get(VideoCaptureProperties.FrameHeight);
                     double actualFps = cap.Get(VideoCaptureProperties.Fps);
-                    Logger.LogInfo($"[CameraService #{Index}] 重连配置: {actualW}x{actualH} @ {actualFps}fps");
+                    double actualFourcc = cap.Get(VideoCaptureProperties.FourCC);
+                    Logger.LogInfo($"[CameraService #{Index}] 重连配置: {actualW}x{actualH} @ {actualFps}fps, 实际格式: {DecodeFourCC(actualFourcc)}");
 
                     if (!cap.IsOpened())
                     {
@@ -1478,12 +1573,6 @@ namespace camera
                     {
                         _Frame.Dispose();
                         _Frame = null;
-                    }
-
-                    if (_captureMat != null)
-                    {
-                        _captureMat.Dispose();
-                        _captureMat = null;
                     }
                 }
                 catch (Exception ex)
