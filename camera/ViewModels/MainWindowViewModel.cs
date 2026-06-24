@@ -379,6 +379,7 @@ namespace camera.ViewModels
 
         //摄像头集合
         private ObservableCollection<CameraService> _Cameras = new();
+        private bool _isInitializing = false;
         public ObservableCollection<CameraService> Cameras
         {
             get { return _Cameras; }
@@ -448,70 +449,111 @@ namespace camera.ViewModels
 
         void init()
         {
-            Logger.LogInfo("开始初始化摄像头 (使用 DirectShow 设备枚举)...");
-            var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
-
-            // 为了防止 USB 探测顺序颠倒，按 DevicePath 排序保证排序一致性
-            devices.Sort((a, b) => string.Compare(a.DevicePath, b.DevicePath, StringComparison.OrdinalIgnoreCase));
-
-            Logger.LogInfo($"物理探测完成，共找到 {devices.Count} 个接入的摄像头设备");
-
-            foreach (var device in devices)
+            Logger.LogInfo("开始后台异步初始化摄像头 (使用 DirectShow 设备枚举)...");
+            _isInitializing = true;
+            
+            System.Threading.Tasks.Task.Run(() =>
             {
                 try
                 {
-                    Logger.LogInfo($"开始初始化物理通道: #{device.Index} - {device.Name} (唯一路径: {device.DevicePath})");
-                    var camera = new CameraService();
-                    camera.DevicePath = device.DevicePath; // 绑定唯一硬件路径
-                    camera.Name = device.Name; // 使用物理设备名称显示
+                    var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
 
-                    // StartCapture 启动该相机，即使被占用也总是返回 true
-                    if (camera.StartCapture(device.Index))
+                    // 为了防止 USB 探测顺序颠倒，按 DevicePath 排序保证排序一致性
+                    devices.Sort((a, b) => string.Compare(a.DevicePath, b.DevicePath, StringComparison.OrdinalIgnoreCase));
+
+                    Logger.LogInfo($"物理探测完成，共找到 {devices.Count} 个接入的摄像头设备");
+
+                    foreach (var device in devices)
                     {
-                        Cameras.Add(camera);
-                        camera.DiskSpaceLow += Camera_DiskSpaceLow;
-
-                        Logger.LogInfo($"✓ 摄像头 #{device.Index} ({device.Name}) 加载成功 (当前在线: {camera.IsConnected})");
-
-                        // 分时初始化：若成功开启，为防抢带宽延时 600ms，否则仅 50ms 
-                        if (camera.IsConnected)
+                        if (_disposed)
                         {
-                            System.Threading.Thread.Sleep(600);
+                            Logger.LogInfo("检测到 ViewModel 已释放，中止摄像头加载。");
+                            break;
                         }
-                        else
+
+                        try
                         {
-                            System.Threading.Thread.Sleep(50);
+                            Logger.LogInfo($"开始初始化物理通道: #{device.Index} - {device.Name} (唯一路径: {device.DevicePath})");
+                            var camera = new CameraService();
+                            camera.DevicePath = device.DevicePath; // 绑定唯一硬件路径
+                            camera.Name = device.Name; // 使用物理设备名称显示
+
+                            // StartCapture 启动该相机，即使被占用也总是返回 true
+                            if (camera.StartCapture(device.Index))
+                            {
+                                if (_disposed)
+                                {
+                                    camera.Dispose();
+                                    break;
+                                }
+
+                                Application.Current?.Dispatcher.Invoke(() =>
+                                {
+                                    if (_disposed)
+                                    {
+                                        camera.Dispose();
+                                        return;
+                                    }
+
+                                    ApplySettingsToCamera(camera);
+                                    Cameras.Add(camera);
+                                    camera.DiskSpaceLow += Camera_DiskSpaceLow;
+                                    
+                                    Logger.LogInfo($"✓ 摄像头 #{device.Index} ({device.Name}) 加载成功 (当前在线: {camera.IsConnected})");
+                                });
+
+                                // 分时初始化：若成功开启，为防抢带宽延时 600ms，否则仅 50ms 
+                                if (camera.IsConnected)
+                                {
+                                    System.Threading.Thread.Sleep(600);
+                                }
+                                else
+                                {
+                                    System.Threading.Thread.Sleep(50);
+                                }
+                            }
+                            else
+                            {
+                                camera.Dispose();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogError($"加载物理摄像头 #{device.Index} 时发生异常", ex);
                         }
                     }
-                    else
+
+                    Application.Current?.Dispatcher.Invoke(() =>
                     {
-                        camera.Dispose();
-                    }
+                        if (_disposed) return;
+
+                        Logger.LogInfo($"摄像头初始化完成，共找到 {Cameras.Count} 个活动/占位摄像头");
+                        _isInitializing = false;
+
+                        // 从第一个摄像头获取实际帧率作为滑块上限
+                        if (Cameras.Count > 0)
+                        {
+                            MaxFps = (int)Cameras[0].Fps;
+                            if (MaxFps <= 0) MaxFps = 30;
+                            Logger.LogInfo($"摄像头最大帧率: {MaxFps}fps");
+                            SelectedConfigCamera = Cameras[0];
+                            RefreshPreviewWidthOptions();
+                        }
+
+                        if (Cameras.Count == 0)
+                        {
+                            Logger.LogWarning("未检测到可用的摄像头，程序将退出");
+                            MessageBox.Show("未检测到可用的摄像头");
+                            Application.Current.Shutdown();//退出自身
+                        }
+                    });
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError($"加载物理摄像头 #{device.Index} 时发生异常", ex);
+                    Logger.LogError("异步初始化摄像头主任务发生异常", ex);
+                    Application.Current?.Dispatcher.Invoke(() => { _isInitializing = false; });
                 }
-            }
-
-            Logger.LogInfo($"摄像头初始化完成，共找到 {Cameras.Count} 个活动/占位摄像头");
-
-            // 从第一个摄像头获取实际帧率作为滑块上限
-            if (Cameras.Count > 0)
-            {
-                MaxFps = (int)Cameras[0].Fps;
-                if (MaxFps <= 0) MaxFps = 30;
-                Logger.LogInfo($"摄像头最大帧率: {MaxFps}fps");
-                SelectedConfigCamera = Cameras[0];
-                RefreshPreviewWidthOptions();
-            }
-
-            if (Cameras.Count == 0)
-            {
-                Logger.LogWarning("未检测到可用的摄像头，程序将退出");
-                MessageBox.Show("未检测到可用的摄像头");
-                Application.Current.Shutdown();//退出自身
-            }
+            });
         }
 
         private void Camera_DiskSpaceLow(object sender, string message)
@@ -574,6 +616,7 @@ namespace camera.ViewModels
 
         void ExecuteClosingCommand()
         {
+            try { System.Windows.Application.Current?.MainWindow?.Hide(); } catch { }
             SaveSettings();
             Dispose(); // 释放所有资源
         }
@@ -1013,6 +1056,12 @@ namespace camera.ViewModels
 
         public void OnDeviceChangeNotification()
         {
+            if (_isInitializing)
+            {
+                Logger.LogInfo("检测到正在进行初始化加载，忽略此次 USB 设备变动通知。");
+                return;
+            }
+
             Logger.LogInfo("检测到 USB 设备变动，正在执行设备状态检查...");
 
             // 在 UI 线程快速拷贝当前已有的 Camera 实例快照，避免多线程并发修改集合异常
@@ -1093,25 +1142,7 @@ namespace camera.ViewModels
                             {
                                 Application.Current?.Dispatcher.Invoke(() =>
                                 {
-                                    string configKey = CameraService.GetConfigKey(device.DevicePath, device.Index);
-                                    newCam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText") ?? device.Name;
-                                    newCam.OverlayTextSize = double.Parse(ConfigurationManager.GetSetting($"Camera_{configKey}_OverlayTextSize") ?? "0.3");
-                                    string savedRes = ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
-                                    if (!string.IsNullOrEmpty(savedRes))
-                                    {
-                                        newCam.SelectedResolution = savedRes;
-                                    }
-                                    string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
-                                    if (!string.IsNullOrEmpty(savedRecordRes))
-                                    {
-                                        newCam.SelectedRecordResolution = savedRecordRes;
-                                    }
-                                    string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
-                                    if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
-                                    {
-                                        newCam.RecordFps = rfps;
-                                    }
-
+                                    ApplySettingsToCamera(newCam);
                                     Cameras.Add(newCam);
                                     newCam.DiskSpaceLow += Camera_DiskSpaceLow;
 
@@ -1181,27 +1212,7 @@ namespace camera.ViewModels
             IsGrayHomogenization = bool.Parse(ConfigurationManager.GetSetting("IsGrayHomogenization") ?? "false");
             OverlayTextSize = double.Parse(ConfigurationManager.GetSetting("OverlayTextSize") ?? "0.3");
 
-            foreach (var cam in Cameras)
-            {
-                string configKey = cam.GetConfigKey();
-                cam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText") ?? $"通道 {cam.Index}";
-                cam.OverlayTextSize = OverlayTextSize;
-                string savedRes = ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
-                if (!string.IsNullOrEmpty(savedRes))
-                {
-                    cam.SelectedResolution = savedRes;
-                }
-                string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
-                if (!string.IsNullOrEmpty(savedRecordRes))
-                {
-                    cam.SelectedRecordResolution = savedRecordRes;
-                }
-                string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
-                if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
-                {
-                    cam.RecordFps = rfps;
-                }
-            }
+            // 摄像头特定配置改为在 init 后台线程/热插拔线程添加摄像头时，通过 ApplySettingsToCamera 异步应用。
 
             // 探测根目录下可能存在的 LOGO 图片文件
             string possibleLogoPng = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logo.png");
@@ -1225,6 +1236,40 @@ namespace camera.ViewModels
             else
             {
                 LogoVisibility = Visibility.Collapsed;
+            }
+        }
+
+        private void ApplySettingsToCamera(CameraService cam)
+        {
+            if (cam == null) return;
+            string configKey = cam.GetConfigKey();
+            cam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText") ?? cam.Name;
+            cam.OverlayTextSize = OverlayTextSize;
+            cam.isSave = isSave;
+            cam.OverwriteOldFiles = OverwriteOldFiles;
+            cam.DiskThreshold = DiskSpaceThreshold;
+            cam.Quality = Quality;
+            cam.SaveInterval = TimeSpan.FromMinutes(SaveInterval);
+            cam.Contrast = Contrast;
+            cam.Luminance = Luminance;
+            cam.IsGrayHomogenization = IsGrayHomogenization;
+            cam.PreviewFps = PreviewFps;
+            cam.MaxPreviewWidth = MaxPreviewWidth;
+
+            string savedRes = ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
+            if (!string.IsNullOrEmpty(savedRes))
+            {
+                cam.SelectedResolution = savedRes;
+            }
+            string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
+            if (!string.IsNullOrEmpty(savedRecordRes))
+            {
+                cam.SelectedRecordResolution = savedRecordRes;
+            }
+            string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
+            if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
+            {
+                cam.RecordFps = rfps;
             }
         }
 
@@ -1283,22 +1328,38 @@ namespace camera.ViewModels
                         _periodicTimer = null;
                     }
 
-                    // 取消所有事件订阅并释放所有 CameraService
+                    // 取消所有事件订阅并并行的释放所有 CameraService，缩短退出时间
                     if (Cameras != null)
                     {
+                        var disposeTasks = new System.Collections.Generic.List<System.Threading.Tasks.Task>();
                         foreach (var camera in Cameras)
                         {
                             if (camera != null)
                             {
                                 camera.DiskSpaceLow -= Camera_DiskSpaceLow;
-                                camera.Dispose();
+                                var camToDispose = camera;
+                                disposeTasks.Add(System.Threading.Tasks.Task.Run(() =>
+                                {
+                                    try { camToDispose.Dispose(); } catch { }
+                                }));
                             }
+                        }
+
+                        if (Cam != null)
+                        {
+                            var camToDispose = Cam;
+                            disposeTasks.Add(System.Threading.Tasks.Task.Run(() =>
+                            {
+                                try { camToDispose.Dispose(); } catch { }
+                            }));
+                        }
+
+                        if (disposeTasks.Count > 0)
+                        {
+                            System.Threading.Tasks.Task.WaitAll(disposeTasks.ToArray(), 4000);
                         }
                         Cameras.Clear();
                     }
-
-                    // 释放单独的 Cam 实例（如果使用）
-                    Cam?.Dispose();
 
                     Debug.WriteLine("MainWindowViewModel 已释放资源");
                 }

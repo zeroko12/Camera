@@ -531,7 +531,9 @@ namespace camera
             };
 
             // 4. 初始化 UI 水印更新定时器
-            _uiTimer = new System.Windows.Threading.DispatcherTimer();
+            _uiTimer = new System.Windows.Threading.DispatcherTimer(
+                System.Windows.Threading.DispatcherPriority.Normal,
+                System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher);
             _uiTimer.Interval = TimeSpan.FromSeconds(1);
             _uiTimer.Tick += (s, e) => { CurrentTimeText = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"); };
             _uiTimer.Start();
@@ -954,6 +956,21 @@ namespace camera
                 
                 _isCapturing = false;
                 
+                // 等待采集线程结束，以防并发访问 cap 导致 OpenCV 崩溃/死锁
+                if (_captureTask != null)
+                {
+                    try
+                    {
+                        Logger.LogInfo($"[CameraService #{Index}] 正在等待采集任务 _captureTask 退出...");
+                        _captureTask.Wait(1000);
+                        Logger.LogInfo($"[CameraService #{Index}] 采集任务 _captureTask 已退出");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"[CameraService #{Index}] 等待采集任务退出异常: {ex.Message}");
+                    }
+                }
+                
                 bool wasConnected = IsConnected;
                 _continuousReadFailCount = 6; // 设置为 6，确保 IsConnected 返回 false
                 if (wasConnected)
@@ -1160,11 +1177,11 @@ namespace camera
         {
             if (isSave)
             {
-                StartSaving();
+                System.Threading.Tasks.Task.Run(() => StartSaving());
             }
             else
             {
-                StopSaving();
+                System.Threading.Tasks.Task.Run(() => StopSaving());
             }
         }
 
@@ -1534,6 +1551,22 @@ namespace camera
                 try
                 {
                     _isCapturing = false;
+
+                    // 等待采集线程结束，以防并发访问 cap 导致 OpenCV 崩溃/死锁
+                    if (_captureTask != null)
+                    {
+                        try
+                        {
+                            Logger.LogInfo($"[CameraService #{Index}] 正在等待采集任务 _captureTask 退出...");
+                            _captureTask.Wait(1000);
+                            Logger.LogInfo($"[CameraService #{Index}] 采集任务 _captureTask 已退出");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogWarning($"[CameraService #{Index}] 等待采集任务退出异常: {ex.Message}");
+                        }
+                    }
+
                     _uiTimer?.Stop();
                     _uiTimer = null;
 
@@ -1545,29 +1578,46 @@ namespace camera
                         }
                     }
 
-                    _recorder?.Dispose();
+                    var tasks = new System.Collections.Generic.List<System.Threading.Tasks.Task>();
+
+                    if (_recorder != null)
+                    {
+                        var rec = _recorder;
+                        tasks.Add(System.Threading.Tasks.Task.Run(() => rec.Dispose()));
+                    }
+
+                    if (cap != null)
+                    {
+                        var c = cap;
+                        tasks.Add(System.Threading.Tasks.Task.Run(() =>
+                        {
+                            try
+                            {
+                                Logger.LogInfo($"[CameraService #{Index}] 正在后台释放 VideoCapture...");
+                                if (c.IsOpened())
+                                {
+                                    c.Release();
+                                }
+                                c.Dispose();
+                                Logger.LogInfo($"[CameraService #{Index}] 后台释放 VideoCapture 完成");
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogWarning($"[CameraService #{Index}] 后台释放 VideoCapture 异常: {ex.Message}");
+                            }
+                        }));
+                    }
+
                     _previewController?.Dispose();
                     _claheProcessor?.Dispose();
                     _timestampOverlayProcessor?.Dispose();
 
-                    if (cap != null)
+                    if (tasks.Count > 0)
                     {
-                        try
-                        {
-                            Logger.LogInfo($"[CameraService #{Index}] 正在同步释放 VideoCapture...");
-                            if (cap.IsOpened())
-                            {
-                                cap.Release();
-                            }
-                            cap.Dispose();
-                            Logger.LogInfo($"[CameraService #{Index}] 同步释放 VideoCapture 完成");
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogWarning($"[CameraService #{Index}] 同步释放 VideoCapture 异常: {ex.Message}");
-                        }
-                        cap = null;
+                        // 并行等待所有释放任务，最多等待 3 秒，防止底层死锁卡死退出流程
+                        System.Threading.Tasks.Task.WaitAll(tasks.ToArray(), 3000);
                     }
+                    cap = null;
 
                     if (_Frame != null)
                     {

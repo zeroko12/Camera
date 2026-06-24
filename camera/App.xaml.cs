@@ -72,6 +72,9 @@ namespace camera
             Debug.WriteLine("程序退出");
             base.OnExit(e);
             Logger.LogInfo("应用程序已退出");
+
+            // 确保进程彻底终止，防止 DirectShow/OpenCV/FFmpeg 遗留线程或 COM 锁导致进程残留
+            Environment.Exit(0);
         }
 
         /// <summary>
