@@ -102,70 +102,95 @@
                 Effect="{StaticResource EffectShadow3}"
                 Opacity="{Binding Opacity}">
                 <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
-                    <ItemsControl ItemsSource="{Binding Cameras}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <UniformGrid Columns="{c:Binding 'Math.Ceiling(Math.Sqrt(Cameras.Count))'}" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="5">
-                                    <hc:ImageBlock
-                                        Margin="0"
-                                        local:ImageMatHelper.SourceMat="{Binding Frame}"
-                                        AllowDrop="True"
-                                        Cursor="Hand"
-                                        DragOver="ImageBlock_DragOver"
-                                        Drop="ImageBlock_Drop"
-                                        MouseMove="ImageBlock_MouseMove"
-                                        PreviewMouseLeftButtonDown="ImageBlock_PreviewMouseLeftButtonDown">
-                                        <hc:ImageBlock.InputBindings>
-                                            <MouseBinding
-                                                Command="{Binding DataContext.ToggleMaximizeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                CommandParameter="{Binding}"
-                                                MouseAction="LeftDoubleClick" />
-                                        </hc:ImageBlock.InputBindings>
-                                    </hc:ImageBlock>
-                                    <!--  零 CPU 损耗 UI 水印叠加  -->
-                                    <StackPanel
-                                        Margin="15"
-                                        HorizontalAlignment="Left"
-                                        VerticalAlignment="Bottom"
-                                        IsHitTestVisible="False"
-                                        Orientation="Vertical">
-                                        <TextBlock
-                                            FontSize="{c:Binding 'OverlayTextSize * 46.6'}"
-                                            FontWeight="Bold"
-                                            Foreground="White"
-                                            Text="{Binding CustomOverlayText}">
-                                            <TextBlock.Effect>
-                                                <DropShadowEffect
-                                                    BlurRadius="3"
-                                                    Direction="320"
-                                                    ShadowDepth="1"
-                                                    Color="Black" />
-                                            </TextBlock.Effect>
-                                        </TextBlock>
-                                        <TextBlock
-                                            Margin="0,2,0,0"
-                                            FontSize="{c:Binding 'OverlayTextSize * 46.6'}"
-                                            FontWeight="Bold"
-                                            Foreground="White"
-                                            Text="{Binding CurrentTimeText}">
-                                            <TextBlock.Effect>
-                                                <DropShadowEffect
-                                                    BlurRadius="3"
-                                                    Direction="320"
-                                                    ShadowDepth="1"
-                                                    Color="Black" />
-                                            </TextBlock.Effect>
-                                        </TextBlock>
-                                    </StackPanel>
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <Grid>
+                        <ItemsControl ItemsSource="{Binding Cameras}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Columns="{c:Binding 'Math.Ceiling(Math.Sqrt(Cameras.Count))'}" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="5">
+                                        <hc:ImageBlock
+                                            Margin="0"
+                                            local:ImageMatHelper.SourceMat="{Binding Frame}"
+                                            AllowDrop="True"
+                                            Cursor="Hand"
+                                            DragOver="ImageBlock_DragOver"
+                                            Drop="ImageBlock_Drop"
+                                            MouseMove="ImageBlock_MouseMove"
+                                            PreviewMouseLeftButtonDown="ImageBlock_PreviewMouseLeftButtonDown">
+                                            <hc:ImageBlock.InputBindings>
+                                                <MouseBinding
+                                                    Command="{Binding DataContext.ToggleMaximizeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    MouseAction="LeftDoubleClick" />
+                                            </hc:ImageBlock.InputBindings>
+                                        </hc:ImageBlock>
+                                        <!--  零 CPU 损耗 UI 水印叠加  -->
+                                        <StackPanel
+                                            Margin="15"
+                                            HorizontalAlignment="Left"
+                                            VerticalAlignment="Bottom"
+                                            IsHitTestVisible="False"
+                                            Orientation="Vertical">
+                                            <TextBlock
+                                                FontSize="{c:Binding 'OverlayTextSize * 46.6'}"
+                                                FontWeight="Bold"
+                                                Foreground="White"
+                                                Text="{Binding CustomOverlayText}">
+                                                <TextBlock.Effect>
+                                                    <DropShadowEffect
+                                                        BlurRadius="3"
+                                                        Direction="320"
+                                                        ShadowDepth="1"
+                                                        Color="Black" />
+                                                </TextBlock.Effect>
+                                            </TextBlock>
+                                            <TextBlock
+                                                Margin="0,2,0,0"
+                                                FontSize="{c:Binding 'OverlayTextSize * 46.6'}"
+                                                FontWeight="Bold"
+                                                Foreground="White"
+                                                Text="{Binding CurrentTimeText}">
+                                                <TextBlock.Effect>
+                                                    <DropShadowEffect
+                                                        BlurRadius="3"
+                                                        Direction="320"
+                                                        ShadowDepth="1"
+                                                        Color="Black" />
+                                                </TextBlock.Effect>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!--  初始打开加载状态标识遮罩层  -->
+                        <Border
+                            Background="#DD1E1E1E"
+                            CornerRadius="5"
+                            Panel.ZIndex="99"
+                            Visibility="{c:Binding IsInitializing,
+                                                   FalseToVisibility=Collapsed}">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <hc:LoadingCircle
+                                    Width="45"
+                                    Height="45"
+                                    Foreground="{DynamicResource PrimaryBrush}" />
+                                <TextBlock
+                                    Margin="0,15,0,0"
+                                    HorizontalAlignment="Center"
+                                    FontSize="14"
+                                    FontWeight="SemiBold"
+                                    Foreground="White"
+                                    Text="{Binding LoadingStatusText}"
+                                    TextAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
                 </Border>
             </Border>
 

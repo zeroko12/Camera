@@ -239,12 +239,40 @@ namespace camera.Views
             base.OnClosed(e);
             GlobalHotKey.Destroy();
 
-            // 释放互斥体
+            // 1. 释放 DataContext ViewModel 资源（优雅关停所有 CameraService 采集与录像线程）
+            try
+            {
+                (this.DataContext as IDisposable)?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"释放 DataContext 异常: {ex.Message}");
+            }
+
+            // 2. 释放互斥体
             if (_mutex != null)
             {
-                _mutex.ReleaseMutex();
-                _mutex.Close();
+                try
+                {
+                    _mutex.ReleaseMutex();
+                    _mutex.Close();
+                }
+                catch { }
             }
+
+            // 3. 触发 WPF 应用程序正常关闭
+            try
+            {
+                Application.Current?.Shutdown();
+            }
+            catch { }
+
+            // 4. 启动 1 秒看门狗，避免底层 DirectShow/OpenCV/FFmpeg 原生 COM 锁死导致 VS 调试进程挂起
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                System.Threading.Thread.Sleep(1000);
+                Environment.Exit(0);
+            });
         }
 
 

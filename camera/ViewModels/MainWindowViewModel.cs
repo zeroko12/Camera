@@ -380,6 +380,19 @@ namespace camera.ViewModels
         //摄像头集合
         private ObservableCollection<CameraService> _Cameras = new();
         private bool _isInitializing = false;
+        public bool IsInitializing
+        {
+            get { return _isInitializing; }
+            set { SetProperty(ref _isInitializing, value); }
+        }
+
+        private string _loadingStatusText = "正在检测摄像头设备...";
+        public string LoadingStatusText
+        {
+            get { return _loadingStatusText; }
+            set { SetProperty(ref _loadingStatusText, value); }
+        }
+
         public ObservableCollection<CameraService> Cameras
         {
             get { return _Cameras; }
@@ -450,8 +463,9 @@ namespace camera.ViewModels
         void init()
         {
             Logger.LogInfo("开始后台异步初始化摄像头 (使用 DirectShow 设备枚举)...");
-            _isInitializing = true;
-            
+            IsInitializing = true;
+            LoadingStatusText = "正在探测摄像头设备...";
+
             System.Threading.Tasks.Task.Run(() =>
             {
                 try
@@ -462,6 +476,11 @@ namespace camera.ViewModels
                     devices.Sort((a, b) => string.Compare(a.DevicePath, b.DevicePath, StringComparison.OrdinalIgnoreCase));
 
                     Logger.LogInfo($"物理探测完成，共找到 {devices.Count} 个接入的摄像头设备");
+
+                    Application.Current?.Dispatcher.Invoke(() =>
+                    {
+                        LoadingStatusText = $"检测到 {devices.Count} 个设备，正在依次加载通道...";
+                    });
 
                     foreach (var device in devices)
                     {
@@ -474,6 +493,11 @@ namespace camera.ViewModels
                         try
                         {
                             Logger.LogInfo($"开始初始化物理通道: #{device.Index} - {device.Name} (唯一路径: {device.DevicePath})");
+                            Application.Current?.Dispatcher.Invoke(() =>
+                            {
+                                LoadingStatusText = $"正在加载摄像头: {device.Name}...";
+                            });
+
                             var camera = new CameraService();
                             camera.DevicePath = device.DevicePath; // 绑定唯一硬件路径
                             camera.Name = device.Name; // 使用物理设备名称显示
@@ -498,7 +522,7 @@ namespace camera.ViewModels
                                     ApplySettingsToCamera(camera);
                                     Cameras.Add(camera);
                                     camera.DiskSpaceLow += Camera_DiskSpaceLow;
-                                    
+
                                     Logger.LogInfo($"✓ 摄像头 #{device.Index} ({device.Name}) 加载成功 (当前在线: {camera.IsConnected})");
                                 });
 
@@ -528,7 +552,7 @@ namespace camera.ViewModels
                         if (_disposed) return;
 
                         Logger.LogInfo($"摄像头初始化完成，共找到 {Cameras.Count} 个活动/占位摄像头");
-                        _isInitializing = false;
+                        IsInitializing = false;
 
                         // 从第一个摄像头获取实际帧率作为滑块上限
                         if (Cameras.Count > 0)
@@ -551,7 +575,7 @@ namespace camera.ViewModels
                 catch (Exception ex)
                 {
                     Logger.LogError("异步初始化摄像头主任务发生异常", ex);
-                    Application.Current?.Dispatcher.Invoke(() => { _isInitializing = false; });
+                    Application.Current?.Dispatcher.Invoke(() => { IsInitializing = false; });
                 }
             });
         }

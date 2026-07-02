@@ -1115,6 +1115,12 @@ namespace camera
                             RaisePropertyChanged(nameof(IsConnected));
                         }
 
+                        // 如果开启了录像且录像服务未就绪/未运行，在首次成功捕获正常画面帧后自动开启录像
+                        if (isSave && _recorder != null && !_recorder.IsRecording)
+                        {
+                            System.Threading.Tasks.Task.Run(() => StartSaving());
+                        }
+
                         _lastPipelineProcessTime = pipelineNow;
 
                         // 兼容性事件通知
@@ -1188,6 +1194,13 @@ namespace camera
         private void StartSaving()
         {
             if (_recorder == null) return;
+            if (_recorder.IsRecording) return;
+
+            if (cap == null || cap.IsDisposed || !cap.IsOpened() || !IsConnected)
+            {
+                Logger.LogInfo($"[CameraService #{Index}] 摄像头 {Name} 尚未成功打开或当前处于离线状态，暂缓开启录像。");
+                return;
+            }
 
             long space = CalcDiskSpaceEnough();
             if (space < DiskThreshold)
