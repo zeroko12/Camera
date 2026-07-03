@@ -1019,6 +1019,16 @@
 
                                                             <Separator Margin="0,2,0,5" />
 
+                                                            <StackPanel Margin="0,2,0,4" Orientation="Vertical">
+                                                                <TextBlock FontSize="11" Foreground="Gray" Text="物理接口规格:" />
+                                                                <TextBlock
+                                                                    Margin="0,1,0,0"
+                                                                    FontSize="11"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="{DynamicResource PrimaryBrush}"
+                                                                    Text="{Binding UsbSpeedDescription}" />
+                                                            </StackPanel>
+
                                                             <TextBlock
                                                                 Margin="0,2,0,2"
                                                                 FontSize="11"
@@ -1029,6 +1039,16 @@
                                                                 ItemsSource="{Binding SupportedResolutions}"
                                                                 SelectedItem="{Binding SelectedResolution, Mode=TwoWay}"
                                                                 Style="{StaticResource ComboBoxExtend}" />
+
+                                                            <StackPanel Margin="0,2,0,5" Orientation="Vertical">
+                                                                <TextBlock FontSize="10" Foreground="Gray" Text="估算传输数据流:" />
+                                                                <TextBlock
+                                                                    Margin="0,1,0,0"
+                                                                    FontSize="11"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="DarkOrange"
+                                                                    Text="{Binding EstimatedMbPerSec, StringFormat={}{0:F1} MB/s}" />
+                                                            </StackPanel>
 
                                                             <TextBlock
                                                                 Margin="0,2,0,2"

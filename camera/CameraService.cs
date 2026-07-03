@@ -369,12 +369,48 @@ namespace camera
             }
         }
 
+        private bool _isUpdatingResolutionProgrammatically = false;
         private string _selectedResolution = "";
         public string SelectedResolution
         {
             get => _selectedResolution;
             set
             {
+                if (string.IsNullOrEmpty(value) || value == _selectedResolution) return;
+
+                string oldRes = _selectedResolution;
+
+                // 若非程序自动恢复/赋值，且原先已有有效分辨率，则尝试拦截并进行 USB 带宽风险检测
+                if (!_isUpdatingResolutionProgrammatically && !string.IsNullOrEmpty(oldRes))
+                {
+                    bool hasRisk = Infrastructure.UsbTopologyHelper.PredictResolutionRisk(
+                        DevicePath,
+                        oldRes,
+                        value,
+                        activeCameraCount: 4,
+                        currentTotalMbPerSec: EstimatedMbPerSec,
+                        out string warningTitle,
+                        out string warningMessage);
+
+                    if (hasRisk && !string.IsNullOrEmpty(warningMessage))
+                    {
+                        var result = System.Windows.MessageBox.Show(
+                            warningMessage,
+                            warningTitle ?? "⚠️ USB 带宽超限预警",
+                            System.Windows.MessageBoxButton.OKCancel,
+                            System.Windows.MessageBoxImage.Warning);
+
+                        if (result != System.Windows.MessageBoxResult.OK)
+                        {
+                            Logger.LogInfo($"[CameraService #{Index}] 用户取消了向高风险分辨率 [{value}] 的切换，保留原分辨率 [{oldRes}]");
+                            _isUpdatingResolutionProgrammatically = true;
+                            RaisePropertyChanged(nameof(SelectedResolution));
+                            _isUpdatingResolutionProgrammatically = false;
+                            return;
+                        }
+                    }
+                }
+
                 if (SetProperty(ref _selectedResolution, value) && !string.IsNullOrEmpty(value))
                 {
                     var parts = value.Split('x');
@@ -382,6 +418,7 @@ namespace camera
                     {
                         Width = w;
                         Height = h;
+                        RaisePropertyChanged(nameof(EstimatedMbPerSec));
                         System.Threading.Tasks.Task.Run(() => ChangeCameraInfo());
                     }
                 }
@@ -461,10 +498,31 @@ namespace camera
 
         public bool IsConnected => _continuousReadFailCount <= 5;
 
+        public string UsbSpeedDescription
+        {
+            get
+            {
+                var topo = Infrastructure.UsbTopologyHelper.GetTopologyInfo(DevicePath, Name);
+                return topo.SpeedDescription;
+            }
+        }
+
+        public double EstimatedMbPerSec
+        {
+            get
+            {
+                if (!IsConnected || Width <= 0 || Height <= 0) return 0;
+                double activeFps = Fps > 0 ? Fps : 30;
+                return Infrastructure.UsbTopologyHelper.CalculateEstimatedMbPerSec((int)Width, (int)Height, activeFps, _preferredFormat.ToString());
+            }
+        }
+
         public void UpdateActiveCodecStatus()
         {
             RaisePropertyChanged(nameof(ActiveCodec));
             RaisePropertyChanged(nameof(IsCodecDowngraded));
+            RaisePropertyChanged(nameof(UsbSpeedDescription));
+            RaisePropertyChanged(nameof(EstimatedMbPerSec));
         }
 
         #endregion
