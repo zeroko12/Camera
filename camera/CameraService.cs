@@ -684,10 +684,25 @@ namespace camera
 
             if (!appliedSavedRes)
             {
-                Width = bestWidth;
-                Height = bestHeight;
-                _selectedResolution = $"{bestWidth}x{bestHeight}";
-                Logger.LogInfo($"[CameraService #{Index}] 未发现有效已保存分辨率，默认使用最大分辨率: {bestWidth}x{bestHeight}");
+                // 为防止多路 4K 摄像头在未配置时默认使用 4K (3840x2160) 吃满 USB 总线带宽导致其他通道打不开，
+                // 优先使用 1080p (1920x1080) 或 720p (1280x720) 作为初始默认采集分辨率。
+                if (SupportedResolutions.Contains("1920x1080"))
+                {
+                    Width = 1920;
+                    Height = 1080;
+                }
+                else if (SupportedResolutions.Contains("1280x720"))
+                {
+                    Width = 1280;
+                    Height = 720;
+                }
+                else
+                {
+                    Width = bestWidth;
+                    Height = bestHeight;
+                }
+                _selectedResolution = $"{(int)Width}x{(int)Height}";
+                Logger.LogInfo($"[CameraService #{Index}] 未发现有效已保存分辨率，默认使用推荐分辨率: {_selectedResolution}");
             }
 
             RaisePropertyChanged(nameof(SelectedResolution));
