@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
 namespace camera.Infrastructure
@@ -26,6 +27,42 @@ namespace camera.Infrastructure
 
     public static class UsbTopologyHelper
     {
+        #region Native P/Invoke for Hardware USB Speed Query (cfgmgr32.dll)
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct DEVPROPKEY
+        {
+            public Guid fmtid;
+            public uint pid;
+
+            public DEVPROPKEY(Guid fmtid, uint pid)
+            {
+                this.fmtid = fmtid;
+                this.pid = pid;
+            }
+        }
+
+        // DEVPKEY_Device_UsbDeviceSpeed: {c8c0c196-d589-49f4-92bd-5ce04746487f}, 9
+        private static readonly DEVPROPKEY DEVPKEY_Device_UsbDeviceSpeed =
+            new DEVPROPKEY(new Guid("c8c0c196-d589-49f4-92bd-5ce04746487f"), 9);
+
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        private static extern int CM_Locate_DevNodeW(out uint pdnDevInst, string pDeviceID, uint ulFlags);
+
+        [DllImport("cfgmgr32.dll")]
+        private static extern int CM_Get_Parent(out uint pdnDevInst, uint dnDevInst, uint ulFlags);
+
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        private static extern int CM_Get_DevNode_PropertyW(
+            uint dnDevInst,
+            ref DEVPROPKEY PropertyKey,
+            out uint PropertyType,
+            byte[] PropertyBuffer,
+            ref uint PropertyBufferSize,
+            uint ulFlags);
+
+        #endregion
+
         private static readonly Dictionary<string, UsbTopologyInfo> _cache = new(StringComparer.OrdinalIgnoreCase);
         private static readonly object _cacheLock = new();
 
@@ -63,34 +100,43 @@ namespace camera.Infrastructure
 
             try
             {
-                string lowerPath = devicePath.ToLower();
-                string lowerName = (deviceName ?? "").ToLower();
-
-                // 优先从 DevicePath 和名称中识别 USB3 / SuperSpeed 特征
-                if (lowerPath.Contains("usb3") || lowerPath.Contains("xhci") || lowerPath.Contains("superspeed") ||
-                    lowerName.Contains("usb3") || lowerName.Contains("superspeed") || lowerName.Contains("3.0"))
+                // 1. 优先使用 Windows SetupAPI / ConfigMgr 查询底层的真实物理硬件速率
+                var hwSpeed = QueryHardwareUsbSpeed(devicePath);
+                if (hwSpeed != UsbSpeedType.Unknown)
                 {
-                    info.SpeedType = UsbSpeedType.Usb3_SuperSpeed;
-                }
-                else if (lowerPath.Contains("ehci") || lowerPath.Contains("usb2") || lowerName.Contains("usb2") || lowerName.Contains("2.0"))
-                {
-                    info.SpeedType = UsbSpeedType.Usb2_HighSpeed;
+                    info.SpeedType = hwSpeed;
                 }
                 else
                 {
-                    // 默认大多 USB 3.0 总线驱动，如果为标准 HD 摄像头默认当作 USB 3.0 / 通用总线处理
-                    info.SpeedType = UsbSpeedType.Usb3_SuperSpeed;
+                    // 2. 若硬件属性查询未命中/不适用，回退至基于 Path 和 Name 的静态特征识别
+                    string lowerPath = (devicePath ?? "").ToLower();
+                    string lowerName = (deviceName ?? "").ToLower();
+
+                    if (lowerPath.Contains("usb3") || lowerPath.Contains("xhci") || lowerPath.Contains("superspeed") ||
+                        lowerName.Contains("usb3") || lowerName.Contains("superspeed") || lowerName.Contains("3.0"))
+                    {
+                        info.SpeedType = UsbSpeedType.Usb3_SuperSpeed;
+                    }
+                    else if (lowerPath.Contains("ehci") || lowerPath.Contains("usb2") || lowerName.Contains("usb2") || lowerName.Contains("2.0"))
+                    {
+                        info.SpeedType = UsbSpeedType.Usb2_HighSpeed;
+                    }
+                    else
+                    {
+                        // 默认当作 USB 3.0 / 通用总线处理
+                        info.SpeedType = UsbSpeedType.Usb3_SuperSpeed;
+                    }
                 }
 
                 // 提取主控分组标识 (例: usb#vid_xxxx&pid_xxxx#...)
-                var match = Regex.Match(devicePath, @"usb#vid_[0-9a-f]+&pid_[0-9a-f]+#([^#{}]+)", RegexOptions.IgnoreCase);
+                var match = Regex.Match(devicePath ?? "", @"usb#vid_[0-9a-f]+&pid_[0-9a-f]+#([^#{}]+)", RegexOptions.IgnoreCase);
                 if (match.Success)
                 {
                     info.ControllerId = match.Groups[1].Value;
                 }
                 else
                 {
-                    info.ControllerId = devicePath;
+                    info.ControllerId = devicePath ?? "";
                 }
             }
             catch
@@ -99,6 +145,93 @@ namespace camera.Infrastructure
             }
 
             return info;
+        }
+
+        /// <summary>
+        /// 从 DirectShow devicePath 提取 Windows PnP Device Instance ID 并查询实际物理连接速率
+        /// </summary>
+        private static UsbSpeedType QueryHardwareUsbSpeed(string devicePath)
+        {
+            if (string.IsNullOrEmpty(devicePath)) return UsbSpeedType.Unknown;
+
+            try
+            {
+                string instanceId = ExtractDeviceInstanceId(devicePath);
+                if (string.IsNullOrEmpty(instanceId)) return UsbSpeedType.Unknown;
+
+                int cr = CM_Locate_DevNodeW(out uint devInst, instanceId, 0);
+                if (cr != 0) return UsbSpeedType.Unknown;
+
+                // 向上递归查询当前设备节点或其父节点（USB 复合设备/集线器节点）
+                uint currentDevInst = devInst;
+                for (int depth = 0; depth < 3; depth++)
+                {
+                    byte[] buffer = new byte[8];
+                    uint bufferSize = (uint)buffer.Length;
+                    var key = DEVPKEY_Device_UsbDeviceSpeed;
+
+                    cr = CM_Get_DevNode_PropertyW(currentDevInst, ref key, out uint _, buffer, ref bufferSize, 0);
+                    if (cr == 0 && bufferSize > 0)
+                    {
+                        byte speedVal = buffer[0];
+                        // 0: UsbLowSpeed (1.5Mbps)
+                        // 1: UsbFullSpeed (12Mbps)
+                        // 2: UsbHighSpeed (480Mbps -> USB 2.0)
+                        // 3: UsbSuperSpeed (5Gbps -> USB 3.0)
+                        // 4: UsbSuperSpeedPlus (10Gbps+ -> USB 3.1/3.2)
+                        if (speedVal == 2 || speedVal == 1 || speedVal == 0)
+                        {
+                            return UsbSpeedType.Usb2_HighSpeed;
+                        }
+                        else if (speedVal >= 3)
+                        {
+                            return UsbSpeedType.Usb3_SuperSpeed;
+                        }
+                    }
+
+                    if (CM_Get_Parent(out uint parentInst, currentDevInst, 0) != 0 || parentInst == 0)
+                    {
+                        break;
+                    }
+                    currentDevInst = parentInst;
+                }
+            }
+            catch
+            {
+                // 忽略 P/Invoke 异常，安全回退
+            }
+
+            return UsbSpeedType.Unknown;
+        }
+
+        private static string ExtractDeviceInstanceId(string devicePath)
+        {
+            if (string.IsNullOrEmpty(devicePath)) return null;
+
+            string id = devicePath;
+
+            // 剥离 DirectShow 前缀: @device:pnp:\\?\ 或 \\?\
+            int prefixIdx = id.IndexOf(@"\\?\", StringComparison.Ordinal);
+            if (prefixIdx >= 0)
+            {
+                id = id.Substring(prefixIdx + 4);
+            }
+            else if (id.StartsWith("@device:pnp:", StringComparison.OrdinalIgnoreCase))
+            {
+                id = id.Substring("@device:pnp:".Length);
+            }
+
+            // 剥离 GUID 后缀: #{65e8773d-8f56-11d0-a3b9-00a0c9223196}
+            int suffixIdx = id.LastIndexOf('#');
+            if (suffixIdx > 0 && id.IndexOf('{', suffixIdx) > 0)
+            {
+                id = id.Substring(0, suffixIdx);
+            }
+
+            // 将 '#' 转换为 '\' 形成标准 PnP Instance ID: USB\VID_xxxx&PID_xxxx...\...
+            id = id.Replace('#', '\\');
+
+            return id.Trim();
         }
 
         /// <summary>
