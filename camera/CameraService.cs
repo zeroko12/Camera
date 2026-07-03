@@ -627,6 +627,32 @@ namespace camera
             return 1;
         }
 
+        private (int Width, int Height) FindClosestResolutionTo720p()
+        {
+            int targetW = 1280;
+            int targetH = 720;
+            int bestW = (int)WidthOrigin;
+            int bestH = (int)HeightOrigin;
+            double minDistance = double.MaxValue;
+
+            foreach (var resStr in SupportedResolutions)
+            {
+                var parts = resStr.Split('x');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h))
+                {
+                    double dist = Math.Pow(w - targetW, 2) + Math.Pow(h - targetH, 2);
+                    if (dist < minDistance)
+                    {
+                        minDistance = dist;
+                        bestW = w;
+                        bestH = h;
+                    }
+                }
+            }
+
+            return (bestW, bestH);
+        }
+
         private void ShowVideoInfo()
         {
             var testResolutions = new (int Width, int Height)[]
@@ -744,6 +770,7 @@ namespace camera
             {
                 // 为防止多路 4K 摄像头在未配置时默认使用 4K (3840x2160) 吃满 USB 总线带宽导致其他通道打不开，
                 // 优先使用 1080p (1920x1080) 或 720p (1280x720) 作为初始默认采集分辨率。
+                // 若连 720p 也不支持，则从支持列表中智能匹配与 720p 最接近的分辨率。
                 if (SupportedResolutions.Contains("1920x1080"))
                 {
                     Width = 1920;
@@ -756,11 +783,12 @@ namespace camera
                 }
                 else
                 {
-                    Width = bestWidth;
-                    Height = bestHeight;
+                    var closest = FindClosestResolutionTo720p();
+                    Width = closest.Width;
+                    Height = closest.Height;
                 }
                 _selectedResolution = $"{(int)Width}x{(int)Height}";
-                Logger.LogInfo($"[CameraService #{Index}] 未发现有效已保存分辨率，默认使用推荐分辨率: {_selectedResolution}");
+                Logger.LogInfo($"[CameraService #{Index}] 未发现有效已保存分辨率，默认使用推荐/最接近 720p 分辨率: {_selectedResolution}");
             }
 
             RaisePropertyChanged(nameof(SelectedResolution));
@@ -1636,79 +1664,71 @@ namespace camera
             {
                 try
                 {
-                    _isCapturing = false;
-
-                    // 等待采集线程结束，以防并发访问 cap 导致 OpenCV 崩溃/死锁
-                    if (_captureTask != null)
+                    lock (_lockObject)
                     {
-                        try
-                        {
-                            Logger.LogInfo($"[CameraService #{Index}] 正在等待采集任务 _captureTask 退出...");
-                            _captureTask.Wait(1000);
-                            Logger.LogInfo($"[CameraService #{Index}] 采集任务 _captureTask 已退出");
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogWarning($"[CameraService #{Index}] 等待采集任务退出异常: {ex.Message}");
-                        }
-                    }
+                        _isCapturing = false;
 
-                    _uiTimer?.Stop();
-                    _uiTimer = null;
-
-                    if (FrameChanged != null)
-                    {
-                        foreach (var d in FrameChanged.GetInvocationList())
-                        {
-                            FrameChanged -= (FrameChangedEventHandler)d;
-                        }
-                    }
-
-                    var tasks = new System.Collections.Generic.List<System.Threading.Tasks.Task>();
-
-                    if (_recorder != null)
-                    {
-                        var rec = _recorder;
-                        tasks.Add(System.Threading.Tasks.Task.Run(() => rec.Dispose()));
-                    }
-
-                    if (cap != null)
-                    {
-                        var c = cap;
-                        tasks.Add(System.Threading.Tasks.Task.Run(() =>
+                        // 1. 等待采集线程结束，确保没有任何线程在执行 C++ 原生 cap.Read()
+                        if (_captureTask != null)
                         {
                             try
                             {
-                                Logger.LogInfo($"[CameraService #{Index}] 正在后台释放 VideoCapture...");
-                                if (c.IsOpened())
-                                {
-                                    c.Release();
-                                }
-                                c.Dispose();
-                                Logger.LogInfo($"[CameraService #{Index}] 后台释放 VideoCapture 完成");
+                                Logger.LogInfo($"[CameraService #{Index}] 正在等待采集任务 _captureTask 退出...");
+                                _captureTask.Wait(1200);
+                                Logger.LogInfo($"[CameraService #{Index}] 采集任务 _captureTask 已退出");
                             }
                             catch (Exception ex)
                             {
-                                Logger.LogWarning($"[CameraService #{Index}] 后台释放 VideoCapture 异常: {ex.Message}");
+                                Logger.LogWarning($"[CameraService #{Index}] 等待采集任务退出异常: {ex.Message}");
                             }
-                        }));
-                    }
+                        }
 
-                    _previewController?.Dispose();
-                    _claheProcessor?.Dispose();
-                    _timestampOverlayProcessor?.Dispose();
+                        _uiTimer?.Stop();
+                        _uiTimer = null;
 
-                    if (tasks.Count > 0)
-                    {
-                        // 并行等待所有释放任务，最多等待 3 秒，防止底层死锁卡死退出流程
-                        System.Threading.Tasks.Task.WaitAll(tasks.ToArray(), 3000);
-                    }
-                    cap = null;
+                        if (FrameChanged != null)
+                        {
+                            foreach (var d in FrameChanged.GetInvocationList())
+                            {
+                                FrameChanged -= (FrameChangedEventHandler)d;
+                            }
+                        }
 
-                    if (_Frame != null)
-                    {
-                        _Frame.Dispose();
-                        _Frame = null;
+                        if (_recorder != null)
+                        {
+                            try { _recorder.Dispose(); } catch { }
+                            _recorder = null;
+                        }
+
+                        // 2. 在线程确认退出后顺发、同步安全释放 VideoCapture 句柄，杜绝 AccessViolationException
+                        if (cap != null)
+                        {
+                            try
+                            {
+                                Logger.LogInfo($"[CameraService #{Index}] 正在释放 VideoCapture...");
+                                if (cap.IsOpened())
+                                {
+                                    cap.Release();
+                                }
+                                cap.Dispose();
+                                Logger.LogInfo($"[CameraService #{Index}] 释放 VideoCapture 完成");
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogWarning($"[CameraService #{Index}] 释放 VideoCapture 异常: {ex.Message}");
+                            }
+                            cap = null;
+                        }
+
+                        _previewController?.Dispose();
+                        _claheProcessor?.Dispose();
+                        _timestampOverlayProcessor?.Dispose();
+
+                        if (_Frame != null)
+                        {
+                            _Frame.Dispose();
+                            _Frame = null;
+                        }
                     }
                 }
                 catch (Exception ex)
