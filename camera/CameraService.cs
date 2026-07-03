@@ -641,6 +641,13 @@ namespace camera
                 if (parts.Length == 2 && int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h))
                 {
                     double dist = Math.Pow(w - targetW, 2) + Math.Pow(h - targetH, 2);
+                    
+                    // 如果该分辨率尺寸大于 720p（向上取），给予 1.5 倍距离惩罚，优先向下取更节省带宽的分辨率
+                    if (w > targetW || h > targetH)
+                    {
+                        dist *= 1.5;
+                    }
+
                     if (dist < minDistance)
                     {
                         minDistance = dist;
@@ -768,15 +775,9 @@ namespace camera
 
             if (!appliedSavedRes)
             {
-                // 为防止多路 4K 摄像头在未配置时默认使用 4K (3840x2160) 吃满 USB 总线带宽导致其他通道打不开，
-                // 优先使用 1080p (1920x1080) 或 720p (1280x720) 作为初始默认采集分辨率。
-                // 若连 720p 也不支持，则从支持列表中智能匹配与 720p 最接近的分辨率。
-                if (SupportedResolutions.Contains("1920x1080"))
-                {
-                    Width = 1920;
-                    Height = 1080;
-                }
-                else if (SupportedResolutions.Contains("1280x720"))
+                // 1. 优先选择 1280x720 (720p) 以节省 USB 总线带宽
+                // 2. 若无 720p，自动寻找与 720p 最接近的分辨率 (优先向下取)
+                if (SupportedResolutions.Contains("1280x720"))
                 {
                     Width = 1280;
                     Height = 720;
@@ -788,7 +789,7 @@ namespace camera
                     Height = closest.Height;
                 }
                 _selectedResolution = $"{(int)Width}x{(int)Height}";
-                Logger.LogInfo($"[CameraService #{Index}] 未发现有效已保存分辨率，默认使用推荐/最接近 720p 分辨率: {_selectedResolution}");
+                Logger.LogInfo($"[CameraService #{Index}] 未发现有效已保存分辨率，默认使用推荐/最接近 720p(优先向下) 的分辨率: {_selectedResolution}");
             }
 
             RaisePropertyChanged(nameof(SelectedResolution));
