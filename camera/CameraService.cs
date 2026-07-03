@@ -539,8 +539,8 @@ namespace camera
         #region 摄像头采集格式
 
         private enum CaptureFormat { MJPG, YUY2, NV12 }
-        private static CaptureFormat _preferredFormat = CaptureFormat.MJPG;
-        private static bool _formatChecked = false;
+        private CaptureFormat _preferredFormat = CaptureFormat.MJPG;
+        private bool _formatChecked = false;
 
         #endregion
 
@@ -1090,28 +1090,26 @@ namespace camera
                     StopSaving();
                 }
 
-                // 异步释放 VideoCapture，防止阻塞调用线程
+                // 同步释放 VideoCapture，确保 DirectShow 资源完全回收后再继续
+                // （采集循环已停止并 Wait，不会死锁；同步释放防止其他通道在资源未回收时串读）
                 if (cap != null)
                 {
                     var capToDispose = cap;
                     cap = null; // 立即置空，防止其他线程继续访问
-                    Task.Run(() =>
+                    try
                     {
-                        try
+                        Logger.LogInfo($"[CameraService #{Index}] 正在同步释放已拔除设备的 VideoCapture...");
+                        if (capToDispose.IsOpened())
                         {
-                            Logger.LogInfo($"[CameraService #{Index}] 正在后台释放已拔除设备的 VideoCapture...");
-                            if (capToDispose.IsOpened())
-                            {
-                                capToDispose.Release();
-                            }
-                            capToDispose.Dispose();
-                            Logger.LogInfo($"[CameraService #{Index}] 后台释放已拔除设备的 VideoCapture 完成");
+                            capToDispose.Release();
                         }
-                        catch (Exception ex)
-                        {
-                            Logger.LogWarning($"[CameraService #{Index}] 后台释放已拔除设备的 VideoCapture 异常: {ex.Message}");
-                        }
-                    });
+                        capToDispose.Dispose();
+                        Logger.LogInfo($"[CameraService #{Index}] 同步释放已拔除设备的 VideoCapture 完成");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"[CameraService #{Index}] 同步释放已拔除设备的 VideoCapture 异常: {ex.Message}");
+                    }
                 }
             }
         }

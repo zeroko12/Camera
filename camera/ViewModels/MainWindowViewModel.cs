@@ -380,6 +380,11 @@ namespace camera.ViewModels
         //摄像头集合
         private ObservableCollection<CameraService> _Cameras = new();
         private bool _isInitializing = false;
+
+        // 热插拔防抖：将短时间内连发的多条 WM_DEVICECHANGE 消息合并为一次处理
+        private System.Threading.Timer _deviceChangeDebounceTimer;
+        private readonly object _deviceChangeLock = new object();
+        private volatile bool _isProcessingDeviceChange = false;
         public bool IsInitializing
         {
             get { return _isInitializing; }
@@ -1086,110 +1091,142 @@ namespace camera.ViewModels
                 return;
             }
 
-            Logger.LogInfo("检测到 USB 设备变动，正在执行设备状态检查...");
-
-            // 在 UI 线程快速拷贝当前已有的 Camera 实例快照，避免多线程并发修改集合异常
-            List<CameraService> existingCamerasSnapshot = null;
-            Application.Current?.Dispatcher.Invoke(() =>
+            // 防抖：每次收到通知后重置 800ms 定时器，只有最后一条消息后 800ms 才真正执行
+            lock (_deviceChangeLock)
             {
-                existingCamerasSnapshot = Cameras.ToList();
-            });
+                _deviceChangeDebounceTimer?.Dispose();
+                _deviceChangeDebounceTimer = new System.Threading.Timer(
+                    _ => ExecuteDeviceChangeHandler(),
+                    null,
+                    800,
+                    System.Threading.Timeout.Infinite);
+            }
+        }
 
-            if (existingCamerasSnapshot == null) return;
-            
-            // 异步后台运行设备变动处理，防止阻塞 UI
-            Task.Run(() =>
+        private void ExecuteDeviceChangeHandler()
+        {
+            // 互斥：如果上一次处理还未完成，跳过本次
+            if (_isProcessingDeviceChange)
             {
-                try
+                Logger.LogInfo("[防抖] 上一次设备变动处理尚未完成，跳过本次。");
+                return;
+            }
+            _isProcessingDeviceChange = true;
+
+            try
+            {
+                Logger.LogInfo("[防抖] 防抖定时器到期，开始执行设备状态检查...");
+
+                // 在 UI 线程快速拷贝当前已有的 Camera 实例快照，避免多线程并发修改集合异常
+                List<CameraService> existingCamerasSnapshot = null;
+                Application.Current?.Dispatcher.Invoke(() =>
                 {
-                    // 延迟 500ms 等待 OS 完成 USB 端口的重新挂载
-                    System.Threading.Thread.Sleep(500);
+                    existingCamerasSnapshot = Cameras.ToList();
+                });
 
-                    var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
-                    // 按 DevicePath 排序保持与 init() 一致的策略
-                    devices.Sort((a, b) => string.Compare(a.DevicePath, b.DevicePath, StringComparison.OrdinalIgnoreCase));
+                if (existingCamerasSnapshot == null) return;
 
-                    // 1. 检查和更新已有摄像头状态
-                    foreach (var cam in existingCamerasSnapshot)
+                var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
+                // 按 DevicePath 排序保持与 init() 一致的策略
+                devices.Sort((a, b) => string.Compare(a.DevicePath, b.DevicePath, StringComparison.OrdinalIgnoreCase));
+
+                // 1. 检查和更新已有摄像头状态
+                foreach (var cam in existingCamerasSnapshot)
+                {
+                    if (string.IsNullOrEmpty(cam.DevicePath)) continue;
+
+                    var match = devices.Find(d => d.DevicePath == cam.DevicePath);
+                    if (match != null)
                     {
-                        if (string.IsNullOrEmpty(cam.DevicePath)) continue;
-
-                        var match = devices.Find(d => d.DevicePath == cam.DevicePath);
-                        if (match != null)
+                        // 物理设备在线，检查索引是否发生漂移
+                        if (cam.Index != match.Index)
                         {
-                            // 物理设备在线，检查索引是否发生漂移
-                            if (cam.Index != match.Index)
-                            {
-                                Logger.LogInfo($"[OnDeviceChangeNotification] 摄像头 {cam.Name} 索引纠正: {cam.Index} -> {match.Index}");
-                                cam.Index = match.Index;
-                            }
+                            Logger.LogInfo($"[OnDeviceChange] 摄像头 {cam.Name} 索引纠正: {cam.Index} -> {match.Index}");
+                            cam.Index = match.Index;
+                        }
 
-                            if (!cam.IsConnected)
+                        if (!cam.IsConnected)
+                        {
+                            Logger.LogInfo($"尝试自动恢复断开后重新插回的摄像头 {cam.Name} (索引: {cam.Index})...");
+                            Task.Run(() => cam.ChangeCameraInfo());
+                        }
+                    }
+                    else
+                    {
+                        Logger.LogWarning($"[OnDeviceChange] 摄像头 {cam.Name} (路径: {cam.DevicePath}) 处于离线状态");
+                        if (cam.IsConnected)
+                        {
+                            Logger.LogWarning($"[OnDeviceChange] 检测到摄像头 {cam.Name} 被物理拔除，执行离线释放处理");
+                            cam.HandleDeviceRemoved();
+                        }
+                    }
+                }
+
+                // 2. 检查是否有新插入的摄像头
+                foreach (var device in devices)
+                {
+                    // 关键防重复：实时检查 Cameras 集合（而非使用旧快照），防止并发添加同一设备
+                    bool exists = false;
+                    Application.Current?.Dispatcher.Invoke(() =>
+                    {
+                        exists = Cameras.Any(c => c.DevicePath == device.DevicePath);
+                    });
+
+                    if (!exists)
+                    {
+                        // 限制最多 8 路监控通道
+                        int currentCount = 0;
+                        Application.Current?.Dispatcher.Invoke(() =>
+                        {
+                            currentCount = Cameras.Count;
+                        });
+                        
+                        if (currentCount >= 8) break;
+
+                        Logger.LogInfo($"检测到全新接入的摄像头: {device.Name} (唯一路径: {device.DevicePath})，尝试添加...");
+                        var newCam = new CameraService();
+                        newCam.DevicePath = device.DevicePath;
+                        newCam.Name = device.Name;
+
+                        if (newCam.StartCapture(device.Index))
+                        {
+                            Application.Current?.Dispatcher.Invoke(() =>
                             {
-                                Logger.LogInfo($"尝试自动恢复断开后重新插回的摄像头 {cam.Name} (索引: {cam.Index})...");
-                                Task.Run(() => cam.ChangeCameraInfo());
-                            }
+                                // 二次检查：在 UI 线程内再次确认没有被并发添加
+                                if (Cameras.Any(c => c.DevicePath == device.DevicePath))
+                                {
+                                    Logger.LogWarning($"[OnDeviceChange] 摄像头 {device.Name} 已被并发添加，跳过重复项");
+                                    newCam.Dispose();
+                                    return;
+                                }
+
+                                ApplySettingsToCamera(newCam);
+                                Cameras.Add(newCam);
+                                newCam.DiskSpaceLow += Camera_DiskSpaceLow;
+
+                                if (SelectedConfigCamera == null)
+                                {
+                                    SelectedConfigCamera = newCam;
+                                }
+                            });
+                            Logger.LogInfo($"✓ 全新接入的摄像头 {device.Name} 已成功加载并加入网格");
+                            RefreshPreviewWidthOptions();
                         }
                         else
                         {
-                            Logger.LogWarning($"[OnDeviceChangeNotification] 摄像头 {cam.Name} (路径: {cam.DevicePath}) 处于离线状态");
-                            if (cam.IsConnected)
-                            {
-                                Logger.LogWarning($"[OnDeviceChangeNotification] 检测到摄像头 {cam.Name} 被物理拔除，执行离线释放处理");
-                                cam.HandleDeviceRemoved();
-                            }
-                        }
-                    }
-
-                    // 2. 检查是否有新插入的摄像头
-                    foreach (var device in devices)
-                    {
-                        bool exists = existingCamerasSnapshot.Any(c => c.DevicePath == device.DevicePath);
-
-                        if (!exists)
-                        {
-                            // 限制最多 8 路监控通道
-                            int currentCount = 0;
-                            Application.Current?.Dispatcher.Invoke(() =>
-                            {
-                                currentCount = Cameras.Count;
-                            });
-                            
-                            if (currentCount >= 8) break;
-
-                            Logger.LogInfo($"检测到全新接入的摄像头: {device.Name} (唯一路径: {device.DevicePath})，尝试添加...");
-                            var newCam = new CameraService();
-                            newCam.DevicePath = device.DevicePath;
-                            newCam.Name = device.Name;
-
-                            if (newCam.StartCapture(device.Index))
-                            {
-                                Application.Current?.Dispatcher.Invoke(() =>
-                                {
-                                    ApplySettingsToCamera(newCam);
-                                    Cameras.Add(newCam);
-                                    newCam.DiskSpaceLow += Camera_DiskSpaceLow;
-
-                                    if (SelectedConfigCamera == null)
-                                    {
-                                        SelectedConfigCamera = newCam;
-                                    }
-                                });
-                                Logger.LogInfo($"✓ 全新接入的摄像头 {device.Name} 已成功加载并加入网格");
-                                RefreshPreviewWidthOptions();
-                            }
-                            else
-                            {
-                                newCam.Dispose();
-                            }
+                            newCam.Dispose();
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    Logger.LogError("自适应更新热拔插设备状态发生异常", ex);
-                }
-            });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("自适应更新热拔插设备状态发生异常", ex);
+            }
+            finally
+            {
+                _isProcessingDeviceChange = false;
+            }
         }
 
         #endregion
