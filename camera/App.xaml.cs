@@ -68,8 +68,16 @@ namespace camera
 
         protected override void OnExit(ExitEventArgs e)
         {
-            Logger.LogInfo("应用程序正在退出...");
+            Logger.LogInfo("应用程序正在退出，正在清理 DirectShow COM 与设备锁...");
             Debug.WriteLine("程序退出");
+            try
+            {
+                Infrastructure.DeviceLockManager.ClearAll();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            catch { }
+
             base.OnExit(e);
             Logger.LogInfo("应用程序已退出");
 
@@ -78,10 +86,22 @@ namespace camera
         }
 
         /// <summary>
-        /// 注册全局异常处理
+        /// 注册全局异常处理与进程退出处理
         /// </summary>
         private void RegisterGlobalExceptionHandling()
         {
+            // 进程彻底退出时的底线清理钩子
+            AppDomain.CurrentDomain.ProcessExit += (s, e) =>
+            {
+                try
+                {
+                    Infrastructure.DeviceLockManager.ClearAll();
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                }
+                catch { }
+            };
+
             // UI 线程未捕获异常
             this.DispatcherUnhandledException += App_DispatcherUnhandledException;
 

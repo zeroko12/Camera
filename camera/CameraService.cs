@@ -587,6 +587,10 @@ namespace camera
                         }
                     }
 
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
+
                     // 推送已关闭警告帧
                     PushWarningFrame("通道已关闭\n(右键可重新开启)");
 
@@ -939,6 +943,14 @@ namespace camera
         {
             try
             {
+                if (!Infrastructure.DeviceLockManager.TryAcquireDevice(DevicePath, index))
+                {
+                    Logger.LogWarning($"[CameraService #{index}] 该物理设备已在其它通道中激活，跳过重复打开 (DevicePath: {DevicePath})");
+                    _continuousReadFailCount = 6;
+                    PushWarningFrame("通道已关闭 / 设备占用");
+                    return false;
+                }
+
                 Logger.LogInfo($"正在打开摄像头索引 {index}...");
                 cap = new VideoCapture(index, VideoCaptureAPIs.DSHOW);
 
@@ -1021,6 +1033,7 @@ namespace camera
                     _previewController.SetCameraFps(Fps);
                     _continuousReadFailCount = 6; // 直接显示警告帧
                     RefreshFrame();
+                    Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, index);
                     return true;
                 }
 
@@ -1035,6 +1048,7 @@ namespace camera
             catch (Exception ex)
             {
                 Logger.LogError($"启动摄像头 {index} 时发生错误", ex);
+                Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, index);
                 return false;
             }
         }
@@ -1066,6 +1080,18 @@ namespace camera
                         cap.Release();
                     }
                     cap.Dispose();
+                    cap = null;
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
+                }
+
+                Thread.Sleep(200);
+
+                if (!Infrastructure.DeviceLockManager.TryAcquireDevice(DevicePath, Index))
+                {
+                    Logger.LogWarning($"[CameraService #{Index}] 尝试重连受阻：设备已被其它通道锁定");
+                    return;
                 }
 
                 cap = new VideoCapture(Index, VideoCaptureAPIs.DSHOW);
@@ -1861,6 +1887,10 @@ namespace camera
                             }
                             cap = null;
                         }
+
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
 
                         _previewController?.Dispose();
                         _claheProcessor?.Dispose();
