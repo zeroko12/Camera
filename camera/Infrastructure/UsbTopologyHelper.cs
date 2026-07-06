@@ -46,6 +46,10 @@ namespace camera.Infrastructure
         private static readonly DEVPROPKEY DEVPKEY_Device_UsbDeviceSpeed =
             new DEVPROPKEY(new Guid("c8c0c196-d589-49f4-92bd-5ce04746487f"), 9);
 
+        // DEVPKEY_Device_LocationPaths: {a45c254e-df1c-4efd-8020-67d146a850e0}, 37
+        private static readonly DEVPROPKEY DEVPKEY_Device_LocationPaths =
+            new DEVPROPKEY(new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), 37);
+
         [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
         private static extern int CM_Locate_DevNodeW(out uint pdnDevInst, string pDeviceID, uint ulFlags);
 
@@ -100,7 +104,7 @@ namespace camera.Infrastructure
 
             try
             {
-                // 1. 优先使用 Windows SetupAPI / ConfigMgr 查询底层的真实物理硬件速率
+                // 1. 优先使用 Windows SetupAPI / ConfigMgr 查询底层的真实物理硬件速率 (LocationPaths / ACPI 拓扑)
                 var hwSpeed = QueryHardwareUsbSpeed(devicePath);
                 if (hwSpeed != UsbSpeedType.Unknown)
                 {
@@ -160,25 +164,42 @@ namespace camera.Infrastructure
                 if (string.IsNullOrEmpty(instanceId)) return UsbSpeedType.Unknown;
 
                 int cr = CM_Locate_DevNodeW(out uint devInst, instanceId, 0);
+                if (cr != 0 && instanceId.Contains("\\"))
+                {
+                    string truncated = instanceId.Substring(0, instanceId.LastIndexOf('\\'));
+                    cr = CM_Locate_DevNodeW(out devInst, truncated, 0);
+                }
+
                 if (cr != 0) return UsbSpeedType.Unknown;
 
                 // 向上递归查询当前设备节点或其父节点（USB 复合设备/集线器节点）
                 uint currentDevInst = devInst;
-                for (int depth = 0; depth < 3; depth++)
+                for (int depth = 0; depth < 4; depth++)
                 {
-                    byte[] buffer = new byte[8];
+                    byte[] buffer = new byte[1024];
                     uint bufferSize = (uint)buffer.Length;
-                    var key = DEVPKEY_Device_UsbDeviceSpeed;
 
-                    cr = CM_Get_DevNode_PropertyW(currentDevInst, ref key, out uint _, buffer, ref bufferSize, 0);
-                    if (cr == 0 && bufferSize > 0)
+                    // 1. 优先从 LocationPaths 查询 ACPI 物理端口路由 (HSxx 表示 USB 2.0 High-Speed, SSxx 表示 USB 3.0 SuperSpeed)
+                    var keyLoc = DEVPKEY_Device_LocationPaths;
+                    if (CM_Get_DevNode_PropertyW(currentDevInst, ref keyLoc, out uint _, buffer, ref bufferSize, 0) == 0 && bufferSize > 0)
+                    {
+                        string loc = System.Text.Encoding.Unicode.GetString(buffer, 0, (int)bufferSize).TrimEnd('\0').ToUpper();
+                        if (loc.Contains("#ACPI(SS") || loc.Contains("#SS"))
+                        {
+                            return UsbSpeedType.Usb3_SuperSpeed;
+                        }
+                        if (loc.Contains("#ACPI(HS") || loc.Contains("#HS") || loc.Contains("EHCI") || loc.Contains("USB2"))
+                        {
+                            return UsbSpeedType.Usb2_HighSpeed;
+                        }
+                    }
+
+                    // 2. 备用检测：查询 UsbDeviceSpeed 属性
+                    bufferSize = (uint)buffer.Length;
+                    var keySpeed = DEVPKEY_Device_UsbDeviceSpeed;
+                    if (CM_Get_DevNode_PropertyW(currentDevInst, ref keySpeed, out uint _, buffer, ref bufferSize, 0) == 0 && bufferSize > 0)
                     {
                         byte speedVal = buffer[0];
-                        // 0: UsbLowSpeed (1.5Mbps)
-                        // 1: UsbFullSpeed (12Mbps)
-                        // 2: UsbHighSpeed (480Mbps -> USB 2.0)
-                        // 3: UsbSuperSpeed (5Gbps -> USB 3.0)
-                        // 4: UsbSuperSpeedPlus (10Gbps+ -> USB 3.1/3.2)
                         if (speedVal == 2 || speedVal == 1 || speedVal == 0)
                         {
                             return UsbSpeedType.Usb2_HighSpeed;
