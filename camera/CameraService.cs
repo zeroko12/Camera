@@ -1,4 +1,5 @@
 using OpenCvSharp;
+using Prism.Commands;
 using Prism.Mvvm;
 using System;
 using System.IO;
@@ -496,7 +497,109 @@ namespace camera
             }
         }
 
-        public bool IsConnected => _continuousReadFailCount <= 5;
+        private bool _isManualDisabled = false;
+        public bool IsManualDisabled
+        {
+            get => _isManualDisabled;
+            set
+            {
+                if (SetProperty(ref _isManualDisabled, value))
+                {
+                    RaisePropertyChanged(nameof(IsConnected));
+                    EnableCameraCommand?.RaiseCanExecuteChanged();
+                    DisableCameraCommand?.RaiseCanExecuteChanged();
+                }
+            }
+        }
+
+        public bool IsConnected => !_isManualDisabled && _continuousReadFailCount <= 5;
+
+        public DelegateCommand EnableCameraCommand { get; private set; }
+        public DelegateCommand DisableCameraCommand { get; private set; }
+
+        public void EnableCamera()
+        {
+            lock (_lockObject)
+            {
+                try
+                {
+                    Logger.LogInfo($"[CameraService #{Index}] 用户手动开启摄像头 [{Name}]");
+                    IsManualDisabled = false;
+                    _continuousReadFailCount = 0;
+
+                    // 异步重新握手设备与开启采集流
+                    System.Threading.Tasks.Task.Run(() => ChangeCameraInfo());
+
+                    RaisePropertyChanged(nameof(IsConnected));
+                    EnableCameraCommand?.RaiseCanExecuteChanged();
+                    DisableCameraCommand?.RaiseCanExecuteChanged();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[CameraService #{Index}] 手动开启摄像头发生异常", ex);
+                }
+            }
+        }
+
+        public void DisableCamera()
+        {
+            lock (_lockObject)
+            {
+                try
+                {
+                    Logger.LogInfo($"[CameraService #{Index}] 用户手动关闭摄像头 [{Name}]");
+                    IsManualDisabled = true;
+
+                    _isCapturing = false;
+
+                    // 等待采集任务结束
+                    if (_captureTask != null)
+                    {
+                        try
+                        {
+                            _captureTask.Wait(1000);
+                        }
+                        catch { }
+                    }
+
+                    // 若正在保存录像，停止保存
+                    if (isSave)
+                    {
+                        StopSaving();
+                    }
+
+                    // 彻底释放 VideoCapture 句柄
+                    if (cap != null)
+                    {
+                        var capToDispose = cap;
+                        cap = null;
+                        try
+                        {
+                            if (capToDispose.IsOpened())
+                            {
+                                capToDispose.Release();
+                            }
+                            capToDispose.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogWarning($"[CameraService #{Index}] 释放 VideoCapture 句柄异常: {ex.Message}");
+                        }
+                    }
+
+                    // 推送已关闭警告帧
+                    PushWarningFrame("通道已关闭\n(右键可重新开启)");
+
+                    RaisePropertyChanged(nameof(IsConnected));
+                    EnableCameraCommand?.RaiseCanExecuteChanged();
+                    DisableCameraCommand?.RaiseCanExecuteChanged();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[CameraService #{Index}] 手动关闭摄像头发生异常", ex);
+                }
+            }
+        }
 
         public string UsbSpeedDescription
         {
@@ -546,6 +649,8 @@ namespace camera
 
         public CameraService()
         {
+            EnableCameraCommand = new DelegateCommand(EnableCamera, () => IsManualDisabled || !IsConnected);
+            DisableCameraCommand = new DelegateCommand(DisableCamera, () => !IsManualDisabled && IsConnected);
             InitializeModules();
         }
 
@@ -1028,12 +1133,50 @@ namespace camera
                 int h = Height > 0 ? (int)Height : 720;
                 tempFrame = Infrastructure.MatPool.Rent(w, h, MatType.CV_8UC3);
                 tempFrame.SetTo(new Scalar(20, 20, 20)); // 暗灰底色
-                const HersheyFonts font = HersheyFonts.HersheySimplex;
-                double fontScale = Math.Max(0.4, 0.6 * (w / 640.0));
-                int thickness = Math.Max(1, (int)(2 * (w / 640.0)));
-                OpenCvSharp.Size textSize = Cv2.GetTextSize(errorMsg, font, fontScale, thickness, out _);
-                var textOrg = new OpenCvSharp.Point((w - textSize.Width) / 2, (h + textSize.Height) / 2);
-                Cv2.PutText(tempFrame, errorMsg, textOrg, font, fontScale, new Scalar(0, 0, 255), thickness, LineTypes.AntiAlias);
+
+                using (var bitmap = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format24bppRgb))
+                {
+                    using (var g = System.Drawing.Graphics.FromImage(bitmap))
+                    {
+                        g.Clear(System.Drawing.Color.FromArgb(20, 20, 20));
+                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+
+                        float fontSize = Math.Max(16f, 22f * (w / 640.0f));
+                        using (var font = new System.Drawing.Font("Microsoft YaHei", fontSize, System.Drawing.FontStyle.Bold))
+                        using (var brush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(240, 70, 70)))
+                        using (var format = new System.Drawing.StringFormat())
+                        {
+                            format.Alignment = System.Drawing.StringAlignment.Center;
+                            format.LineAlignment = System.Drawing.StringAlignment.Center;
+
+                            var rect = new System.Drawing.RectangleF(0, 0, w, h);
+                            g.DrawString(errorMsg ?? "", font, brush, rect, format);
+                        }
+                    }
+
+                    var rectLock = new System.Drawing.Rectangle(0, 0, w, h);
+                    var bmpData = bitmap.LockBits(rectLock, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    try
+                    {
+                        unsafe
+                        {
+                            byte* srcPtr = (byte*)bmpData.Scan0;
+                            byte* dstPtr = (byte*)tempFrame.Data;
+                            int strideSrc = bmpData.Stride;
+                            int strideDst = (int)tempFrame.Step();
+
+                            for (int row = 0; row < h; row++)
+                            {
+                                Buffer.MemoryCopy(srcPtr + row * strideSrc, dstPtr + row * strideDst, strideDst, w * 3);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        bitmap.UnlockBits(bmpData);
+                    }
+                }
 
                 _previewController.UpdateFrame(tempFrame, DateTime.Now);
             }

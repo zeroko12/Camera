@@ -121,6 +121,26 @@
                                             Drop="ImageBlock_Drop"
                                             MouseMove="ImageBlock_MouseMove"
                                             PreviewMouseLeftButtonDown="ImageBlock_PreviewMouseLeftButtonDown">
+                                            <hc:ImageBlock.ContextMenu>
+                                                <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                    <MenuItem
+                                                        Header="开启摄像头"
+                                                        Command="{Binding EnableCameraCommand}"
+                                                        IsEnabled="{Binding IsManualDisabled}">
+                                                        <MenuItem.Icon>
+                                                            <materialDesign:PackIcon Kind="PlayCircle" Foreground="#2ECC71" />
+                                                        </MenuItem.Icon>
+                                                    </MenuItem>
+                                                    <MenuItem
+                                                        Header="关闭摄像头"
+                                                        Command="{Binding DisableCameraCommand}"
+                                                        IsEnabled="{Binding IsConnected}">
+                                                        <MenuItem.Icon>
+                                                            <materialDesign:PackIcon Kind="StopCircle" Foreground="#E74C3C" />
+                                                        </MenuItem.Icon>
+                                                    </MenuItem>
+                                                </ContextMenu>
+                                            </hc:ImageBlock.ContextMenu>
                                             <hc:ImageBlock.InputBindings>
                                                 <MouseBinding
                                                     Command="{Binding DataContext.ToggleMaximizeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
@@ -245,9 +265,30 @@
                     Margin="5"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Stretch"
-                    local:ImageMatHelper.SourceMat="{Binding SelectedCamera.Frame}">
+                    DataContext="{Binding SelectedCamera}"
+                    local:ImageMatHelper.SourceMat="{Binding Frame}">
+                    <hc:ImageBlock.ContextMenu>
+                        <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                            <MenuItem
+                                Header="开启摄像头"
+                                Command="{Binding EnableCameraCommand}"
+                                IsEnabled="{Binding IsManualDisabled}">
+                                <MenuItem.Icon>
+                                    <materialDesign:PackIcon Kind="PlayCircle" Foreground="#2ECC71" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem
+                                Header="关闭摄像头"
+                                Command="{Binding DisableCameraCommand}"
+                                IsEnabled="{Binding IsConnected}">
+                                <MenuItem.Icon>
+                                    <materialDesign:PackIcon Kind="StopCircle" Foreground="#E74C3C" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                        </ContextMenu>
+                    </hc:ImageBlock.ContextMenu>
                     <hc:ImageBlock.InputBindings>
-                        <MouseBinding Command="{Binding BackToGridCommand}" MouseAction="LeftDoubleClick" />
+                        <MouseBinding Command="{Binding DataContext.BackToGridCommand, RelativeSource={RelativeSource AncestorType=Grid, AncestorLevel=2}}" MouseAction="LeftDoubleClick" />
                     </hc:ImageBlock.InputBindings>
                 </hc:ImageBlock>
 
