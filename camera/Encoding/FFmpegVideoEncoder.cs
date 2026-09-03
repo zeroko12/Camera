@@ -37,9 +37,17 @@ namespace camera.Encoding
         private CancellationTokenSource _cts;
         private Task _errorReadTask;
         private bool _isDisposed;
-        private Mat _yuvBuffer;  // 持久 YUV 转换缓冲区，避免每帧 MatPool Rent/Return
+        private Mat _yuvBuffer;  // 持久 YUV 转换缓冲区，避免避免每帧 MatPool Rent/Return
 
-        public bool IsInitialized => _ffmpegProcess != null && !_ffmpegProcess.HasExited;
+        // ═══ HasExited 缓存：消除每帧 P/Invoke DuplicateHandle ═══
+        // 原来每帧调用 Process.HasExited 都会触发一次 DuplicateHandle + GetExitCodeProcess + CloseHandle。
+        // 30 fps 时每秒 30 次 kernel syscall,且大量线程争用同一进程句柄。
+        // 改为每 200 ms 最多探活一次,既足够捕获崩溃退出,也避免 syscall 风暴。
+        private bool _hasExitedCached;
+        private long _lastHasExitedCheckTicks;
+        private const long HasExitedCheckIntervalTicks = 200 * TimeSpan.TicksPerMillisecond;
+
+        public bool IsInitialized => _ffmpegProcess != null && !GetHasExitedCached();
         public int InputWidth { get; private set; }
         public int InputHeight { get; private set; }
         public int Width { get; private set; }
@@ -47,6 +55,34 @@ namespace camera.Encoding
         public double Fps { get; private set; }
         public string Codec { get; private set; } = "";
         public string OutputPath { get; private set; } = "";
+
+        /// <summary>
+        /// 缓存版的 HasExited。最多每 200 ms 调一次 Process.HasExited 真实探活。
+        /// 在窗口期内复用上次结果,确保 EncodeFrame 热路径零 syscall。
+        /// </summary>
+        private bool GetHasExitedCached()
+        {
+            var proc = _ffmpegProcess;
+            if (proc == null) return true;
+
+            long now = DateTime.UtcNow.Ticks;
+            long last = Interlocked.Read(ref _lastHasExitedCheckTicks);
+            if (now - last < HasExitedCheckIntervalTicks && last != 0)
+            {
+                return _hasExitedCached;
+            }
+
+            // 试图抢占:把 last 设为 now,失败表示别的线程正在查,直接复用旧结果
+            if (Interlocked.CompareExchange(ref _lastHasExitedCheckTicks, now, last) == last)
+            {
+                bool exited;
+                try { exited = proc.HasExited; }
+                catch { exited = true; }
+                _hasExitedCached = exited;
+                return exited;
+            }
+            return _hasExitedCached;
+        }
 
         public FFmpegVideoEncoder(string ffmpegPath = null)
         {

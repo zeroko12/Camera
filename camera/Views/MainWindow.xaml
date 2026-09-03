@@ -48,7 +48,7 @@
         </i:EventTrigger>
     </i:Interaction.Triggers>
     <Window.Resources>
-        <local:MatToImageSourceConverter x:Key="MatToImageSourceConverter" />
+        <!-- 已删除 MatToImageSourceConverter 资源,见 ImageMatHelper.cs -->
         <Storyboard x:Key="FlashStoryboard" RepeatBehavior="Forever">
             <!--  瞬间切换到不透明  -->
             <DoubleAnimation

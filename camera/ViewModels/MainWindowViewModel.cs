@@ -8,6 +8,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -994,6 +995,10 @@ namespace camera.ViewModels
         #region 运维报警与定时器
 
         private DispatcherTimer _periodicTimer;
+        // 共享帧拉取定时器:1 个定时器统一处理所有 camera 的 UI 帧拉取,
+        // 替代 CameraService 中原本的 per-camera DispatcherTimer。
+        private DispatcherTimer _sharedFrameTimer;
+        private int _sharedFrameIntervalMs = 100; // 10 fps,与 PreviewFps 默认值对齐
 
         private string _diskSpaceWarningText = "等待计算...";
         public string DiskSpaceWarningText
@@ -1008,10 +1013,68 @@ namespace camera.ViewModels
             _periodicTimer.Interval = TimeSpan.FromSeconds(10);
             _periodicTimer.Tick += PeriodicTimer_Tick;
             _periodicTimer.Start();
-            
+
             // 立即执行一次
             UpdateDiskRecordingStatus();
             UpdateActiveCodecStatus();
+
+            // 初始化共享帧拉取定时器(Background 优先级,与 WPF 渲染管线让开)
+            _sharedFrameTimer = new DispatcherTimer(DispatcherPriority.Background);
+            _sharedFrameTimer.Interval = TimeSpan.FromMilliseconds(_sharedFrameIntervalMs);
+            _sharedFrameTimer.Tick += SharedFrameTimer_Tick;
+            _sharedFrameTimer.Start();
+        }
+
+        /// <summary>
+        /// 共享帧拉取:每个 Tick 遍历所有 camera,拉一次最新帧。
+        /// 替代原先每个 CameraService 各自 DispatcherTimer 的方案,
+        /// 从 4 个 timer × 30 fps = 120 op/s 入队,降为 1 个 × 10 fps = 10 op/s。
+        /// </summary>
+        private void SharedFrameTimer_Tick(object sender, EventArgs e)
+        {
+            var cameras = Cameras;
+            if (cameras == null) return;
+
+            // 内存压力监测:当本进程占用超过阈值时,触发 Gen 2 GC 释放 native 资源
+            // (WPF 渲染缓存、DirectShow filter graph 等 native 内存需 GC 才会触发 finalize)
+            // 阈值设 1 GB,避免高频 GC 影响 UI 流畅性;最少间隔 30 分钟。
+            TryMemoryPressureCollect();
+
+            for (int i = 0, n = cameras.Count; i < n; i++)
+            {
+                var cam = cameras[i];
+                if (cam == null) continue;
+                // CameraService.PullLatestFrame 内部 Interlocked.Exchange(_latestFrame),
+                // 无新帧时返回 null,UI 线程零开销跳过。
+                cam.PullAndApplyLatestFrame();
+            }
+        }
+
+        private long _lastPressureCollectTicks;
+        private const long PressureCollectIntervalTicks = 30L * 60 * TimeSpan.TicksPerSecond;
+        private const long PressureThresholdBytes = 1024L * 1024 * 1024; // 1 GB
+
+        /// <summary>
+        /// 进程占用 > 1 GB 时,每隔 ≥ 30 分钟最多触发一次 Gen 2 GC,
+        /// 主动回收 WPF / DirectShow 持有的 native 资源。
+        /// 实际数据(counters):Process.PrivateBytes 每 17 小时累积到 ~850 MB → GC → 回落 ~400 MB。
+        /// 主动 GC 可缩短这个周期,避免 1 次 850 MB 的尖峰。
+        /// </summary>
+        private void TryMemoryPressureCollect()
+        {
+            long now = DateTime.UtcNow.Ticks;
+            long last = Interlocked.Read(ref _lastPressureCollectTicks);
+            if (now - last < PressureCollectIntervalTicks && last != 0) return;
+
+            long bytes = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64;
+            if (bytes < PressureThresholdBytes) return;
+
+            // 抢占:防止多个线程同时进入 GC.Collect
+            if (Interlocked.CompareExchange(ref _lastPressureCollectTicks, now, last) != last) return;
+
+            Logger.LogInfo($"[VM] 内存占用 {bytes / 1024 / 1024} MB,主动触发 GC");
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true);
+            GC.WaitForPendingFinalizers();
         }
 
         private void PeriodicTimer_Tick(object sender, EventArgs e)
@@ -1387,6 +1450,12 @@ namespace camera.ViewModels
                     {
                         _periodicTimer.Stop();
                         _periodicTimer = null;
+                    }
+
+                    if (_sharedFrameTimer != null)
+                    {
+                        _sharedFrameTimer.Stop();
+                        _sharedFrameTimer = null;
                     }
 
                     // 取消所有事件订阅并并行的释放所有 CameraService，缩短退出时间

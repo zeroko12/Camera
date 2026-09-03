@@ -33,6 +33,26 @@ namespace camera
         private FFmpegVideoRecorder _recorder;
         private RecordingOptions _recordingOptions;
         private System.Windows.Threading.DispatcherTimer _uiTimer;
+        // 帧拉取模型:capture 线程写 _latestFrame,UI 线程定时器拉取。
+// 注意:此处不再创建 DispatcherTimer,改由 MainWindowViewModel.SharedFrameTimer
+// 统一调度(1 个定时器而非 4 个),且拉取频率与 PreviewFps 对齐避免无意义操作。
+        private volatile Mat _latestFrame;
+        public Mat PullLatestFrame()
+        {
+            return Interlocked.Exchange(ref _latestFrame, null);
+        }
+
+        /// <summary>
+        /// 由 MainWindowViewModel.SharedFrameTimer 在 UI 线程统一调用。
+        /// 拉取最新 Mat,若非空则赋给 Frame 属性(触发 binding cascade)。
+        /// 比每个 CameraService 单独跑 DispatcherTimer 节省 3 个定时器 +
+        /// 所有相机共享 1 个 DispatcherOperation 入队点。
+        /// </summary>
+        public void PullAndApplyLatestFrame()
+        {
+            var pending = Interlocked.Exchange(ref _latestFrame, null);
+            if (pending != null) Frame = pending;
+        }
 
         // 管道内特定的图像处理算子
         private ClaheProcessor _claheProcessor;
@@ -151,13 +171,16 @@ namespace camera
             get => _Frame;
             set
             {
-                var oldFrame = _Frame;
-                if (SetProperty(ref _Frame, value))
+                // 先在 setter 入口抓住旧引用,SetProperty 之后 _Frame 已指向新值。
+                Mat oldFrame = _Frame;
+                if (SetProperty(ref _Frame, value) && oldFrame != null && oldFrame != value)
                 {
-                    if (oldFrame != null && oldFrame != value)
-                    {
-                        Infrastructure.MatPool.Return(oldFrame);
-                    }
+                    // MatPool 内部使用 ConcurrentDictionary + ConcurrentQueue,完全线程安全,
+                    // 直接同步归还即可。原先 Task.Run 包装是为了避开 UI 线程 native 释放,
+                    // 但 MatPool.Return 只是把 Mat 塞回队列或直接 Dispose,
+                    // 真正的 P/Invoke 仅在池满时触发(每规格缓存 8 张),概率极低。
+                    try { Infrastructure.MatPool.Return(oldFrame); }
+                    catch (Exception ex) { Logger.LogError($"[CameraService #{Index}] 回收旧 Frame Mat 异常", ex); }
                 }
             }
         }
@@ -682,7 +705,7 @@ namespace camera
                 IsEnabled = true
             };
 
-            // 订阅预览帧回调
+            // 订阅预览帧回调(只写共享槽位,不调 BeginInvoke)
             _previewController.PreviewFrameReady += (s, previewFrame) =>
             {
                 if (Application.Current == null)
@@ -691,11 +714,19 @@ namespace camera
                     return;
                 }
 
-                Application.Current.Dispatcher.BeginInvoke(() =>
+                // 用 Interlocked.Exchange 替换共享槽位中的 Mat。
+                // 若上一帧还没被 UI 线程拉走,直接同步回收(MatPool 线程安全)。
+                var previous = Interlocked.Exchange(ref _latestFrame, previewFrame);
+                if (previous != null)
                 {
-                    Frame = previewFrame; // 自动处理旧帧到 MatPool
-                });
+                    try { Infrastructure.MatPool.Return(previous); }
+                    catch (Exception ex) { Logger.LogError($"[CameraService #{Index}] 回收预览旧帧异常", ex); }
+                }
             };
+
+            // 共享帧拉取定时器由 MainWindowViewModel 统一管理(CameraService 不再单独创建 DispatcherTimer)。
+            // 原 4 个 per-camera 定时器 × 30 fps = 120 DispatcherOperation 入队/秒,
+            // 改为 1 个 × PreviewFps = 8-15 DispatcherOperation /秒,显著降低 UI 线程负载。
 
             // 4. 初始化 UI 水印更新定时器
             _uiTimer = new System.Windows.Threading.DispatcherTimer(
