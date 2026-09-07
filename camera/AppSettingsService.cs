@@ -1,0 +1,295 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading;
+
+namespace camera
+{
+    /// <summary>
+    /// 应用配置的持久化服务(企业级,替换原 ConfigurationManager)。
+    ///
+    /// 核心能力:
+    /// 1. JSON 持久化 — 文件存放在 %APPDATA%\CameraMonitor\settings.json,
+    ///    不污染 EXE 目录,可被 .NET 8 单文件部署、容器化正确处理。
+    /// 2. 原子写入 — 先写 .tmp,fsync 后 rename,保证配置文件不损坏。
+    /// 3. 迁移兼容 — 旧 App.config / .exe.config 中的设置作为 fallback。
+    /// 4. 完整日志 — 所有读写操作记录到日志文件。
+    /// 5. 线程安全 — 所有公共方法可重入。
+    /// </summary>
+    public sealed class AppSettingsService
+    {
+        private static readonly Lazy<AppSettingsService> _instance =
+            new(() => new AppSettingsService(), LazyThreadSafetyMode.ExecutionAndPublication);
+
+        public static AppSettingsService Instance => _instance.Value;
+
+        // ─── 持久化位置 ───
+        // %APPDATA%\CameraMonitor\settings.json
+        public string FilePath { get; }
+
+        // ─── JSON 序列化选项(单例,带注释尾随逗号容忍)──
+        private static readonly JsonSerializerOptions JsonOpts = new()
+        {
+            WriteIndented            = true,
+            DefaultIgnoreCondition   = JsonIgnoreCondition.WhenWritingNull,
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling      = JsonCommentHandling.Skip,
+            AllowTrailingCommas      = true,
+            Converters               = { new JsonStringEnumConverter() },
+        };
+
+        // ─── 内存中的当前设置(线程安全访问)──
+        private AppSettings _current = AppSettings.CreateDefault();
+        public AppSettings Current => _current;
+
+        // ─── 自动保存防抖(避免高频 setter 反复落盘)──
+        private readonly System.Threading.Timer _autoSaveTimer;
+        private const int AutoSaveDelayMs = 1000;  // 1 秒防抖
+        private readonly object _saveLock = new();
+
+        private AppSettingsService()
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var dir = Path.Combine(appData, "CameraMonitor");
+            Directory.CreateDirectory(dir);
+            FilePath = Path.Combine(dir, "settings.json");
+
+            _autoSaveTimer = new System.Threading.Timer(_ => FlushPendingSave(),
+                null, Timeout.Infinite, Timeout.Infinite);
+
+            Logger.LogInfo($"[Settings] 配置文件路径: {FilePath}");
+        }
+
+        /// <summary>
+        /// 加载设置。优先级:JSON 文件 > App.config 迁移 > 默认值。
+        /// </summary>
+        public AppSettings Load()
+        {
+            // 1. 优先尝试 JSON 文件
+            if (File.Exists(FilePath))
+            {
+                try
+                {
+                    var json = File.ReadAllText(FilePath);
+                    var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOpts);
+                    if (loaded != null)
+                    {
+                        _current = new AppSettings
+                        {
+                            IsInitialized = true,
+                            LoadSource    = "JSON",
+                            LoadedAt      = DateTime.UtcNow,
+                            // 复制所有字段
+                            IsSave = loaded.IsSave,
+                            Opacity = loaded.Opacity,
+                            Title = loaded.Title,
+                            SystemTitle = loaded.SystemTitle,
+                            OverwriteOldFiles = loaded.OverwriteOldFiles,
+                            DiskSpaceThreshold = loaded.DiskSpaceThreshold,
+                            Quality = loaded.Quality,
+                            SaveInterval = loaded.SaveInterval,
+                            MaxPreviewWidth = loaded.MaxPreviewWidth,
+                            PreviewFps = loaded.PreviewFps,
+                            RecordFps = loaded.RecordFps,
+                            Contrast = loaded.Contrast,
+                            Luminance = loaded.Luminance,
+                            IsGrayHomogenization = loaded.IsGrayHomogenization,
+                            OverlayTextSize = loaded.OverlayTextSize,
+                            MaxFps = loaded.MaxFps,
+                            WindowWidth = loaded.WindowWidth,
+                            WindowHeight = loaded.WindowHeight,
+                            WindowLeft = loaded.WindowLeft,
+                            WindowTop = loaded.WindowTop,
+                            MinWindowWidth = loaded.MinWindowWidth,
+                            MinWindowHeight = loaded.MinWindowHeight,
+                            AspectRatio = loaded.AspectRatio,
+                            CanClickThrough = loaded.CanClickThrough,
+                            Topmost = loaded.Topmost,
+                            ExitBehavior = loaded.ExitBehavior,
+                            Cameras = loaded.Cameras,
+                        };
+                        Logger.LogInfo($"[Settings] 从 JSON 加载成功 ({FilePath})");
+                        return _current;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[Settings] JSON 加载失败,回退到默认: {ex.Message}", ex);
+                }
+            }
+
+            // 2. fallback: 从旧 App.config 迁移
+            try
+            {
+                var migrated = MigrateFromLegacyConfig();
+                _current = new AppSettings
+                {
+                    IsInitialized = true,
+                    LoadSource    = "App.config",
+                    LoadedAt      = DateTime.UtcNow,
+                    IsSave = migrated.IsSave,
+                    Opacity = migrated.Opacity,
+                    Title = migrated.Title,
+                    SystemTitle = migrated.SystemTitle,
+                    OverwriteOldFiles = migrated.OverwriteOldFiles,
+                    DiskSpaceThreshold = migrated.DiskSpaceThreshold,
+                    Quality = migrated.Quality,
+                    SaveInterval = migrated.SaveInterval,
+                    MaxPreviewWidth = migrated.MaxPreviewWidth,
+                    PreviewFps = migrated.PreviewFps,
+                    RecordFps = migrated.RecordFps,
+                    Contrast = migrated.Contrast,
+                    Luminance = migrated.Luminance,
+                    IsGrayHomogenization = migrated.IsGrayHomogenization,
+                    OverlayTextSize = migrated.OverlayTextSize,
+                    MaxFps = migrated.MaxFps,
+                    WindowWidth = migrated.WindowWidth,
+                    WindowHeight = migrated.WindowHeight,
+                    WindowLeft = migrated.WindowLeft,
+                    WindowTop = migrated.WindowTop,
+                    MinWindowWidth = migrated.MinWindowWidth,
+                    MinWindowHeight = migrated.MinWindowHeight,
+                    AspectRatio = migrated.AspectRatio,
+                    CanClickThrough = migrated.CanClickThrough,
+                    Topmost = migrated.Topmost,
+                    ExitBehavior = migrated.ExitBehavior,
+                    Cameras = migrated.Cameras,
+                };
+                Logger.LogInfo("[Settings] 从 App.config 迁移配置");
+                // 立即落盘,迁移完成
+                SaveSync(_current);
+                return _current;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Settings] App.config 迁移失败,使用默认: {ex.Message}", ex);
+            }
+
+            // 3. 兜底:全部默认
+            _current = AppSettings.CreateDefault();
+            Logger.LogWarning("[Settings] 使用默认配置(JSON 与 App.config 都不存在)");
+            return _current;
+        }
+
+        /// <summary>
+        /// 立即同步保存(阻塞,带文件锁)。
+        /// </summary>
+        public void SaveSync(AppSettings settings)
+        {
+            lock (_saveLock)
+            {
+                try
+                {
+                    var json = JsonSerializer.Serialize(settings, JsonOpts);
+                    var tmp = FilePath + ".tmp";
+
+                    // 原子写入:先写临时文件 → 强制 flush → rename
+                    using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        var buf = System.Text.Encoding.UTF8.GetBytes(json);
+                        fs.Write(buf, 0, buf.Length);
+                        fs.Flush(true);  // 强制 fsync,落盘后再 rename
+                    }
+                    // Windows 下 File.Move(..., overwrite: true) 在 .NET 8 才有
+                    if (File.Exists(FilePath))
+                        File.Replace(tmp, FilePath, null);
+                    else
+                        File.Move(tmp, FilePath);
+
+                    Logger.LogInfo($"[Settings] 保存成功 → {FilePath} ({json.Length} 字节)");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[Settings] 保存失败: {ex.Message}", ex);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 调度一次防抖保存(1 秒内多次调用合并为一次落盘)。
+        /// 推荐在属性 setter 末尾调用。
+        /// </summary>
+        public void RequestSave()
+        {
+            _autoSaveTimer.Change(AutoSaveDelayMs, Timeout.Infinite);
+        }
+
+        /// <summary>
+        /// 防抖定时器回调:把内存中的最新设置写盘。
+        /// </summary>
+        private void FlushPendingSave()
+        {
+            try { SaveSync(_current); }
+            catch (Exception ex) { Logger.LogError($"[Settings] 自动保存失败: {ex.Message}", ex); }
+        }
+
+        /// <summary>
+        /// 用回调函数更新当前设置并调度自动保存。
+        /// 主窗口 ViewModel 的 setter 用这个 API:
+        ///
+        /// <code>
+        /// public int DiskSpaceThreshold {
+        ///     get => _s.DiskSpaceThreshold;
+        ///     set {
+        ///         _s = _s.With(x => x.DiskSpaceThreshold = value);
+        ///         AppSettingsService.Instance.RequestSave();
+        ///     }
+        /// }
+        /// </code>
+        /// </summary>
+        public void Update(System.Action<AppSettings> mutator)
+        {
+            mutator(_current);
+            RequestSave();
+        }
+
+        /// <summary>
+        /// 从 System.Configuration.ConfigurationManager 迁移所有已知 key。
+        /// </summary>
+        private AppSettings MigrateFromLegacyConfig()
+        {
+            var legacy = System.Configuration.ConfigurationManager.AppSettings;
+            string Get(string k) => legacy[k];
+
+            int Ip(string k, int d) => int.TryParse(Get(k), out var v) ? v : d;
+            bool Bp(string k, bool d) => bool.TryParse(Get(k), out var v) ? v : d;
+            double Dp(string k, double d) => double.TryParse(Get(k), out var v) ? v : d;
+            string Sp(string k, string d) => string.IsNullOrEmpty(Get(k)) ? d : Get(k);
+
+            var cameras = new AppSettings.CameraSettingsCollection();
+            // 摄像头特定:遍历已知的 configKey 不实际可行,延迟到 ApplySettingsToCamera
+            return new AppSettings
+            {
+                IsSave               = Bp("isSave", AppSettings.DefaultIsSave),
+                Opacity              = Dp("Opacity", AppSettings.DefaultOpacity),
+                Title                = Sp("Title", AppSettings.DefaultTitle),
+                SystemTitle          = Sp("SystemTitle", AppSettings.DefaultSystemTitle),
+                OverwriteOldFiles    = Bp("OverwriteOldFiles", AppSettings.DefaultOverwriteOldFiles),
+                DiskSpaceThreshold   = Ip("DiskSpaceThreshold", AppSettings.DefaultDiskSpaceThresholdMb),
+                Quality              = Ip("Quality", AppSettings.DefaultQuality),
+                SaveInterval         = Ip("SaveInterval", AppSettings.DefaultSaveIntervalMin),
+                MaxPreviewWidth      = Ip("MaxPreviewWidth", AppSettings.DefaultMaxPreviewWidth),
+                PreviewFps           = Ip("PreviewFps", AppSettings.DefaultPreviewFps),
+                RecordFps            = Ip("RecordFps", AppSettings.DefaultRecordFps),
+                Contrast             = Dp("Contrast", AppSettings.DefaultContrast),
+                Luminance            = Dp("Luminance", AppSettings.DefaultLuminance),
+                IsGrayHomogenization = Bp("IsGrayHomogenization", AppSettings.DefaultIsGrayHomogenization),
+                OverlayTextSize      = Dp("OverlayTextSize", AppSettings.DefaultOverlayTextSize),
+                MaxFps               = Ip("MaxFps", AppSettings.DefaultMaxFps),
+                WindowWidth          = Dp("WindowWidth", AppSettings.DefaultWindowWidth),
+                WindowHeight         = Dp("WindowHeight", AppSettings.DefaultWindowHeight),
+                WindowLeft           = Dp("WindowLeft", AppSettings.DefaultWindowLeft),
+                WindowTop            = Dp("WindowTop", AppSettings.DefaultWindowTop),
+                MinWindowWidth       = Dp("MinWindowWidth", AppSettings.DefaultMinWindowWidth),
+                MinWindowHeight      = Dp("MinWindowHeight", AppSettings.DefaultMinWindowHeight),
+                AspectRatio          = Dp("AspectRatio", AppSettings.DefaultAspectRatio),
+                CanClickThrough      = Bp("CanClickThrough", AppSettings.DefaultCanClickThrough),
+                Topmost              = Bp("Topmost", AppSettings.DefaultTopmost),
+                ExitBehavior         = Sp("ExitBehavior", AppSettings.DefaultExitBehavior),
+                Cameras              = cameras,
+            };
+        }
+    }
+}

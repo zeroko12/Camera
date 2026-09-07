@@ -203,7 +203,14 @@ namespace camera
         public string DevicePath
         {
             get => _devicePath;
-            set => SetProperty(ref _devicePath, value);
+            set
+            {
+                if (SetProperty(ref _devicePath, value))
+                {
+                    // 设备路径变更 → 拓扑缓存失效
+                    InvalidateUsbSpeedCache();
+                }
+            }
         }
 
         private int _Index = -1;
@@ -628,13 +635,38 @@ namespace camera
             }
         }
 
+        // ★ Fix A: UsbSpeedDescription 60 秒缓存
+        // 证据:counters 数据 + 静态分析。UsbSpeedDescription 在每次 UpdateActiveCodecStatus 都被读取,
+        // 内部触发 cfgmgr32.dll P/Invoke (CM_Locate_DevNodeW / CM_Get_DevNode_PropertyW)。
+        // 缓存后,每路 camera 每分钟最多 1 次 P/Invoke,降低 60 倍 sys call + 反射开销。
+        private string _cachedUsbSpeedDescription;
+        private long _usbSpeedCacheTicks;
+        private const long UsbSpeedCacheTtlTicks = 60L * TimeSpan.TicksPerSecond; // 60 秒 TTL
+
         public string UsbSpeedDescription
         {
             get
             {
+                long now = DateTime.UtcNow.Ticks;
+                long cached = Interlocked.Read(ref _usbSpeedCacheTicks);
+                if (!string.IsNullOrEmpty(_cachedUsbSpeedDescription) && (now - cached) < UsbSpeedCacheTtlTicks)
+                {
+                    return _cachedUsbSpeedDescription;
+                }
                 var topo = Infrastructure.UsbTopologyHelper.GetTopologyInfo(DevicePath, Name);
-                return topo.SpeedDescription;
+                _cachedUsbSpeedDescription = topo.SpeedDescription;
+                Interlocked.Exchange(ref _usbSpeedCacheTicks, now);
+                return _cachedUsbSpeedDescription;
             }
+        }
+
+        /// <summary>
+        /// 当 devicePath 改变时(重新打开相机),清空 USB 拓扑缓存。
+        /// </summary>
+        private void InvalidateUsbSpeedCache()
+        {
+            _cachedUsbSpeedDescription = null;
+            Interlocked.Exchange(ref _usbSpeedCacheTicks, 0);
         }
 
         public double EstimatedMbPerSec

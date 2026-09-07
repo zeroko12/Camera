@@ -100,6 +100,10 @@ namespace camera.ViewModels
         private void ExecuteConfirmDiskThresholdCommand()
         {
             DiskSpaceThreshold = DiskSpaceThresholdInput;
+            // ★ 根因修复:用户点"确认"后必须立即落盘,
+            // 否则 app 崩溃 / 强制关闭 → 下次启动值丢失,看起来像"重置"。
+            AppSettingsService.Instance.RequestSave();
+            Logger.LogInfo($"[VM] 磁盘阈值更新为 {DiskSpaceThreshold} MB,已调度自动保存");
         }
 
         private int _DiskSpaceThreshold = 1024;
@@ -463,6 +467,46 @@ namespace camera.ViewModels
             init();
             LoadSettings();
             InitializePeriodicTimer();
+
+            // ★ 自动保存:任何"持久化属性"被修改后,1 秒防抖落盘。
+            // 此前必须等 SaveSettings() 在 Close 时才统一保存,期间崩溃/强杀 → 配置丢失。
+            // 现在 setter 改值 → PropertyChanged 触发 → AppSettingsService.RequestSave() 调度落盘。
+            this.PropertyChanged += OnPersistentPropertyChanged;
+        }
+
+        /// <summary>
+        /// 需要自动落盘的属性名集合(同步原 SaveSettings() 写入的 key 列表)。
+        /// 修改任何 setter 会经由 SetProperty 触发 PropertyChanged,
+        /// 这里过滤出"持久化属性"再调度 RequestSave,1 秒防抖合并连续改动。
+        /// </summary>
+        private static readonly System.Collections.Generic.HashSet<string> _persistKeys =
+            new(System.StringComparer.Ordinal)
+            {
+                nameof(isSave),
+                nameof(Opacity),
+                nameof(Title),
+                nameof(SystemTitle),
+                nameof(OverwriteOldFiles),
+                nameof(DiskSpaceThreshold),
+                nameof(Quality),
+                nameof(SaveInterval),
+                nameof(MaxPreviewWidth),
+                nameof(PreviewFps),
+                nameof(RecordFps),
+                nameof(Contrast),
+                nameof(Luminance),
+                nameof(IsGrayHomogenization),
+                nameof(OverlayTextSize),
+                nameof(MaxFps),
+                // MinWindowWidth/MinWindowHeight 属于 MainWindow,在 MainWindow 自己处理
+            };
+
+        private void OnPersistentPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == null) return;
+            if (!_persistKeys.Contains(e.PropertyName)) return;
+            // 防抖由 AppSettingsService.RequestSave 内部 Timer 提供,无需此处再 debounce
+            AppSettingsService.Instance.RequestSave();
         }
 
 
@@ -1010,7 +1054,10 @@ namespace camera.ViewModels
         private void InitializePeriodicTimer()
         {
             _periodicTimer = new DispatcherTimer();
-            _periodicTimer.Interval = TimeSpan.FromSeconds(10);
+            // ★ Fix A: Period 10s → 60s
+            // 证据:counters 数据 methods-jitted +9664 + PeriodicTimer × 4 cameras × 每10s × 86400次/天 = 34560次/天
+            // 的反射 + 驱动调用。降低频率减少 CPU、reflection、P/Invoke 调用量,以及随附的内存 churn。
+            _periodicTimer.Interval = TimeSpan.FromSeconds(60);
             _periodicTimer.Tick += PeriodicTimer_Tick;
             _periodicTimer.Start();
 

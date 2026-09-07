@@ -63,10 +63,27 @@ namespace camera.Views
             Loaded += MainWindow_Loaded;
             StateChanged += MainWindow_StateChanged;
 
-            // 移除以下行 
-            //this.KeyDown += MainWindow_KeyDown;
-            //this.KeyUp += MainWindow_KeyUp;
+            // ★ 自动保存:窗口几何变化 → 立即调度落盘。
+            // 原 SaveSettings() 仅在 OnClosing 触发,期间崩溃 → 窗口尺寸/位置丢失。
+            SizeChanged     += MainWindow_SizeOrLocationChanged;
+            LocationChanged += MainWindow_SizeOrLocationChanged;
+        }
 
+        /// <summary>
+        /// 主窗口几何变化 → 自动持久化(防抖由 AppSettingsService 内部 Timer 提供)。
+        /// 同时通过 ConfigurationManager 同步给旧 App.config(.exe.config),
+        /// 确保下次启动 LoadSettings 恢复正确位置。
+        /// </summary>
+        private void MainWindow_SizeOrLocationChanged(object? sender, EventArgs e)
+        {
+            if (WindowState != System.Windows.WindowState.Normal) return;
+
+            ConfigurationManager.SaveSetting("WindowWidth",  ActualWidth.ToString());
+            ConfigurationManager.SaveSetting("WindowHeight", ActualHeight.ToString());
+            ConfigurationManager.SaveSetting("WindowLeft",   Left.ToString());
+            ConfigurationManager.SaveSetting("WindowTop",    Top.ToString());
+            // 也调一下新的 JSON 服务的 RequestSave 以触发防抖落盘(覆盖 VM 侧的设置)
+            AppSettingsService.Instance.RequestSave();
         }
 
         private static Mutex _mutex = null;
