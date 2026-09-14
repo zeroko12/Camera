@@ -1956,6 +1956,7 @@ namespace camera
                         Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
 
                         _previewController?.Dispose();
+                        _previewController = null;  // ★ Fix P1-1: 置 null 帮助 GC 回收循环引用
                         _claheProcessor?.Dispose();
                         _timestampOverlayProcessor?.Dispose();
 
@@ -1963,6 +1964,14 @@ namespace camera
                         {
                             _Frame.Dispose();
                             _Frame = null;
+                        }
+
+                        // ★ Fix P0-1: 清理 _latestFrame 槽位中可能滞留的帧,避免被 finalize 漏掉
+                        var pendingLatestFrame = Interlocked.Exchange(ref _latestFrame, null);
+                        if (pendingLatestFrame != null && !pendingLatestFrame.IsDisposed)
+                        {
+                            try { Infrastructure.MatPool.Return(pendingLatestFrame); }
+                            catch { /* Dispose 路径不再抛 */ }
                         }
                     }
                 }

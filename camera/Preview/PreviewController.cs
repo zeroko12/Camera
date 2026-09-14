@@ -81,6 +81,13 @@ namespace camera.Preview
 
         public void Dispose()
         {
+            // ★ Fix P1-1: 先清空事件订阅,打破 GC 循环引用
+            // CameraService._previewController.PreviewFrameReady += lambda
+            // 闭包持有 this (CameraService),如果不在 Dispose 前清空,
+            // 会形成: CameraService → PreviewController → event → lambda → CameraService
+            // 整个 CameraService 实例无法被 Gen 2 GC 回收
+            PreviewFrameReady = null;
+
             if (_detector is IDisposable disposable)
             {
                 disposable.Dispose();

@@ -71,18 +71,15 @@ namespace camera.Views
 
         /// <summary>
         /// 主窗口几何变化 → 自动持久化(防抖由 AppSettingsService 内部 Timer 提供)。
-        /// 同时通过 ConfigurationManager 同步给旧 App.config(.exe.config),
-        /// 确保下次启动 LoadSettings 恢复正确位置。
+        /// ★ Fix P0-2: 删除高频率的 ConfigurationManager.SaveSetting 调用。
+        /// 原来拖拽窗口 5 秒会触发 ~300 次 SizeChanged × 4 个 .exe.config 全量写,
+        /// 每次 SaveSetting 都会 OpenExeConfiguration + XmlDocument.Save + RefreshSection,
+        /// 产生大量临时对象,直接推高 Post-GC baseline。
+        /// 现在只调一次 AppSettingsService.RequestSave(),由其 1 秒防抖合并所有写。
         /// </summary>
         private void MainWindow_SizeOrLocationChanged(object? sender, EventArgs e)
         {
             if (WindowState != System.Windows.WindowState.Normal) return;
-
-            ConfigurationManager.SaveSetting("WindowWidth",  ActualWidth.ToString());
-            ConfigurationManager.SaveSetting("WindowHeight", ActualHeight.ToString());
-            ConfigurationManager.SaveSetting("WindowLeft",   Left.ToString());
-            ConfigurationManager.SaveSetting("WindowTop",    Top.ToString());
-            // 也调一下新的 JSON 服务的 RequestSave 以触发防抖落盘(覆盖 VM 侧的设置)
             AppSettingsService.Instance.RequestSave();
         }
 

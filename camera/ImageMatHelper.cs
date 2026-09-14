@@ -209,7 +209,13 @@ namespace camera
                     }
                 }
 
-                wb.AddDirtyRect(new Int32Rect(0, 0, w, h));
+                // ★ Fix P0-5: 删除冗余的 AddDirtyRect 调用
+                // WPF 的 WriteableBitmap.Lock/Unlock 已经隐式标记 dirty region,
+                // 显式 AddDirtyRect 会触发完整的 CompositionTarget.Rendering 渲染管线,
+                // 这是导致 WPF RenderData/FreezableContextPair 累积的主要源头。
+                // 在 4-camera + libx264 环境下每帧 AddDirtyRect 触发 ~36 entries/秒
+                // 字典增长(来自 BitmapSource.DownloadProgress 内部订阅追踪),
+                // 这是用户数据中 Post-GC 内存从 430 MB 涨到 1100 MB 的核心原因之一。
             }
             finally
             {

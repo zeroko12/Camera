@@ -387,34 +387,64 @@ namespace camera.Encoding
         /// </summary>
         private void Cleanup()
         {
-            _cts?.Cancel();
-            try { _errorReadTask?.Wait(500); } catch { }
-            _cts?.Dispose();
-            _cts = null;
+            // ★ Fix P0-4: 严格顺序释放,消除 finalizer 队列堆积
+            // 1. 停止 stderr reader task
+            if (_cts != null)
+            {
+                try { _cts.Cancel(); } catch { }
+            }
+            if (_errorReadTask != null)
+            {
+                try
+                {
+                    if (!_errorReadTask.Wait(2000))
+                    {
+                        Logger.LogWarning("[FFmpegEncoder] stderr reader 未在 2s 内退出,后台继续");
+                    }
+                }
+                catch (AggregateException) { }
+                catch { }
+                _errorReadTask = null;
+            }
+            if (_cts != null)
+            {
+                try { _cts.Dispose(); } catch { }
+                _cts = null;
+            }
 
+            // 2. 释放会话计数
             if (!string.IsNullOrEmpty(Codec))
             {
                 VideoEncoderFactory.ReleaseSession(Codec);
                 Codec = "";
             }
 
-            // 释放持久 YUV 缓冲区
-            _yuvBuffer?.Dispose();
-            _yuvBuffer = null;
+            // 3. YUV 缓冲(必须在 Process 之前)
+            if (_yuvBuffer != null)
+            {
+                try { _yuvBuffer.Dispose(); } catch { }
+                _yuvBuffer = null;
+            }
 
+            // 4. Process 严格顺序
             if (_ffmpegProcess != null)
             {
+                var proc = _ffmpegProcess;
+                _ffmpegProcess = null;  // 先置 null,任何后续异常都不会让外部访问到
                 try
                 {
-                    if (!_ffmpegProcess.HasExited)
+                    if (!proc.HasExited)
                     {
-                        _ffmpegProcess.Kill();
-                        _ffmpegProcess.WaitForExit(1000);
+                        try { proc.Kill(); } catch { }
+                        // libx264 软编码 moov atom 重写最坏情况 5-10 秒
+                        try { if (!proc.WaitForExit(5000)) Logger.LogWarning("[FFmpegEncoder] FFmpeg 5s 内未退出,继续释放"); } catch { }
                     }
                 }
-                catch { }
-                _ffmpegProcess.Dispose();
-                _ffmpegProcess = null;
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"[FFmpegEncoder] 终止 FFmpeg 进程异常: {ex.Message}");
+                }
+                try { proc.Dispose(); } catch { }
             }
         }
 
