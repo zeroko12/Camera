@@ -1204,7 +1204,14 @@ namespace camera.ViewModels
             // 防抖：每次收到通知后重置 800ms 定时器，只有最后一条消息后 800ms 才真正执行
             lock (_deviceChangeLock)
             {
-                _deviceChangeDebounceTimer?.Dispose();
+                // ★ Fix P1-3: 同步等待旧 Timer 释放,避免 callback 持有 this 闭包泄漏
+                var oldTimer = _deviceChangeDebounceTimer;
+                _deviceChangeDebounceTimer = null;
+                if (oldTimer != null)
+                {
+                    try { oldTimer.Dispose(System.Threading.WaitHandle); } catch { }
+                }
+
                 _deviceChangeDebounceTimer = new System.Threading.Timer(
                     _ => ExecuteDeviceChangeHandler(),
                     null,
@@ -1488,9 +1495,15 @@ namespace camera.ViewModels
         {
             if (_disposed)
                 return;
+            _disposed = true;  // ★ 提到最前面,任何并发访问立即可见
 
             if (disposing)
             {
+                // ★ Fix P1-4: 先解绑所有事件订阅,避免闭包循环引用阻止 GC
+                // 关键:this.PropertyChanged += OnPersistentPropertyChanged 在 #474 行
+                // lambda 闭包 this 阻止 VM 被回收
+                this.PropertyChanged -= OnPersistentPropertyChanged;
+
                 try
                 {
                     if (_periodicTimer != null)

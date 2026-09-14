@@ -249,6 +249,14 @@ namespace camera.Views
 
         protected override void OnClosed(EventArgs e)
         {
+            // ★ Fix P1-5: 先停所有 DispatcherTimer,打破 Tick → this 闭包引用
+            if (_playbackTimelineTimer != null)
+            {
+                try { _playbackTimelineTimer.Stop(); } catch { }
+                _playbackTimelineTimer.Tick -= PlaybackTimelineTimer_Tick;
+                _playbackTimelineTimer = null;
+            }
+
             SaveSettings();
             base.OnClosed(e);
             GlobalHotKey.Destroy();

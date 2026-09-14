@@ -317,8 +317,19 @@ namespace camera.Recording
             if (_encoder == null) return;
 
             Logger.LogInfo($"[FFmpegRecorder] 分段切换: 关闭 {_currentOutputPath}");
-            _encoder.Flush();
-            _encoder.Dispose();
+            // ★ Fix P1-6: 显式 Dispose 一次,避免 RotateSegment + Dispose 双重 Flush 调用
+            // 原来的 _encoder.Flush() + _encoder.Dispose() 会触发两次 Cleanup,
+            // 每次都创建 _yuvBuffer/_cts Dispose 链。
+            var oldEncoder = _encoder;
+            _encoder = null;  // 先置 null,确保 RecordFrame 不再访问
+            try
+            {
+                oldEncoder.Dispose();  // Dispose 内部会调 Flush
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[FFmpegRecorder] 旧编码器 Dispose 异常: {ex.Message}");
+            }
 
             // 如果本分段没有写入任何有效帧，则自动清理删除该空视频文件
             if (_framesWritten == 0 && !string.IsNullOrEmpty(_currentOutputPath) && File.Exists(_currentOutputPath))

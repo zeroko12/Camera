@@ -1957,8 +1957,27 @@ namespace camera
 
                         _previewController?.Dispose();
                         _previewController = null;  // ★ Fix P1-1: 置 null 帮助 GC 回收循环引用
-                        _claheProcessor?.Dispose();
-                        _timestampOverlayProcessor?.Dispose();
+
+                        // ★ Fix P1-2: 显式 Dispose pipeline 所有 processor 并置 null
+                        // 原代码只 Dispose _claheProcessor 和 _timestampOverlayProcessor,
+                        // _contrastLuminanceProcessor 和 _recordingProcessor 未 Dispose,
+                        // _pipeline 字段本身未置 null,4 路 camera × 4 个 processor 累积。
+                        if (_pipeline != null)
+                        {
+                            var processors = _pipeline.Processors;
+                            for (int i = 0; i < processors.Count; i++)
+                            {
+                                if (processors[i] is IDisposable disp)
+                                {
+                                    try { disp.Dispose(); } catch { }
+                                }
+                            }
+                            _pipeline = null;
+                        }
+                        _claheProcessor = null;
+                        _contrastLuminanceProcessor = null;
+                        _timestampOverlayProcessor = null;
+                        _recordingProcessor = null;
 
                         if (_Frame != null)
                         {
