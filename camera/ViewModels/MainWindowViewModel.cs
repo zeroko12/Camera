@@ -1209,7 +1209,7 @@ namespace camera.ViewModels
                 _deviceChangeDebounceTimer = null;
                 if (oldTimer != null)
                 {
-                    try { oldTimer.Dispose(System.Threading.WaitHandle); } catch { }
+                    try { oldTimer.Dispose(); } catch { }
                 }
 
                 _deviceChangeDebounceTimer = new System.Threading.Timer(
