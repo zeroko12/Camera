@@ -37,6 +37,7 @@ namespace camera
             PropertyNameCaseInsensitive = true,
             ReadCommentHandling      = JsonCommentHandling.Skip,
             AllowTrailingCommas      = true,
+            Encoder                  = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             Converters               = { new JsonStringEnumConverter() },
         };
 
@@ -60,6 +61,7 @@ namespace camera
                 null, Timeout.Infinite, Timeout.Infinite);
 
             Logger.LogInfo($"[Settings] 配置文件路径: {FilePath}");
+            _current = Load();
         }
 
         /// <summary>
@@ -88,6 +90,7 @@ namespace camera
                             SystemTitle = loaded.SystemTitle,
                             OverwriteOldFiles = loaded.OverwriteOldFiles,
                             DiskSpaceThreshold = loaded.DiskSpaceThreshold,
+                            SaveDirectory = string.IsNullOrWhiteSpace(loaded.SaveDirectory) ? AppSettings.DefaultSaveDirectory : loaded.SaveDirectory,
                             Quality = loaded.Quality,
                             SaveInterval = loaded.SaveInterval,
                             MaxPreviewWidth = loaded.MaxPreviewWidth,
@@ -108,7 +111,13 @@ namespace camera
                             CanClickThrough = loaded.CanClickThrough,
                             Topmost = loaded.Topmost,
                             ExitBehavior = loaded.ExitBehavior,
-                            Cameras = loaded.Cameras,
+                            MaxNvencSessions = loaded.MaxNvencSessions,
+                            MaxAmfSessions = loaded.MaxAmfSessions,
+                            MaxQsvSessions = loaded.MaxQsvSessions,
+                            UseV3Architecture = loaded.UseV3Architecture,
+                            ForceCpuEncoding = loaded.ForceCpuEncoding,
+                            Cameras = loaded.Cameras ?? new(StringComparer.OrdinalIgnoreCase),
+                            CameraOrder = loaded.CameraOrder ?? new(),
                         };
                         Logger.LogInfo($"[Settings] 从 JSON 加载成功 ({FilePath})");
                         return _current;
@@ -135,6 +144,7 @@ namespace camera
                     SystemTitle = migrated.SystemTitle,
                     OverwriteOldFiles = migrated.OverwriteOldFiles,
                     DiskSpaceThreshold = migrated.DiskSpaceThreshold,
+                    SaveDirectory = migrated.SaveDirectory,
                     Quality = migrated.Quality,
                     SaveInterval = migrated.SaveInterval,
                     MaxPreviewWidth = migrated.MaxPreviewWidth,
@@ -155,7 +165,13 @@ namespace camera
                     CanClickThrough = migrated.CanClickThrough,
                     Topmost = migrated.Topmost,
                     ExitBehavior = migrated.ExitBehavior,
-                    Cameras = migrated.Cameras,
+                    MaxNvencSessions = migrated.MaxNvencSessions,
+                    MaxAmfSessions = migrated.MaxAmfSessions,
+                    MaxQsvSessions = migrated.MaxQsvSessions,
+                    UseV3Architecture = migrated.UseV3Architecture,
+                    ForceCpuEncoding = migrated.ForceCpuEncoding,
+                    Cameras = migrated.Cameras ?? new(StringComparer.OrdinalIgnoreCase),
+                    CameraOrder = migrated.CameraOrder ?? new(),
                 };
                 Logger.LogInfo("[Settings] 从 App.config 迁移配置");
                 // 立即落盘,迁移完成
@@ -176,13 +192,14 @@ namespace camera
         /// <summary>
         /// 立即同步保存(阻塞,带文件锁)。
         /// </summary>
-        public void SaveSync(AppSettings settings)
+        public void SaveSync(AppSettings? settings = null)
         {
             lock (_saveLock)
             {
                 try
                 {
-                    var json = JsonSerializer.Serialize(settings, JsonOpts);
+                    var target = settings ?? _current;
+                    var json = JsonSerializer.Serialize(target, JsonOpts);
                     var tmp = FilePath + ".tmp";
 
                     // 原子写入:先写临时文件 → 强制 flush → rename
@@ -258,8 +275,37 @@ namespace camera
             double Dp(string k, double d) => double.TryParse(Get(k), out var v) ? v : d;
             string Sp(string k, string d) => string.IsNullOrEmpty(Get(k)) ? d : Get(k);
 
-            var cameras = new AppSettings.CameraSettingsCollection();
-            // 摄像头特定:遍历已知的 configKey 不实际可行,延迟到 ApplySettingsToCamera
+            var cameras = new Dictionary<string, AppSettings.CameraSettings>(StringComparer.OrdinalIgnoreCase);
+            foreach (string key in legacy.AllKeys)
+            {
+                if (string.IsNullOrEmpty(key)) continue;
+                if (key.StartsWith("Camera_", StringComparison.OrdinalIgnoreCase))
+                {
+                    int lastUnder = key.LastIndexOf('_');
+                    if (lastUnder > 7)
+                    {
+                        string configKey = key.Substring(7, lastUnder - 7);
+                        string prop = key.Substring(lastUnder + 1);
+
+                        if (!cameras.TryGetValue(configKey, out var camSetting))
+                        {
+                            camSetting = new AppSettings.CameraSettings();
+                            cameras[configKey] = camSetting;
+                        }
+
+                        string val = legacy[key];
+                        switch (prop.ToLowerInvariant())
+                        {
+                            case "customtext": camSetting.CustomText = val; break;
+                            case "resolution": camSetting.Resolution = val; break;
+                            case "recordresolution": camSetting.RecordResolution = val; break;
+                            case "recordfps": if (int.TryParse(val, out int rfps)) camSetting.RecordFps = rfps; break;
+                            case "ismanualdisabled": if (bool.TryParse(val, out bool dis)) camSetting.IsManualDisabled = dis; break;
+                        }
+                    }
+                }
+            }
+
             return new AppSettings
             {
                 IsSave               = Bp("isSave", AppSettings.DefaultIsSave),
@@ -268,6 +314,7 @@ namespace camera
                 SystemTitle          = Sp("SystemTitle", AppSettings.DefaultSystemTitle),
                 OverwriteOldFiles    = Bp("OverwriteOldFiles", AppSettings.DefaultOverwriteOldFiles),
                 DiskSpaceThreshold   = Ip("DiskSpaceThreshold", AppSettings.DefaultDiskSpaceThresholdMb),
+                SaveDirectory        = Sp("SaveDirectory", AppSettings.DefaultSaveDirectory),
                 Quality              = Ip("Quality", AppSettings.DefaultQuality),
                 SaveInterval         = Ip("SaveInterval", AppSettings.DefaultSaveIntervalMin),
                 MaxPreviewWidth      = Ip("MaxPreviewWidth", AppSettings.DefaultMaxPreviewWidth),
@@ -288,6 +335,11 @@ namespace camera
                 CanClickThrough      = Bp("CanClickThrough", AppSettings.DefaultCanClickThrough),
                 Topmost              = Bp("Topmost", AppSettings.DefaultTopmost),
                 ExitBehavior         = Sp("ExitBehavior", AppSettings.DefaultExitBehavior),
+                MaxNvencSessions     = Ip("MaxNvencSessions", AppSettings.DefaultMaxNvencSessions),
+                MaxAmfSessions       = Ip("MaxAmfSessions", AppSettings.DefaultMaxAmfSessions),
+                MaxQsvSessions       = Ip("MaxQsvSessions", AppSettings.DefaultMaxQsvSessions),
+                UseV3Architecture    = Bp("UseV3Architecture", AppSettings.DefaultUseV3Architecture),
+                ForceCpuEncoding     = Bp("ForceCpuEncoding", AppSettings.DefaultForceCpuEncoding),
                 Cameras              = cameras,
             };
         }

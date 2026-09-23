@@ -79,6 +79,7 @@ namespace camera.Recording
                 {
                     CurrentQuality = quality;
                     _currentOutputPath = string.IsNullOrEmpty(outputPath) ? GenerateOutputPath() : outputPath;
+                    StorageManager.Instance.RegisterActiveFile(_currentOutputPath);
                     _recordingStartTime = DateTime.Now;
                     _lastSegmentTime = _recordingStartTime;
                     _framesWritten = 0;
@@ -263,8 +264,15 @@ namespace camera.Recording
                     _encoder = null;
                 }
 
+                string oldPath = _currentOutputPath;
+                if (!string.IsNullOrEmpty(oldPath))
+                {
+                    StorageManager.Instance.UnregisterActiveFile(oldPath);
+                }
+
                 // 使用新路径重新拉起，避免损坏已有视频文件
                 _currentOutputPath = GenerateOutputPath();
+                StorageManager.Instance.RegisterActiveFile(_currentOutputPath);
                 _encoder = VideoEncoderFactory.CreateWithAutoFallback(
                     _options.InputWidth, _options.InputHeight, _options.Width, _options.Height, _options.RecordFps, CurrentQuality, _currentOutputPath, _ffmpegPath, _options.CustomText, _options.OverlayTextSize);
 
@@ -345,7 +353,14 @@ namespace camera.Recording
                 }
             }
 
+            string oldRotatedPath = _currentOutputPath;
+            if (!string.IsNullOrEmpty(oldRotatedPath))
+            {
+                StorageManager.Instance.UnregisterActiveFile(oldRotatedPath);
+            }
+
             string newPath = GenerateOutputPath();
+            StorageManager.Instance.RegisterActiveFile(newPath);
             Logger.LogInfo($"[FFmpegRecorder] 分段切换: 创建 {newPath}");
             _encoder = VideoEncoderFactory.CreateWithAutoFallback(
                 _options.InputWidth, _options.InputHeight, _options.Width, _options.Height, _options.RecordFps, CurrentQuality, newPath, _ffmpegPath, _options.CustomText, _options.OverlayTextSize);
@@ -362,7 +377,7 @@ namespace camera.Recording
             string dateStr = now.ToString("yyyyMMdd");
             string timeStr = now.ToString("HH-mm-ss") + ".mp4";
             
-            string rawDir = string.IsNullOrEmpty(_options.SaveDirectory) ? "SavedVideos" : _options.SaveDirectory;
+            string rawDir = string.IsNullOrEmpty(_options.SaveDirectory) ? StorageManager.Instance.SaveDirectory : _options.SaveDirectory;
             string directory = Path.IsPathRooted(rawDir)
                 ? rawDir
                 : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, rawDir);
@@ -389,6 +404,10 @@ namespace camera.Recording
             string outputPathToDelete = null;
             lock (_lock)
             {
+                if (!string.IsNullOrEmpty(_currentOutputPath))
+                {
+                    StorageManager.Instance.UnregisterActiveFile(_currentOutputPath);
+                }
                 encoderToDispose = _encoder;
                 _encoder = null;          // 立即置空，让 RecordFrame 不再使用旧编码器
                 _isRecording = false;
@@ -429,6 +448,10 @@ namespace camera.Recording
         /// </summary>
         private void Cleanup()
         {
+            if (!string.IsNullOrEmpty(_currentOutputPath))
+            {
+                StorageManager.Instance.UnregisterActiveFile(_currentOutputPath);
+            }
             string outputPathToDelete = null;
             if (_encoder != null)
             {

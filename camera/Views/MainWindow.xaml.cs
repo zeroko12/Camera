@@ -95,7 +95,21 @@ namespace camera.Views
         private void MainWindow_SizeOrLocationChanged(object? sender, EventArgs e)
         {
             if (WindowState != System.Windows.WindowState.Normal) return;
-            AppSettingsService.Instance.RequestSave();
+            double w = this.Width;
+            double h = this.Height;
+            double l = this.Left;
+            double t = this.Top;
+
+            _normalWidth = w;
+            _normalHeight = h;
+
+            AppSettingsService.Instance.Update(s =>
+            {
+                s.WindowWidth = w;
+                s.WindowHeight = h;
+                s.WindowLeft = l;
+                s.WindowTop = t;
+            });
         }
 
         private static Mutex _mutex = null;
@@ -799,50 +813,54 @@ namespace camera.Views
         /// <param name="e"></param>
         private void ToggleButton_Click(object sender, RoutedEventArgs e)
         {
-            this.Topmost = !this.Topmost;
+            this.Topmost = topMostButton.IsChecked == true;
+            AppSettingsService.Instance.Update(s => s.Topmost = this.Topmost);
+            ConfigurationManager.SaveSetting("Topmost", this.Topmost.ToString());
         }
-
-        //private void MainBorder_MouseEnter(object sender, MouseEventArgs e)
-        //{
-        //    StartClickThrough();
-        //    Debug.WriteLine("启用穿透");
-        //}
-
-        //private void MainBorder_MouseLeave(object sender, MouseEventArgs e)
-        //{
-        //    StopClickThrough();
-        //    Debug.WriteLine("禁用穿透");
-        //}
 
         private void LoadSettings()
         {
-            CanClickThrough = bool.Parse(ConfigurationManager.GetSetting("CanClickThrough") ?? "false");
-            this.Topmost = bool.Parse(ConfigurationManager.GetSetting("Topmost") ?? "true");
+            var appSettings = AppSettingsService.Instance.Current;
+            CanClickThrough = appSettings.CanClickThrough;
+            this.Topmost = appSettings.Topmost;
             topMostButton.IsChecked = this.Topmost;
-            double width = double.Parse(ConfigurationManager.GetSetting("WindowWidth") ?? "900");
-            double height = double.Parse(ConfigurationManager.GetSetting("WindowHeight") ?? "480");
-            double left = double.Parse(ConfigurationManager.GetSetting("WindowLeft") ?? "100");
-            double top = double.Parse(ConfigurationManager.GetSetting("WindowTop") ?? "100");
-            double MinWindowWidth = double.Parse(ConfigurationManager.GetSetting("MinWindowWidth") ?? "450");
-            double MinWindowHeight = double.Parse(ConfigurationManager.GetSetting("MinWindowHeight") ?? "240");
 
+            this.MinWindowHeight = appSettings.MinWindowHeight > 0 ? appSettings.MinWindowHeight : 240;
+            this.MinWindowWidth = appSettings.MinWindowWidth > 0 ? appSettings.MinWindowWidth : 450;
 
-            this.MinWindowHeight = MinWindowHeight;
-            this.MinWindowWidth = MinWindowWidth;
+            double width = appSettings.WindowWidth > 0 ? appSettings.WindowWidth : 900;
+            double height = appSettings.WindowHeight > 0 ? appSettings.WindowHeight : 480;
+            double left = appSettings.WindowLeft;
+            double top = appSettings.WindowTop;
+
             this.Width = width;
             this.Height = height;
-            this.Left = left;
-            this.Top = top;
+            if (left >= 0) this.Left = left;
+            if (top >= 0) this.Top = top;
             this._normalWidth = width;
             this._normalHeight = height;
         }
 
         private void SaveSettings()
         {
-            ConfigurationManager.SaveSetting("CanClickThrough", CanClickThrough.ToString());
-            ConfigurationManager.SaveSetting("Topmost", this.Topmost.ToString());
             double widthToSave = this.WindowState == WindowState.Maximized ? _normalWidth : this.Width;
             double heightToSave = this.WindowState == WindowState.Maximized ? _normalHeight : this.Height;
+
+            AppSettingsService.Instance.Update(s =>
+            {
+                s.CanClickThrough = CanClickThrough;
+                s.Topmost = this.Topmost;
+                s.WindowWidth = widthToSave;
+                s.WindowHeight = heightToSave;
+                s.WindowLeft = this.Left;
+                s.WindowTop = this.Top;
+                s.MinWindowWidth = this.MinWindowWidth;
+                s.MinWindowHeight = this.MinWindowHeight;
+            });
+            AppSettingsService.Instance.SaveSync();
+
+            ConfigurationManager.SaveSetting("CanClickThrough", CanClickThrough.ToString());
+            ConfigurationManager.SaveSetting("Topmost", this.Topmost.ToString());
             ConfigurationManager.SaveSetting("WindowWidth", widthToSave.ToString());
             ConfigurationManager.SaveSetting("WindowHeight", heightToSave.ToString());
             ConfigurationManager.SaveSetting("WindowLeft", this.Left.ToString());
@@ -1316,6 +1334,7 @@ namespace camera.Views
                         if (sourceIndex >= 0 && targetIndex >= 0)
                         {
                             vm.Cameras.Move(sourceIndex, targetIndex);
+                            vm.SaveCameraOrder();
                         }
                     }
                 }

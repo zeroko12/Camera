@@ -73,8 +73,6 @@ namespace camera
         #region 锁和时间统计
 
         private readonly object _lockObject = new();
-        private static readonly object _diskCleanupLock = new();
-        private static DateTime _lastDiskSpaceWarningTime = DateTime.MinValue;
         private readonly Stopwatch _fpsTimer = new();
 
         #endregion
@@ -127,6 +125,7 @@ namespace camera
 
                     if (Index >= 0)
                     {
+                        SaveCameraSetting(s => s.RecordFps = clamped);
                         ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_RecordFps", clamped.ToString());
                     }
 
@@ -249,7 +248,11 @@ namespace camera
             return GetConfigKey(DevicePath, Index);
         }
 
-        public string saveDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SavedVideos");
+        public string saveDirectory
+        {
+            get => StorageManager.Instance.SaveDirectory;
+            set => StorageManager.Instance.SaveDirectory = value;
+        }
 
         private TimeSpan _saveInterval = TimeSpan.FromMinutes(1);
         public TimeSpan SaveInterval
@@ -265,18 +268,10 @@ namespace camera
             }
         }
 
-        private long _diskThreshold = 1024;
         public long DiskThreshold
         {
-            get => _diskThreshold;
-            set
-            {
-                if (_diskThreshold != value)
-                {
-                    SetProperty(ref _diskThreshold, value);
-                    Debug.WriteLine($"设置{Index}磁盘阈值:{DiskThreshold}");
-                }
-            }
+            get => StorageManager.Instance.DiskSpaceThresholdMb;
+            set => StorageManager.Instance.DiskSpaceThresholdMb = value;
         }
 
         private double contrast = 1.0;
@@ -349,18 +344,10 @@ namespace camera
             }
         }
 
-        private bool _overwriteOldFiles = true;
         public bool OverwriteOldFiles
         {
-            get => _overwriteOldFiles;
-            set
-            {
-                if (_overwriteOldFiles != value)
-                {
-                    SetProperty(ref _overwriteOldFiles, value);
-                    Debug.WriteLine($"设置{Index}保存模式为{OverwriteOldFiles}");
-                }
-            }
+            get => StorageManager.Instance.OverwriteOldFiles;
+            set => StorageManager.Instance.OverwriteOldFiles = value;
         }
 
         private System.Collections.ObjectModel.ObservableCollection<string> _supportedResolutions = new();
@@ -387,6 +374,7 @@ namespace camera
                 {
                     if (Index >= 0)
                     {
+                        SaveCameraSetting(s => s.RecordResolution = value);
                         ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_RecordResolution", value);
                     }
                     if (isSave)
@@ -498,6 +486,7 @@ namespace camera
                     // 实时保存自定义水印文字内容
                     if (Index >= 0)
                     {
+                        SaveCameraSetting(s => s.CustomText = value);
                         ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_CustomText", value ?? "");
                     }
 
@@ -543,10 +532,39 @@ namespace camera
             {
                 if (SetProperty(ref _isManualDisabled, value))
                 {
+                    if (Index >= 0)
+                    {
+                        SaveCameraSetting(s => s.IsManualDisabled = value);
+                        ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_IsManualDisabled", value.ToString());
+                    }
+
                     RaisePropertyChanged(nameof(IsConnected));
                     EnableCameraCommand?.RaiseCanExecuteChanged();
                     DisableCameraCommand?.RaiseCanExecuteChanged();
                 }
+            }
+        }
+
+        private void SaveCameraSetting(Action<AppSettings.CameraSettings> mutator)
+        {
+            try
+            {
+                string key = GetConfigKey();
+                if (string.IsNullOrEmpty(key)) return;
+
+                AppSettingsService.Instance.Update(settings =>
+                {
+                    if (!settings.Cameras.TryGetValue(key, out var camSetting))
+                    {
+                        camSetting = new AppSettings.CameraSettings();
+                        settings.Cameras[key] = camSetting;
+                    }
+                    mutator(camSetting);
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[CameraService] 保存摄像头配置失败: {ex.Message}");
             }
         }
 
@@ -718,7 +736,13 @@ namespace camera
         {
             EnableCameraCommand = new DelegateCommand(EnableCamera, () => IsManualDisabled || !IsConnected);
             DisableCameraCommand = new DelegateCommand(DisableCamera, () => !IsManualDisabled && IsConnected);
+            StorageManager.Instance.StorageWarning += OnStorageWarningForward;
             InitializeModules();
+        }
+
+        private void OnStorageWarningForward(object sender, string message)
+        {
+            DiskSpaceLow?.Invoke(this, message);
         }
 
         private void InitializeModules()
@@ -933,8 +957,12 @@ namespace camera
             WidthOrigin = bestWidth;
             HeightOrigin = bestHeight;
 
+            string configKey = GetConfigKey();
+            AppSettings.CameraSettings camConfig = null;
+            AppSettingsService.Instance.Current.Cameras.TryGetValue(configKey, out camConfig);
+
             // 读取已保存的分辨率配置，如果在支持的列表中，则优先应用
-            string savedRes = ConfigurationManager.GetSetting($"Camera_{GetConfigKey()}_Resolution");
+            string savedRes = camConfig?.Resolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
             bool appliedSavedRes = false;
             if (!string.IsNullOrEmpty(savedRes))
             {
@@ -975,7 +1003,7 @@ namespace camera
             RaisePropertyChanged(nameof(SelectedResolution));
 
             // 读取已保存的录像分辨率配置，如果在支持的列表中，则优先应用
-            string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{GetConfigKey()}_RecordResolution");
+            string savedRecordRes = camConfig?.RecordResolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
             if (!string.IsNullOrEmpty(savedRecordRes) && SupportedRecordResolutions.Contains(savedRecordRes))
             {
                 _selectedRecordResolution = savedRecordRes;
@@ -987,10 +1015,35 @@ namespace camera
             RaisePropertyChanged(nameof(SelectedRecordResolution));
 
             // 读取已保存的录像帧率配置
-            string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{GetConfigKey()}_RecordFps");
-            if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
+            if (camConfig?.RecordFps.HasValue == true)
             {
-                RecordFps = rfps;
+                RecordFps = camConfig.RecordFps.Value;
+            }
+            else
+            {
+                string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
+                if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
+                {
+                    RecordFps = rfps;
+                }
+            }
+
+            // 读取已保存的水印文字配置
+            string savedCustomText = camConfig?.CustomText ?? ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText");
+            if (!string.IsNullOrEmpty(savedCustomText))
+            {
+                CustomOverlayText = savedCustomText;
+            }
+
+            // 读取已保存的停用状态
+            bool? savedDisabled = camConfig?.IsManualDisabled;
+            if (!savedDisabled.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsManualDisabled"), out bool dis))
+            {
+                savedDisabled = dis;
+            }
+            if (savedDisabled == true)
+            {
+                _isManualDisabled = true;
             }
 
             // 将摄像头设置回最终确定的分辨率（避免保留探测循环最后一项的值）
@@ -1473,7 +1526,7 @@ namespace camera
                         // 将处理后的图像传递给预览控制器
                         _previewController.UpdateFrame(tempFrame, pipelineNow);
 
-                        // 磁盘检查计数和采集帧率监控
+                        // 采集帧率监控 (已彻底移除实时帧循环中的同步磁盘 IO 检查)
                         _frameCount++;
                         if (_frameCount % 100 == 0)
                         {
@@ -1493,7 +1546,6 @@ namespace camera
                             }
 
                             _frameCount = 0;
-                            CheckDiskSpace();
                         }
                     }
                     catch (Exception ex)
@@ -1543,15 +1595,9 @@ namespace camera
                 return;
             }
 
-            long space = CalcDiskSpaceEnough();
-            if (space < DiskThreshold)
+            if (!StorageManager.Instance.CanStartRecording(out string failureReason))
             {
-                CheckDiskSpace();
-            }
-
-            if (CalcDiskSpaceEnough() < DiskThreshold)
-            {
-                Logger.LogWarning($"[CameraService] 磁盘空间低于阈值，拒绝开启录像。");
+                Logger.LogWarning($"[CameraService #{Index}] 无法开启录像: {failureReason}");
                 isSave = false;
                 return;
             }
@@ -1595,164 +1641,12 @@ namespace camera
             _recorder?.StopRecording();
         }
 
-        private void CheckDiskSpace()
-        {
-            if (!isSave) return;
-
-            long space = CalcDiskSpaceEnough();
-            if (space < DiskThreshold)
-            {
-                Logger.LogWarning($"磁盘空间不足: {space}MB < {DiskThreshold}MB");
-                if (OverwriteOldFiles)
-                {
-                    long targetSpace = DiskThreshold + 500;
-                    space = BatchCleanUpDiskSpace(targetSpace, space);
-
-                    if (space < DiskThreshold)
-                    {
-                        Logger.LogError("清理所有旧文件后空间仍不足，停止录像。");
-                        TriggerDiskSpaceLow($"清理所有旧文件后空间仍不足，录像已停止: {space}MB");
-                        StopSave();
-                    }
-                }
-                else
-                {
-                    Logger.LogWarning("磁盘空间不足且未启用覆盖旧文件，停止录像。");
-                    TriggerDiskSpaceLow($"磁盘空间不足且未启用覆盖旧文件，录像已停止: {space}MB");
-                    StopSave();
-                }
-            }
-        }
-
-        private void TriggerDiskSpaceLow(string message)
-        {
-            if ((DateTime.Now - _lastDiskSpaceWarningTime).TotalSeconds > 10)
-            {
-                _lastDiskSpaceWarningTime = DateTime.Now;
-                Application.Current?.Dispatcher.Invoke(() =>
-                {
-                    try
-                    {
-                        DiskSpaceLow?.Invoke(this, message);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError("触发 DiskSpaceLow 事件发生异常", ex);
-                    }
-                });
-            }
-        }
-
-        private void StopSave()
-        {
-            isSave = false;
-        }
-
-        private long CalcDiskSpaceEnough()
-        {
-            try
-            {
-                // 1. 核心安全防御: 监控系统盘(C:)空间。如果 C 盘可用空间不足 3072MB (3GB)，直接拦截录像，防止挤爆系统盘
-                try
-                {
-                    DriveInfo cDrive = new DriveInfo("C");
-                    if (cDrive.AvailableFreeSpace < 3072L * 1024 * 1024)
-                    {
-                        Logger.LogWarning($"[CameraService #{Index}] 系统盘(C:)空间极低({cDrive.AvailableFreeSpace / (1024 * 1024)}MB < 3072MB)，安全熔断阻止录像。");
-                        return 0;
-                    }
-                }
-                catch { }
-
-                // 2. 存储盘空间校验（确保解析到绝对路径，优先保存在应用基目录所在磁盘）
-                string targetDir = string.IsNullOrWhiteSpace(saveDirectory)
-                    ? AppDomain.CurrentDomain.BaseDirectory
-                    : (Path.IsPathRooted(saveDirectory) ? saveDirectory : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, saveDirectory));
-                string drive = Path.GetPathRoot(targetDir);
-                DriveInfo driveInfo = new DriveInfo(drive);
-                long availableSpace = driveInfo.AvailableFreeSpace / (1024 * 1024); // MB
-                return availableSpace;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning($"[CameraService #{Index}] 获取磁盘剩余空间异常: {ex.Message}");
-                return 102400;
-            }
-        }
-
-        private long BatchCleanUpDiskSpace(long targetSpace, long currentAvailableSpace)
-        {
-            lock (_diskCleanupLock)
-            {
-                currentAvailableSpace = CalcDiskSpaceEnough();
-                if (currentAvailableSpace >= targetSpace)
-                {
-                    return currentAvailableSpace;
-                }
-
-                string fullSaveDir = string.IsNullOrWhiteSpace(saveDirectory)
-                    ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SavedVideos")
-                    : (Path.IsPathRooted(saveDirectory) ? saveDirectory : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, saveDirectory));
-
-                if (!Directory.Exists(fullSaveDir))
-                {
-                    return currentAvailableSpace;
-                }
-
-                try
-                {
-                    var allMp4Files = Directory.GetFiles(fullSaveDir, "*.mp4", SearchOption.AllDirectories)
-                        .Select(f => new FileInfo(f))
-                        .OrderBy(fi => fi.LastWriteTime)
-                        .ToList();
-
-                    int deletedCount = 0;
-                    long deletedSpaceMB = 0;
-
-                    foreach (var fileInfo in allMp4Files)
-                    {
-                        if (currentAvailableSpace >= targetSpace)
-                            break;
-
-                        try
-                        {
-                            if (File.Exists(fileInfo.FullName))
-                            {
-                                long fileSizeMB = fileInfo.Length / (1024 * 1024);
-                                if (fileSizeMB < 1) fileSizeMB = 1;
-
-                                fileInfo.Delete();
-                                deletedCount++;
-                                deletedSpaceMB += fileSizeMB;
-                                currentAvailableSpace += fileSizeMB;
-
-                                var parentDir = fileInfo.Directory;
-                                if (parentDir != null && parentDir.Exists && parentDir.GetFiles().Length == 0 && parentDir.GetDirectories().Length == 0)
-                                {
-                                    try { parentDir.Delete(); } catch { }
-                                }
-                            }
-                        }
-                        catch (IOException) { }
-                        catch (Exception ex)
-                        {
-                            Logger.LogError($"批清理删除个别文件失败: {fileInfo.FullName}", ex);
-                        }
-                    }
-
-                    if (deletedCount > 0)
-                    {
-                        Logger.LogInfo($"磁盘清理完成: 共删除 {deletedCount} 个过期视频文件，释放空间约 {deletedSpaceMB}MB");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError("全局批量清理旧视频发生异常", ex);
-                }
-
-                return CalcDiskSpaceEnough();
-            }
-        }
+        // ═══════════════════════════════════════════════════════════
+        // 核心重构说明:
+        // 原 CheckDiskSpace()、BatchCleanUpDiskSpace()、CalcDiskSpaceEnough() 
+        // 曾导致严重跨盘误删 D 盘 788 个历史录像并冻结实时采集管线，
+        // 现已全部重构升级并迁移至独立的全局后台服务 StorageManager.cs。
+        // ═══════════════════════════════════════════════════════════
 
         public void ChangeCameraInfo()
         {
@@ -1892,6 +1786,7 @@ namespace camera
                         // 仅当确定此分辨率被硬件驱动成功应用时，才实时保存配置
                         if (Index >= 0)
                         {
+                            SaveCameraSetting(s => s.Resolution = actualResStr);
                             ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_Resolution", actualResStr);
                         }
 
@@ -1945,6 +1840,7 @@ namespace camera
             {
                 try
                 {
+                    StorageManager.Instance.StorageWarning -= OnStorageWarningForward;
                     lock (_lockObject)
                     {
                         _isCapturing = false;

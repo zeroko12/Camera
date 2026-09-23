@@ -81,14 +81,19 @@ namespace camera.Encoding
         {
             try
             {
+                var appSettings = AppSettingsService.Instance.Current;
+                if (appSettings != null)
+                {
+                    _forceCpuEncoding = appSettings.ForceCpuEncoding;
+                    if (appSettings.MaxNvencSessions > 0) _maxNvencSessions = appSettings.MaxNvencSessions;
+                    if (appSettings.MaxAmfSessions > 0) _maxAmfSessions = appSettings.MaxAmfSessions;
+                    if (appSettings.MaxQsvSessions > 0) _maxQsvSessions = appSettings.MaxQsvSessions;
+                }
+
                 var config = System.Configuration.ConfigurationManager.AppSettings;
                 if (bool.TryParse(config["ForceCpuEncoding"], out bool forceCpu))
                 {
                     _forceCpuEncoding = forceCpu;
-                    if (forceCpu)
-                    {
-                        Logger.LogInfo("[EncoderFactory] App.config 已启用 ForceCpuEncoding=true，将强制使用 CPU 软件编码 (libx264)");
-                    }
                 }
                 if (int.TryParse(config["MaxNvencSessions"], out int nvenc) && nvenc > 0)
                     _maxNvencSessions = nvenc;
@@ -97,6 +102,11 @@ namespace camera.Encoding
                 // qsv=0 时保留自动检测结果；正数则强制覆盖
                 if (int.TryParse(config["MaxQsvSessions"], out int qsv) && qsv > 0)
                     _maxQsvSessions = qsv;
+
+                if (_forceCpuEncoding)
+                {
+                    Logger.LogInfo("[EncoderFactory] 已启用 ForceCpuEncoding=true，将强制使用 CPU 软件编码 (libx264)");
+                }
             }
             catch { }
         }

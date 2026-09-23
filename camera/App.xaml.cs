@@ -102,6 +102,8 @@ namespace camera
             Debug.WriteLine("程序退出");
             try
             {
+                AppSettingsService.Instance.SaveSync();
+                Recording.StorageManager.Instance.Dispose();
                 Infrastructure.DeviceLockManager.ClearAll();
                 Infrastructure.MatPool.Clear();
                 GC.Collect();

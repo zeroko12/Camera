@@ -794,6 +794,7 @@
                                                     Width="78"
                                                     Margin="2"
                                                     infrastructure:InputBehavior.UpdateOnEnter="True"
+                                                    infrastructure:InputBehavior.EnterCommand="{Binding ConfirmDiskThresholdCommand}"
                                                     Maximum="1024000"
                                                     Minimum="1"
                                                     Style="{StaticResource NumericUpDownPlus}"
@@ -810,6 +811,13 @@
                                                 Command="{Binding ConfirmDiskThresholdCommand}"
                                                 Content="确定"
                                                 Style="{StaticResource ButtonPrimary.Small}" />
+                                            <TextBlock
+                                                Margin="2,2,2,4"
+                                                HorizontalAlignment="Center"
+                                                FontSize="10"
+                                                Foreground="{Binding DiskSpaceThresholdStatusColor}"
+                                                Text="{Binding DiskSpaceThresholdStatusText}"
+                                                TextWrapping="Wrap" />
                                             <Separator />
                                             <hc:ButtonGroup Margin="4" Orientation="Vertical">
                                                 <RadioButton Content="覆盖旧文件" IsChecked="{c:Binding OverwriteOldFiles}" />
@@ -989,7 +997,6 @@
                                                 <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center">夜间处理</TextBlock>
                                                 <ToggleButton
                                                     HorizontalAlignment="Center"
-                                                    Click="ToggleButton_Click"
                                                     IsChecked="{Binding IsGrayHomogenization}"
                                                     ToolTip="是否开启自适应直方图均衡化">
                                                     <materialDesign:PackIcon Kind="WhiteBalanceSunny" RenderTransformOrigin=".5,.5">

@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using camera.Recording;
 
 namespace camera.ViewModels
 {
@@ -78,6 +79,8 @@ namespace camera.ViewModels
 
         void OnSaveModeChanged()
         {
+            StorageManager.Instance.OverwriteOldFiles = OverwriteOldFiles;
+            AppSettingsService.Instance.Update(s => s.OverwriteOldFiles = OverwriteOldFiles);
             foreach (var camera in Cameras)
             {
                 camera.OverwriteOldFiles = OverwriteOldFiles;
@@ -86,11 +89,45 @@ namespace camera.ViewModels
 
 
 
-        private int _DiskSpaceThresholdInput = 1024;
+        private int _DiskSpaceThresholdInput = 10240;
         public int DiskSpaceThresholdInput
         {
             get { return _DiskSpaceThresholdInput; }
-            set { SetProperty(ref _DiskSpaceThresholdInput, value); }
+            set
+            {
+                if (SetProperty(ref _DiskSpaceThresholdInput, value))
+                {
+                    UpdateDiskSpaceThresholdStatus();
+                }
+            }
+        }
+
+        private string _diskSpaceThresholdStatusText = string.Empty;
+        public string DiskSpaceThresholdStatusText
+        {
+            get => _diskSpaceThresholdStatusText;
+            set => SetProperty(ref _diskSpaceThresholdStatusText, value);
+        }
+
+        private string _diskSpaceThresholdStatusColor = "#2E7D32";
+        public string DiskSpaceThresholdStatusColor
+        {
+            get => _diskSpaceThresholdStatusColor;
+            set => SetProperty(ref _diskSpaceThresholdStatusColor, value);
+        }
+
+        private void UpdateDiskSpaceThresholdStatus()
+        {
+            if (_DiskSpaceThresholdInput != _DiskSpaceThreshold)
+            {
+                DiskSpaceThresholdStatusText = $"待确认: {_DiskSpaceThresholdInput} MB (按回车或点确定)";
+                DiskSpaceThresholdStatusColor = "#E65100"; // 橙色提示待确认
+            }
+            else
+            {
+                DiskSpaceThresholdStatusText = $"✓ 已生效: {_DiskSpaceThreshold} MB";
+                DiskSpaceThresholdStatusColor = "#2E7D32"; // 绿色正常
+            }
         }
 
         private DelegateCommand _ConfirmDiskThresholdCommand;
@@ -100,13 +137,18 @@ namespace camera.ViewModels
         private void ExecuteConfirmDiskThresholdCommand()
         {
             DiskSpaceThreshold = DiskSpaceThresholdInput;
-            // ★ 根因修复:用户点"确认"后必须立即落盘,
-            // 否则 app 崩溃 / 强制关闭 → 下次启动值丢失,看起来像"重置"。
-            AppSettingsService.Instance.RequestSave();
-            Logger.LogInfo($"[VM] 磁盘阈值更新为 {DiskSpaceThreshold} MB,已调度自动保存");
+            StorageManager.Instance.DiskSpaceThresholdMb = DiskSpaceThreshold;
+            
+            // 立即保存至 JSON 与 App.config 双重持久化
+            AppSettingsService.Instance.Update(s => s.DiskSpaceThreshold = DiskSpaceThreshold);
+            AppSettingsService.Instance.SaveSync();
+            ConfigurationManager.SaveSetting("DiskSpaceThreshold", DiskSpaceThreshold.ToString());
+
+            UpdateDiskSpaceThresholdStatus();
+            Logger.LogInfo($"[VM] 磁盘空间策略阈值已生效并持久化: {DiskSpaceThreshold} MB");
         }
 
-        private int _DiskSpaceThreshold = 1024;
+        private int _DiskSpaceThreshold = 10240;
         public int DiskSpaceThreshold
         {
             get { return _DiskSpaceThreshold; }
@@ -119,11 +161,12 @@ namespace camera.ViewModels
 
         void OnDiskSpaceThresholdChanged()
         {
+            StorageManager.Instance.DiskSpaceThresholdMb = DiskSpaceThreshold;
+            AppSettingsService.Instance.Update(s => s.DiskSpaceThreshold = DiskSpaceThreshold);
             foreach (var camera in Cameras)
             {
                 camera.DiskThreshold = DiskSpaceThreshold;
             }
-            //Debug.WriteLine("修改空间阈值");
         }
 
         private int _Quality = 30;
@@ -468,6 +511,10 @@ namespace camera.ViewModels
             LoadSettings();
             InitializePeriodicTimer();
 
+            // 订阅存储管理器非模态告警与状态更新
+            StorageManager.Instance.StorageWarning += OnStorageWarningTriggered;
+            StorageManager.Instance.StorageStatusUpdated += (s, e) => UpdateDiskRecordingStatus();
+
             // ★ 自动保存:任何"持久化属性"被修改后,1 秒防抖落盘。
             // 此前必须等 SaveSettings() 在 Close 时才统一保存,期间崩溃/强杀 → 配置丢失。
             // 现在 setter 改值 → PropertyChanged 触发 → AppSettingsService.RequestSave() 调度落盘。
@@ -505,8 +552,26 @@ namespace camera.ViewModels
         {
             if (e.PropertyName == null) return;
             if (!_persistKeys.Contains(e.PropertyName)) return;
-            // 防抖由 AppSettingsService.RequestSave 内部 Timer 提供,无需此处再 debounce
-            AppSettingsService.Instance.RequestSave();
+
+            AppSettingsService.Instance.Update(s =>
+            {
+                s.IsSave = isSave;
+                s.Opacity = Opacity;
+                s.Title = Title;
+                s.SystemTitle = SystemTitle;
+                s.OverwriteOldFiles = OverwriteOldFiles;
+                s.DiskSpaceThreshold = DiskSpaceThreshold;
+                s.Quality = Quality;
+                s.SaveInterval = SaveInterval;
+                s.MaxPreviewWidth = MaxPreviewWidth;
+                s.PreviewFps = PreviewFps;
+                s.RecordFps = RecordFps;
+                s.Contrast = Contrast;
+                s.Luminance = Luminance;
+                s.IsGrayHomogenization = IsGrayHomogenization;
+                s.OverlayTextSize = OverlayTextSize;
+                s.MaxFps = MaxFps;
+            });
         }
 
 
@@ -601,6 +666,9 @@ namespace camera.ViewModels
                     {
                         if (_disposed) return;
 
+                        // 按照用户之前自定义拖拽保存的顺序重新排列摄像头
+                        ApplyCameraOrder();
+
                         Logger.LogInfo($"摄像头初始化完成，共找到 {Cameras.Count} 个活动/占位摄像头");
                         IsInitializing = false;
 
@@ -630,13 +698,22 @@ namespace camera.ViewModels
             });
         }
 
-        private void Camera_DiskSpaceLow(object sender, string message)
+        private void OnStorageWarningTriggered(object? sender, string message)
         {
-            Application.Current.Dispatcher.Invoke(() =>
+            Application.Current?.Dispatcher.InvokeAsync(() =>
             {
-                isSave = false;
-                MessageBox.Show(message, "磁盘空间警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Logger.LogWarning($"[VM-Storage] 存储空间警告: {message}");
+                DiskSpaceWarningText = $"⚠️ 磁盘警告: {message}";
+                if (StorageManager.Instance.IsStorageCritical && !OverwriteOldFiles)
+                {
+                    isSave = false;
+                }
             });
+        }
+
+        private void Camera_DiskSpaceLow(object? sender, string message)
+        {
+            OnStorageWarningTriggered(sender, message);
         }
 
 
@@ -1158,15 +1235,16 @@ namespace camera.ViewModels
                     }
                 }
 
-                string drive = Path.GetPathRoot(AppDomain.CurrentDomain.BaseDirectory);
-                DriveInfo driveInfo = new DriveInfo(drive);
-                double availableGB = driveInfo.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0);
-                double availableMB = driveInfo.AvailableFreeSpace / (1024.0 * 1024.0);
+                // 核心修复：精准获取视频存储目标盘符与容量，杜绝与 BaseDirectory 割裂
+                StorageManager.Instance.UpdateDriveInfo();
+                string drive = StorageManager.Instance.StorageDriveRoot;
+                double availableGB = StorageManager.Instance.AvailableStorageGb;
+                double availableMB = StorageManager.Instance.AvailableStorageMb;
 
                 if (isSave && activeSavingCamerasCount > 0 && totalMbPerSec > 0)
                 {
                     double hoursLeft = availableMB / (totalMbPerSec * 3600.0);
-                    DiskSpaceWarningText = $"磁盘剩余: {availableGB:F1} GB, 预计录制: {hoursLeft:F1} 小时";
+                    DiskSpaceWarningText = $"磁盘剩余: {availableGB:F1} GB ({drive}), 预计录制: {hoursLeft:F1} 小时";
                 }
                 else
                 {
@@ -1373,22 +1451,29 @@ namespace camera.ViewModels
 
         private void LoadSettings()
         {
-            isSave = bool.Parse(ConfigurationManager.GetSetting("isSave") ?? "true");
-            Opacity = double.Parse(ConfigurationManager.GetSetting("Opacity") ?? "1.0");
-            Title = ConfigurationManager.GetSetting("Title") ?? "监控";
-            SystemTitle = ConfigurationManager.GetSetting("SystemTitle") ?? "季华恒一离子注入机监控";
-            OverwriteOldFiles = bool.Parse(ConfigurationManager.GetSetting("OverwriteOldFiles") ?? "true");
-            DiskSpaceThreshold = int.Parse(ConfigurationManager.GetSetting("DiskSpaceThreshold") ?? "1024");
+            var appSettings = AppSettingsService.Instance.Current;
+            isSave = appSettings.IsSave;
+            Opacity = appSettings.Opacity;
+            Title = appSettings.Title;
+            SystemTitle = appSettings.SystemTitle;
+            OverwriteOldFiles = appSettings.OverwriteOldFiles;
+            DiskSpaceThreshold = appSettings.DiskSpaceThreshold;
             DiskSpaceThresholdInput = DiskSpaceThreshold;
-            Quality = int.Parse(ConfigurationManager.GetSetting("Quality") ?? "30");
-            SaveInterval = int.Parse(ConfigurationManager.GetSetting("SaveInterval") ?? "1");
-            MaxPreviewWidth = int.Parse(ConfigurationManager.GetSetting("MaxPreviewWidth") ?? "640");
-            PreviewFps = int.Parse(ConfigurationManager.GetSetting("PreviewFps") ?? "15");
-            RecordFps = int.Parse(ConfigurationManager.GetSetting("RecordFps") ?? "15");
-            Contrast = double.Parse(ConfigurationManager.GetSetting("Contrast") ?? "1.0");
-            Luminance = double.Parse(ConfigurationManager.GetSetting("Luminance") ?? "0.0");
-            IsGrayHomogenization = bool.Parse(ConfigurationManager.GetSetting("IsGrayHomogenization") ?? "false");
-            OverlayTextSize = double.Parse(ConfigurationManager.GetSetting("OverlayTextSize") ?? "0.3");
+            UpdateDiskSpaceThresholdStatus();
+            Quality = appSettings.Quality;
+            SaveInterval = appSettings.SaveInterval;
+            MaxPreviewWidth = appSettings.MaxPreviewWidth;
+            PreviewFps = appSettings.PreviewFps;
+            RecordFps = appSettings.RecordFps;
+            Contrast = appSettings.Contrast;
+            Luminance = appSettings.Luminance;
+            IsGrayHomogenization = appSettings.IsGrayHomogenization;
+            OverlayTextSize = appSettings.OverlayTextSize;
+
+            // 初始化存储管理器
+            StorageManager.Instance.SaveDirectory = appSettings.SaveDirectory;
+            StorageManager.Instance.DiskSpaceThresholdMb = DiskSpaceThreshold;
+            StorageManager.Instance.OverwriteOldFiles = OverwriteOldFiles;
 
             // 摄像头特定配置改为在 init 后台线程/热插拔线程添加摄像头时，通过 ApplySettingsToCamera 异步应用。
 
@@ -1417,11 +1502,58 @@ namespace camera.ViewModels
             }
         }
 
+        public void SaveCameraOrder()
+        {
+            try
+            {
+                var order = Cameras.Select(c => c.GetConfigKey()).Where(k => !string.IsNullOrEmpty(k)).ToList();
+                AppSettingsService.Instance.Update(s => s.CameraOrder = order);
+                Logger.LogInfo($"[VM] 已保存摄像头排列顺序: {string.Join(", ", order)}");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[VM] 保存摄像头排列顺序失败: {ex.Message}");
+            }
+        }
+
+        private void ApplyCameraOrder()
+        {
+            try
+            {
+                var savedOrder = AppSettingsService.Instance.Current.CameraOrder;
+                if (savedOrder == null || savedOrder.Count == 0 || Cameras.Count <= 1) return;
+
+                var ordered = Cameras.OrderBy(c =>
+                {
+                    int idx = savedOrder.IndexOf(c.GetConfigKey());
+                    return idx >= 0 ? idx : int.MaxValue;
+                }).ToList();
+
+                for (int i = 0; i < ordered.Count; i++)
+                {
+                    int oldIndex = Cameras.IndexOf(ordered[i]);
+                    if (oldIndex != i)
+                    {
+                        Cameras.Move(oldIndex, i);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[VM] 恢复摄像头排序失败: {ex.Message}");
+            }
+        }
+
         private void ApplySettingsToCamera(CameraService cam)
         {
             if (cam == null) return;
             string configKey = cam.GetConfigKey();
-            cam.CustomOverlayText = ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText") ?? cam.Name;
+            AppSettings.CameraSettings camConfig = null;
+            AppSettingsService.Instance.Current.Cameras.TryGetValue(configKey, out camConfig);
+
+            cam.CustomOverlayText = camConfig?.CustomText 
+                ?? ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText") 
+                ?? cam.Name;
             cam.OverlayTextSize = OverlayTextSize;
             cam.isSave = isSave;
             cam.OverwriteOldFiles = OverwriteOldFiles;
@@ -1434,31 +1566,83 @@ namespace camera.ViewModels
             cam.PreviewFps = PreviewFps;
             cam.MaxPreviewWidth = MaxPreviewWidth;
 
-            string savedRes = ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
+            string savedRes = camConfig?.Resolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
             if (!string.IsNullOrEmpty(savedRes))
             {
                 cam.SelectedResolution = savedRes;
             }
-            string savedRecordRes = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
+            string savedRecordRes = camConfig?.RecordResolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
             if (!string.IsNullOrEmpty(savedRecordRes))
             {
                 cam.SelectedRecordResolution = savedRecordRes;
             }
-            string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
-            if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
+            if (camConfig?.RecordFps.HasValue == true)
             {
-                cam.RecordFps = rfps;
+                cam.RecordFps = camConfig.RecordFps.Value;
+            }
+            else
+            {
+                string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
+                if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
+                {
+                    cam.RecordFps = rfps;
+                }
+            }
+            if (camConfig?.IsManualDisabled == true)
+            {
+                cam.IsManualDisabled = true;
             }
         }
 
         private void SaveSettings()
         {
+            AppSettingsService.Instance.Update(s =>
+            {
+                s.IsSave = isSave;
+                s.Opacity = Opacity;
+                s.Title = Title;
+                s.SystemTitle = SystemTitle;
+                s.OverwriteOldFiles = OverwriteOldFiles;
+                s.DiskSpaceThreshold = this.DiskSpaceThreshold;
+                s.SaveDirectory = StorageManager.Instance.SaveDirectory;
+                s.Quality = this.Quality;
+                s.SaveInterval = this.SaveInterval;
+                s.MaxPreviewWidth = this.MaxPreviewWidth;
+                s.PreviewFps = this.PreviewFps;
+                s.RecordFps = this.RecordFps;
+                s.Contrast = this.Contrast;
+                s.Luminance = this.Luminance;
+                s.IsGrayHomogenization = this.IsGrayHomogenization;
+                s.OverlayTextSize = this.OverlayTextSize;
+                s.CameraOrder = Cameras.Select(c => c.GetConfigKey()).Where(k => !string.IsNullOrEmpty(k)).ToList();
+
+                foreach (var cam in Cameras)
+                {
+                    string key = cam.GetConfigKey();
+                    if (string.IsNullOrEmpty(key)) continue;
+
+                    if (!s.Cameras.TryGetValue(key, out var camSetting))
+                    {
+                        camSetting = new AppSettings.CameraSettings();
+                        s.Cameras[key] = camSetting;
+                    }
+
+                    camSetting.CustomText = cam.CustomOverlayText;
+                    camSetting.Resolution = cam.SelectedResolution;
+                    camSetting.RecordResolution = cam.SelectedRecordResolution;
+                    camSetting.RecordFps = cam.RecordFps;
+                    camSetting.IsManualDisabled = cam.IsManualDisabled;
+                }
+            });
+            AppSettingsService.Instance.SaveSync();
+
             ConfigurationManager.SaveSetting("isSave", isSave.ToString());
             ConfigurationManager.SaveSetting("Opacity", Opacity.ToString());
             ConfigurationManager.SaveSetting("Title", Title);
             ConfigurationManager.SaveSetting("SystemTitle", SystemTitle);
             ConfigurationManager.SaveSetting("OverwriteOldFiles", OverwriteOldFiles.ToString());
             ConfigurationManager.SaveSetting("DiskSpaceThreshold", this.DiskSpaceThreshold.ToString());
+            ConfigurationManager.SaveSetting("SaveDirectory", StorageManager.Instance.SaveDirectory);
             ConfigurationManager.SaveSetting("Quality", this.Quality.ToString());
             ConfigurationManager.SaveSetting("SaveInterval", this.SaveInterval.ToString());
             ConfigurationManager.SaveSetting("MaxPreviewWidth", this.MaxPreviewWidth.ToString());
@@ -1476,6 +1660,7 @@ namespace camera.ViewModels
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_Resolution", cam.SelectedResolution ?? "");
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_RecordResolution", cam.SelectedRecordResolution ?? "与采集分辨率一致");
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_RecordFps", cam.RecordFps.ToString());
+                 ConfigurationManager.SaveSetting($"Camera_{configKey}_IsManualDisabled", cam.IsManualDisabled.ToString());
             }
         }
 
@@ -1499,6 +1684,8 @@ namespace camera.ViewModels
 
             if (disposing)
             {
+                StorageManager.Instance.StorageWarning -= OnStorageWarningTriggered;
+
                 // ★ Fix P1-4: 先解绑所有事件订阅,避免闭包循环引用阻止 GC
                 // 关键:this.PropertyChanged += OnPersistentPropertyChanged 在 #474 行
                 // lambda 闭包 this 阻止 VM 被回收

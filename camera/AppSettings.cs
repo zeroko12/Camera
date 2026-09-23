@@ -24,6 +24,7 @@ namespace camera
         public const string  DefaultSystemTitle           = "季华恒一离子注入机监控";
         public const bool    DefaultOverwriteOldFiles     = true;
         public const int     DefaultDiskSpaceThresholdMb  = 10240;  // 与 App.config 一致
+        public const string  DefaultSaveDirectory         = "SavedVideos";
         public const int     DefaultQuality               = 20;
         public const int     DefaultSaveIntervalMin       = 1;
         public const int     DefaultMaxPreviewWidth       = 640;
@@ -49,75 +50,73 @@ namespace camera
         public const int     DefaultCameraRecordFps        = 10;
         public const string  DefaultCameraRecordResolution = "与采集分辨率一致";
 
+        // ────────────────── 硬件与编码默认值 ──────────────────
+        public const int     DefaultMaxNvencSessions       = 2;
+        public const int     DefaultMaxAmfSessions         = 3;
+        public const int     DefaultMaxQsvSessions         = 0;
+        public const bool    DefaultUseV3Architecture      = true;
+        public const bool    DefaultForceCpuEncoding       = false;
+
         // ────────────────── 运行时状态(不持久化)──────────────────
-        public bool         IsInitialized   { get; init; }
-        public string?      LoadSource      { get; init; }   // "JSON" / "App.config" / "Defaults"
-        public DateTime?    LoadedAt        { get; init; }
+        public bool         IsInitialized   { get; set; }
+        public string?      LoadSource      { get; set; }   // "JSON" / "App.config" / "Defaults"
+        public DateTime?    LoadedAt        { get; set; }
 
         // ────────────────── 全局 UI 设置 ──────────────────
-        public bool         IsSave              { get; init; } = DefaultIsSave;
-        public double       Opacity             { get; init; } = DefaultOpacity;
-        public string       Title               { get; init; } = DefaultTitle;
-        public string       SystemTitle         { get; init; } = DefaultSystemTitle;
-        public bool         OverwriteOldFiles   { get; init; } = DefaultOverwriteOldFiles;
-        public int          DiskSpaceThreshold  { get; init; } = DefaultDiskSpaceThresholdMb;
-        public int          Quality             { get; init; } = DefaultQuality;
-        public int          SaveInterval        { get; init; } = DefaultSaveIntervalMin;
-        public int          MaxPreviewWidth     { get; init; } = DefaultMaxPreviewWidth;
-        public int          PreviewFps          { get; init; } = DefaultPreviewFps;
-        public int          RecordFps           { get; init; } = DefaultRecordFps;
-        public double       Contrast            { get; init; } = DefaultContrast;
-        public double       Luminance           { get; init; } = DefaultLuminance;
-        public bool         IsGrayHomogenization { get; init; }
-        public double       OverlayTextSize     { get; init; } = DefaultOverlayTextSize;
-        public int          MaxFps              { get; init; } = DefaultMaxFps;
+        public bool         IsSave              { get; set; } = DefaultIsSave;
+        public double       Opacity             { get; set; } = DefaultOpacity;
+        public string       Title               { get; set; } = DefaultTitle;
+        public string       SystemTitle         { get; set; } = DefaultSystemTitle;
+        public bool         OverwriteOldFiles   { get; set; } = DefaultOverwriteOldFiles;
+        public int          DiskSpaceThreshold  { get; set; } = DefaultDiskSpaceThresholdMb;
+        public string       SaveDirectory       { get; set; } = DefaultSaveDirectory;
+        public int          Quality             { get; set; } = DefaultQuality;
+        public int          SaveInterval        { get; set; } = DefaultSaveIntervalMin;
+        public int          MaxPreviewWidth     { get; set; } = DefaultMaxPreviewWidth;
+        public int          PreviewFps          { get; set; } = DefaultPreviewFps;
+        public int          RecordFps           { get; set; } = DefaultRecordFps;
+        public double       Contrast            { get; set; } = DefaultContrast;
+        public double       Luminance           { get; set; } = DefaultLuminance;
+        public bool         IsGrayHomogenization { get; set; }
+        public double       OverlayTextSize     { get; set; } = DefaultOverlayTextSize;
+        public int          MaxFps              { get; set; } = DefaultMaxFps;
 
         // ────────────────── 主窗口几何 ──────────────────
-        public double       WindowWidth         { get; init; } = DefaultWindowWidth;
-        public double       WindowHeight        { get; init; } = DefaultWindowHeight;
-        public double       WindowLeft          { get; init; } = DefaultWindowLeft;
-        public double       WindowTop           { get; init; } = DefaultWindowTop;
-        public double       MinWindowWidth      { get; init; } = DefaultMinWindowWidth;
-        public double       MinWindowHeight     { get; init; } = DefaultMinWindowHeight;
-        public double       AspectRatio         { get; init; } = DefaultAspectRatio;
-        public bool         CanClickThrough     { get; init; }
-        public bool         Topmost             { get; init; } = DefaultTopmost;
-        public string       ExitBehavior        { get; init; } = DefaultExitBehavior;
+        public double       WindowWidth         { get; set; } = DefaultWindowWidth;
+        public double       WindowHeight        { get; set; } = DefaultWindowHeight;
+        public double       WindowLeft          { get; set; } = DefaultWindowLeft;
+        public double       WindowTop           { get; set; } = DefaultWindowTop;
+        public double       MinWindowWidth      { get; set; } = DefaultMinWindowWidth;
+        public double       MinWindowHeight     { get; set; } = DefaultMinWindowHeight;
+        public double       AspectRatio         { get; set; } = DefaultAspectRatio;
+        public bool         CanClickThrough     { get; set; }
+        public bool         Topmost             { get; set; } = DefaultTopmost;
+        public string       ExitBehavior        { get; set; } = DefaultExitBehavior;
+
+        // ────────────────── 硬件与编码设置 ──────────────────
+        public int          MaxNvencSessions    { get; set; } = DefaultMaxNvencSessions;
+        public int          MaxAmfSessions      { get; set; } = DefaultMaxAmfSessions;
+        public int          MaxQsvSessions      { get; set; } = DefaultMaxQsvSessions;
+        public bool         UseV3Architecture   { get; set; } = DefaultUseV3Architecture;
+        public bool         ForceCpuEncoding    { get; set; } = DefaultForceCpuEncoding;
 
         // ────────────────── 摄像头特定覆盖 ──────────────────
         // key = camera 的稳定配置 key(由 CameraService.GetConfigKey 生成)
-        public CameraSettingsCollection Cameras { get; init; } = new();
+        public Dictionary<string, CameraSettings> Cameras { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        // 摄像头排列顺序(按 configKey 存储)
+        public List<string> CameraOrder { get; set; } = new();
 
         /// <summary>
-        /// 单个摄像头的覆盖配置(只保存用户改过的项)。
+        /// 单个摄像头的覆盖配置。
         /// </summary>
         public sealed class CameraSettings
         {
-            public string? CustomText        { get; init; }
-            public string? Resolution        { get; init; }
-            public string? RecordResolution  { get; init; }
-            public int?    RecordFps         { get; init; }
-        }
-
-        /// <summary>
-        /// 按 configKey 索引的摄像头覆盖集合。
-        /// 用 sealed 字典(只读)防止运行时被恶意修改。
-        /// </summary>
-        public sealed class CameraSettingsCollection
-        {
-            private readonly System.Collections.Generic.Dictionary<string, CameraSettings> _inner
-                = new(StringComparer.OrdinalIgnoreCase);
-
-            public IReadOnlyDictionary<string, CameraSettings> Items => _inner;
-
-            public CameraSettings? GetOrDefault(string key)
-                => _inner.TryGetValue(key, out var v) ? v : null;
-
-            public void Set(string key, CameraSettings settings)
-            {
-                if (string.IsNullOrEmpty(key)) throw new ArgumentNullException(nameof(key));
-                _inner[key] = settings;
-            }
+            public string? CustomText        { get; set; }
+            public string? Resolution        { get; set; }
+            public string? RecordResolution  { get; set; }
+            public int?    RecordFps         { get; set; }
+            public bool?   IsManualDisabled  { get; set; }
         }
 
         /// <summary>
