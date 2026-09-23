@@ -423,11 +423,11 @@ namespace camera.ViewModels
             set { SetProperty(ref _SelectedCamera, value); }
         }
 
-        private CameraService _Cam = new();
+        private CameraService _Cam;
         public CameraService Cam
         {
-            get { return _Cam; }
-            set { SetProperty(ref _Cam, value); }
+            get => _Cam ?? SelectedConfigCamera;
+            set => SetProperty(ref _Cam, value);
         }
 
         private DelegateCommand<CameraService> _ToggleMaximizeCommand;
@@ -646,7 +646,7 @@ namespace camera.ViewModels
 
         void ExecuteSet()
         {
-            Cam.ChangeCameraInfo();
+            (SelectedConfigCamera ?? Cam)?.ChangeCameraInfo();
         }
 
         private DelegateCommand _ResetImageSettings;
@@ -1518,6 +1518,16 @@ namespace camera.ViewModels
                         _sharedFrameTimer = null;
                     }
 
+                    // 释放设备热插拔防抖定时器
+                    lock (_deviceChangeLock)
+                    {
+                        if (_deviceChangeDebounceTimer != null)
+                        {
+                            try { _deviceChangeDebounceTimer.Dispose(); } catch { }
+                            _deviceChangeDebounceTimer = null;
+                        }
+                    }
+
                     // 取消所有事件订阅并并行的释放所有 CameraService，缩短退出时间
                     if (Cameras != null)
                     {
@@ -1535,9 +1545,10 @@ namespace camera.ViewModels
                             }
                         }
 
-                        if (Cam != null)
+                        if (_Cam != null && !Cameras.Contains(_Cam))
                         {
-                            var camToDispose = Cam;
+                            var camToDispose = _Cam;
+                            _Cam = null;
                             disposeTasks.Add(System.Threading.Tasks.Task.Run(() =>
                             {
                                 try { camToDispose.Dispose(); } catch { }

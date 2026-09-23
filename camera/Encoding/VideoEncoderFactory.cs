@@ -43,6 +43,13 @@ namespace camera.Encoding
         private static int _maxAmfSessions = 3;
         // QSV 默认值在静态构造函数中通过 CPU 自动检测覆盖，此处 4 仅为字段声明的占位保守值
         private static int _maxQsvSessions = 4;
+        private static bool _forceCpuEncoding = false;
+
+        public static bool ForceCpuEncoding
+        {
+            get { lock (_lock) return _forceCpuEncoding; }
+            set { lock (_lock) _forceCpuEncoding = value; }
+        }
 
         public static int MaxNvencSessions
         {
@@ -75,6 +82,14 @@ namespace camera.Encoding
             try
             {
                 var config = System.Configuration.ConfigurationManager.AppSettings;
+                if (bool.TryParse(config["ForceCpuEncoding"], out bool forceCpu))
+                {
+                    _forceCpuEncoding = forceCpu;
+                    if (forceCpu)
+                    {
+                        Logger.LogInfo("[EncoderFactory] App.config 已启用 ForceCpuEncoding=true，将强制使用 CPU 软件编码 (libx264)");
+                    }
+                }
                 if (int.TryParse(config["MaxNvencSessions"], out int nvenc) && nvenc > 0)
                     _maxNvencSessions = nvenc;
                 if (int.TryParse(config["MaxAmfSessions"], out int amf) && amf > 0)
@@ -353,15 +368,22 @@ namespace camera.Encoding
 
             lock (_lock)
             {
-                // 硬件编码器：需通过探测 + 会话数限制
-                if (_nvencSessionCount < _maxNvencSessions && !_failedEncoders.Contains("h264_nvenc"))
-                    encodersToTry.Add("h264_nvenc");
+                if (!_forceCpuEncoding)
+                {
+                    // 硬件编码器：需通过探测 + 会话数限制
+                    if (_nvencSessionCount < _maxNvencSessions && !_failedEncoders.Contains("h264_nvenc"))
+                        encodersToTry.Add("h264_nvenc");
 
-                if (_amfSessionCount < _maxAmfSessions && !_failedEncoders.Contains("h264_amf"))
-                    encodersToTry.Add("h264_amf");
+                    if (_amfSessionCount < _maxAmfSessions && !_failedEncoders.Contains("h264_amf"))
+                        encodersToTry.Add("h264_amf");
 
-                if (_qsvSessionCount < _maxQsvSessions && !_failedEncoders.Contains("h264_qsv"))
-                    encodersToTry.Add("h264_qsv");
+                    if (_qsvSessionCount < _maxQsvSessions && !_failedEncoders.Contains("h264_qsv"))
+                        encodersToTry.Add("h264_qsv");
+                }
+                else
+                {
+                    Logger.LogInfo("[EncoderFactory] 强制 CPU 软件编码模式已启用：跳过 GPU 硬件编码器，直接进入 libx264 软件编码。");
+                }
 
                 // 软件编码器：无会话限制
                 if (!_failedEncoders.Contains("libx264"))

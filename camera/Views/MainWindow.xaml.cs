@@ -38,6 +38,7 @@ namespace camera.Views
 
         private System.Windows.Forms.NotifyIcon _notifyIcon;
         private bool _isRealExit = false;
+        private HwndSource _hwndSource;
 
         // 时间轴缩放与拖拽平移相关私有字段
         private double _zoomLevel = 1.0;          // 缩放级别 (1.0 到 48.0)
@@ -50,7 +51,21 @@ namespace camera.Views
             // 检查是否已有实例在运行
             if (!EnsureSingleInstance())
             {
-                MessageBox.Show("程序已经在运行中。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                try
+                {
+                    var currentProc = Process.GetCurrentProcess();
+                    foreach (var p in Process.GetProcessesByName(currentProc.ProcessName))
+                    {
+                        if (p.Id != currentProc.Id && p.MainWindowHandle != IntPtr.Zero)
+                        {
+                            SwitchToThisWindow(p.MainWindowHandle, true);
+                            SetForegroundWindow(p.MainWindowHandle);
+                            break;
+                        }
+                    }
+                }
+                catch { }
+                MessageBox.Show("程序已经在运行中，已为您激活并切换到前台显示。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 Application.Current.Shutdown();
                 return;
             }
@@ -146,10 +161,10 @@ namespace camera.Views
             GlobalHotKey.Awake();
             //GlobalHotKey.Add(ModelKeys.CTRL, NormalKeys.F1, GlobalDo);
             
-            HwndSource hwndSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
-            if (hwndSource != null)
+            _hwndSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+            if (_hwndSource != null)
             {
-                hwndSource.AddHook(HwndHook);
+                _hwndSource.AddHook(HwndHook);
             }
             
             base.OnSourceInitialized(e);
@@ -249,12 +264,17 @@ namespace camera.Views
 
         protected override void OnClosed(EventArgs e)
         {
-            // ★ Fix P1-5: 先停所有 DispatcherTimer,打破 Tick → this 闭包引用
             if (_playbackTimelineTimer != null)
             {
                 try { _playbackTimelineTimer.Stop(); } catch { }
                 _playbackTimelineTimer.Tick -= PlaybackTimelineTimer_Tick;
                 _playbackTimelineTimer = null;
+            }
+
+            if (_hwndSource != null)
+            {
+                try { _hwndSource.RemoveHook(HwndHook); } catch { }
+                _hwndSource = null;
             }
 
             SaveSettings();
@@ -370,6 +390,13 @@ namespace camera.Views
 
         [DllImport("user32.dll")]
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             // 初始化系统托盘图标
@@ -401,6 +428,13 @@ namespace camera.Views
                     this.WindowState = WindowState.Normal;
                 }
                 this.Activate();
+                this.Focus();
+                var h = new WindowInteropHelper(this).Handle;
+                if (h != IntPtr.Zero)
+                {
+                    SetForegroundWindow(h);
+                    SwitchToThisWindow(h, true);
+                }
             };
 
             var contextMenu = new System.Windows.Forms.ContextMenuStrip();
@@ -413,10 +447,19 @@ namespace camera.Views
             contextMenu.Items.Add(menuExit);
             _notifyIcon.ContextMenuStrip = contextMenu;
 
-            // 设置窗口样式为透明
-            int exStyle = GetWindowLong(new WindowInteropHelper(this).Handle, GWL_EXSTYLE);
-            SetWindowLong(new WindowInteropHelper(this).Handle, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
-            //StartClickThrough();
+            // 确保窗口在前台可见并获得焦点，置顶显示
+            this.WindowState = WindowState.Normal;
+            this.Topmost = true;
+            this.Show();
+            this.Activate();
+            this.Focus();
+
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                SetForegroundWindow(hwnd);
+                SwitchToThisWindow(hwnd, true);
+            }
 
             // 绑定 VM 事件
             var vm = this.DataContext as MainWindowViewModel;
@@ -468,8 +511,8 @@ namespace camera.Views
         #endregion
         private void InitializeTitleBar()
         {
-            // 设置标题栏初始状态为透明
-            TitleBar.Opacity = 0;
+            // 设置标题栏初始状态为可见（使标题栏及窗口轮廓清晰可见）
+            TitleBar.Opacity = 1.0;
         }
 
         private bool isMouseOverTitleBar = false;

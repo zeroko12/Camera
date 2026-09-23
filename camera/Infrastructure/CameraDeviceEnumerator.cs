@@ -47,18 +47,27 @@ namespace camera.Infrastructure
                 while (enumMoniker.Next(1, monikers, fetched) == 0)
                 {
                     IMoniker moniker = monikers[0];
-                    string name = GetFriendlyName(moniker);
-                    string path = GetDevicePath(moniker);
-
-                    cameras.Add(new CameraDeviceInfo
+                    try
                     {
-                        Index = index,
-                        Name = name ?? $"USB Camera #{index}",
-                        DevicePath = path ?? name ?? index.ToString()
-                    });
+                        string name = GetFriendlyName(moniker);
+                        string path = GetDevicePath(moniker);
 
-                    Marshal.ReleaseComObject(moniker);
-                    index++;
+                        cameras.Add(new CameraDeviceInfo
+                        {
+                            Index = index,
+                            Name = name ?? $"USB Camera #{index}",
+                            DevicePath = path ?? name ?? index.ToString()
+                        });
+                        index++;
+                    }
+                    finally
+                    {
+                        if (moniker != null)
+                        {
+                            Marshal.ReleaseComObject(moniker);
+                            monikers[0] = null;
+                        }
+                    }
                 }
             }
             catch (Exception ex)

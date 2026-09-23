@@ -37,14 +37,17 @@ namespace camera.Infrastructure
         public static Mat Rent(int width, int height, MatType type)
         {
             var key = (width, height, type);
-            if (_pools.TryGetValue(key, out var pool) && pool.TryDequeue(out var mat))
+            if (_pools.TryGetValue(key, out var pool))
             {
-                if (mat != null && !mat.IsDisposed)
+                while (pool.TryDequeue(out var mat))
                 {
-                    return mat;
+                    if (mat != null && !mat.IsDisposed)
+                    {
+                        return mat;
+                    }
                 }
             }
-            return new Mat(width, height, type);
+            return new Mat(rows: height, cols: width, type);
         }
 
         public static void Return(Mat mat)
@@ -60,8 +63,31 @@ namespace camera.Infrastructure
             }
             else
             {
-                mat.Dispose();
+                try { mat.Dispose(); } catch { }
             }
+        }
+
+        /// <summary>
+        /// 排空并释放池中所有缓存的 Mat 原生对象（在应用退出或全局重置时调用）
+        /// </summary>
+        public static void Clear()
+        {
+            foreach (var kvp in _pools)
+            {
+                var queue = kvp.Value;
+                while (queue.TryDequeue(out var mat))
+                {
+                    try
+                    {
+                        if (mat != null && !mat.IsDisposed)
+                        {
+                            mat.Dispose();
+                        }
+                    }
+                    catch { }
+                }
+            }
+            _pools.Clear();
         }
     }
 }

@@ -55,8 +55,8 @@ namespace camera
         public DateTime?    LoadedAt        { get; init; }
 
         // ────────────────── 全局 UI 设置 ──────────────────
-        public bool         IsSave              { get; init; }
-        public double       Opacity             { get; init; }
+        public bool         IsSave              { get; init; } = DefaultIsSave;
+        public double       Opacity             { get; init; } = DefaultOpacity;
         public string       Title               { get; init; } = DefaultTitle;
         public string       SystemTitle         { get; init; } = DefaultSystemTitle;
         public bool         OverwriteOldFiles   { get; init; } = DefaultOverwriteOldFiles;

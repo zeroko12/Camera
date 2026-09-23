@@ -37,6 +37,7 @@ namespace camera.Encoding
         private CancellationTokenSource _cts;
         private Task _errorReadTask;
         private bool _isDisposed;
+        private bool _isFlushed;
         private Mat _yuvBuffer;  // 持久 YUV 转换缓冲区，避免避免每帧 MatPool Rent/Return
 
         // ═══ HasExited 缓存：消除每帧 P/Invoke DuplicateHandle ═══
@@ -107,6 +108,9 @@ namespace camera.Encoding
                 Flush();
             }
 
+            _isDisposed = false;
+            _isFlushed = false;
+
             InputWidth = inputWidth;
             InputHeight = inputHeight;
             Width = recordWidth;
@@ -143,8 +147,7 @@ namespace camera.Encoding
                 int fontSize = (int)Math.Round(24.0 * (fontScale / 0.3));
                 if (fontSize < 8) fontSize = 8;
 
-                // 注意：冒号与大括号需要双重甚至三重斜杠转义
-                string drawTextFilter = $"drawtext=fontfile='{fontPath}':text='{escapedText}%{{localtime\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}}':x=20:y=h-40:fontsize={fontSize}:fontcolor=white";
+                string drawTextFilter = $"drawtext=fontfile='{fontPath}':text='{escapedText}%{{localtime}}':x=20:y=h-40:fontsize={fontSize}:fontcolor=white";
                 
                 if (string.IsNullOrEmpty(vfFilter))
                 {
@@ -324,12 +327,15 @@ namespace camera.Encoding
         /// </summary>
         public void Flush()
         {
+            if (_isFlushed) return;
+            _isFlushed = true;
+
             if (_ffmpegProcess != null && !_ffmpegProcess.HasExited)
             {
                 try
                 {
                     Logger.LogInfo($"[FFmpegEncoder] 正在关闭编码管道 (PID: {_ffmpegProcess.Id})...");
-                    _ffmpegProcess.StandardInput.Close();
+                    try { _ffmpegProcess.StandardInput.Close(); } catch { }
                     if (!_ffmpegProcess.WaitForExit(8000))
                     {
                         Logger.LogWarning($"[FFmpegEncoder] FFmpeg 进程未在 8 秒内退出，将强制终止");
@@ -431,6 +437,7 @@ namespace camera.Encoding
             {
                 var proc = _ffmpegProcess;
                 _ffmpegProcess = null;  // 先置 null,任何后续异常都不会让外部访问到
+                try { proc.StandardInput?.Close(); } catch { }
                 try
                 {
                     if (!proc.HasExited)

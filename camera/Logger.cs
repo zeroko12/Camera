@@ -25,8 +25,8 @@ namespace camera
         private static string _logFilePath;
         private static readonly object _lockObj = new object();
 
-        // 有界队列,防止日志风暴把内存吃光。256K 条目按平均 100 字节/条 = 25 MB 上限。
-        private static readonly BlockingCollection<string> _queue = new(new ConcurrentQueue<string>(), 262144);
+        // 有界队列,防止日志风暴推高物理提交内存。8K 条目可缓冲上百秒的日志流量 (~1MB 上限)。
+        private static readonly BlockingCollection<string> _queue = new(new ConcurrentQueue<string>(), 8192);
         private static readonly Thread _writerThread;
 
         static Logger()
@@ -145,28 +145,39 @@ namespace camera
         /// </summary>
         private static void WriterLoop()
         {
+            var batch = new System.Collections.Generic.List<string>(64);
             try
             {
-                foreach (var entry in _queue.GetConsumingEnumerable())
+                while (!_queue.IsCompleted)
                 {
-                    try
+                    if (_queue.TryTake(out var firstEntry, Timeout.Infinite))
                     {
-                        lock (_lockObj)
-                        {
-                            // 检查日期变更,实现每日分文件
-                            if (DateTime.Now.ToString("yyyyMMdd") != _currentDateStr)
-                            {
-                                UpdateLogFilePath();
-                                CleanOldLogs();
-                            }
+                        batch.Clear();
+                        batch.Add(firstEntry);
 
-                            File.AppendAllText(_logFilePath, entry + Environment.NewLine, System.Text.Encoding.UTF8);
+                        // 快速吸纳队列中已积压的其它日志，进行一次性批量写入，大幅降低文件句柄反复创建开销
+                        while (batch.Count < 100 && _queue.TryTake(out var nextEntry))
+                        {
+                            batch.Add(nextEntry);
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"写入日志失败: {ex.Message}");
-                        Debug.WriteLine($"原始消息: {entry}");
+
+                        try
+                        {
+                            lock (_lockObj)
+                            {
+                                if (DateTime.Now.ToString("yyyyMMdd") != _currentDateStr)
+                                {
+                                    UpdateLogFilePath();
+                                    CleanOldLogs();
+                                }
+
+                                File.AppendAllLines(_logFilePath, batch, System.Text.Encoding.UTF8);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"写入日志失败: {ex.Message}");
+                        }
                     }
                 }
             }

@@ -1,7 +1,9 @@
 using camera.Views;
+using Prism.DryIoc;
 using Prism.Ioc;
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -11,12 +13,40 @@ namespace camera
     /// <summary>
     /// Interaction logic for App.xaml
     /// </summary>
-    public partial class App
+    public partial class App : PrismApplication
     {
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr OpenWindowStation(string lpszWinSta, bool fInherit, uint dwDesiredAccess);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetProcessWindowStation(IntPtr hWinSta);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr OpenDesktop(string lpszDesktop, uint dwFlags, bool fInherit, uint dwDesiredAccess);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetThreadDesktop(IntPtr hDesktop);
+
         protected override void OnStartup(StartupEventArgs e)
         {
             try
             {
+                // 确保绑定到用户前台物理交互桌面 (WinSta0\Default)
+                try
+                {
+                    var hWs = OpenWindowStation("WinSta0", false, 0x037F);
+                    if (hWs != IntPtr.Zero)
+                    {
+                        SetProcessWindowStation(hWs);
+                    }
+                    var hDesk = OpenDesktop("Default", 0, false, 0x01FF);
+                    if (hDesk != IntPtr.Zero)
+                    {
+                        SetThreadDesktop(hDesk);
+                    }
+                }
+                catch { }
+
                 Logger.LogInfo("应用程序启动中...");
 
                 // 注册全局异常处理
@@ -68,11 +98,12 @@ namespace camera
 
         protected override void OnExit(ExitEventArgs e)
         {
-            Logger.LogInfo("应用程序正在退出，正在清理 DirectShow COM 与设备锁...");
+            Logger.LogInfo("应用程序正在退出，正在清理 DirectShow COM、设备锁与 MatPool...");
             Debug.WriteLine("程序退出");
             try
             {
                 Infrastructure.DeviceLockManager.ClearAll();
+                Infrastructure.MatPool.Clear();
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }
@@ -96,6 +127,7 @@ namespace camera
                 try
                 {
                     Infrastructure.DeviceLockManager.ClearAll();
+                    Infrastructure.MatPool.Clear();
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
                 }

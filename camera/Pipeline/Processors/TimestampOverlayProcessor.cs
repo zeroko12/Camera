@@ -156,8 +156,10 @@ namespace camera.Pipeline.Processors
         /// </summary>
         private void RegenerateRegions(int frameW, int frameH, string timeStr)
         {
-            // 释放旧区域
-            foreach (var r in _regions)
+            // 先备份并排空旧区域，防止生成中途发生异常时残留已释放的 SmallMat 悬挂引用
+            var oldRegions = _regions;
+            _regions = Array.Empty<OverlayRegion>();
+            foreach (var r in oldRegions)
                 r.SmallMat?.Dispose();
 
             float fontSize = (float)Math.Max(10, FontScale * 60.0 * (frameW / 1920.0));
@@ -183,41 +185,52 @@ namespace camera.Pipeline.Processors
             }
 
             var list = new List<OverlayRegion>(2);
-
-            // ─── 时间戳（右上角）───
-            if (timeSize.Width > 0 && timeSize.Height > 0)
+            try
             {
-                // +2 为阴影留 1px 偏移量
-                int tw = Math.Min((int)Math.Ceiling(timeSize.Width)  + 2, frameW);
-                int th = Math.Min((int)Math.Ceiling(timeSize.Height) + 2, frameH);
-                int rx = Math.Max(0, frameW - tw - margin);
-                int ry = Math.Max(0, margin);
-
-                list.Add(new OverlayRegion
+                // ─── 时间戳（右上角）───
+                if (timeSize.Width > 0 && timeSize.Height > 0)
                 {
-                    SmallMat  = RenderTextToSmallMat(timeStr, font, tw, th),
-                    FrameRect = new Rect(rx, ry, tw, th)
-                });
-            }
+                    // +2 为阴影留 1px 偏移量
+                    int tw = Math.Min((int)Math.Ceiling(timeSize.Width)  + 2, frameW);
+                    int th = Math.Min((int)Math.Ceiling(timeSize.Height) + 2, frameH);
+                    int rx = Math.Max(0, frameW - tw - margin);
+                    int ry = Math.Max(0, margin);
 
-            // ─── 自定义文字（左上角）───
-            if (customSize.Width > 0 && customSize.Height > 0)
+                    list.Add(new OverlayRegion
+                    {
+                        SmallMat  = RenderTextToSmallMat(timeStr, font, tw, th),
+                        FrameRect = new Rect(rx, ry, tw, th)
+                    });
+                }
+
+                // ─── 自定义文字（左上角）───
+                if (customSize.Width > 0 && customSize.Height > 0)
+                {
+                    // 限制最大渲染宽度为画幅宽度的 40%
+                    int maxCw = (int)(frameW * 0.40f);
+                    int cw = Math.Min((int)Math.Ceiling(customSize.Width)  + 2, maxCw);
+                    int ch = Math.Min((int)Math.Ceiling(customSize.Height) + 2, frameH);
+                    int rx = Math.Max(0, margin);
+                    int ry = Math.Max(0, margin);
+
+                    list.Add(new OverlayRegion
+                    {
+                        SmallMat  = RenderTextToSmallMat(CustomText, font, cw, ch, cw < customSize.Width),
+                        FrameRect = new Rect(rx, ry, cw, ch)
+                    });
+                }
+
+                _regions = list.ToArray();
+            }
+            catch (Exception ex)
             {
-                // 限制最大渲染宽度为画幅宽度的 40%
-                int maxCw = (int)(frameW * 0.40f);
-                int cw = Math.Min((int)Math.Ceiling(customSize.Width)  + 2, maxCw);
-                int ch = Math.Min((int)Math.Ceiling(customSize.Height) + 2, frameH);
-                int rx = Math.Max(0, margin);
-                int ry = Math.Max(0, margin);
-
-                list.Add(new OverlayRegion
+                Logger.LogWarning($"[TimestampOverlayProcessor] 渲染文字区域发生异常: {ex.Message}");
+                foreach (var r in list)
                 {
-                    SmallMat  = RenderTextToSmallMat(CustomText, font, cw, ch, cw < customSize.Width),
-                    FrameRect = new Rect(rx, ry, cw, ch)
-                });
+                    try { r.SmallMat?.Dispose(); } catch { }
+                }
+                _regions = Array.Empty<OverlayRegion>();
             }
-
-            _regions = list.ToArray();
         }
 
         /// <summary>

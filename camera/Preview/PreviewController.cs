@@ -66,7 +66,15 @@ namespace camera.Preview
 
                 if (previewFrame != null)
                 {
-                    PreviewFrameReady?.Invoke(this, previewFrame);
+                    var handler = PreviewFrameReady;
+                    if (handler != null)
+                    {
+                        handler.Invoke(this, previewFrame);
+                    }
+                    else
+                    {
+                        Infrastructure.MatPool.Return(previewFrame);
+                    }
                 }
             }
             catch (Exception ex)

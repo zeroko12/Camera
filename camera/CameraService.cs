@@ -51,7 +51,15 @@ namespace camera
         public void PullAndApplyLatestFrame()
         {
             var pending = Interlocked.Exchange(ref _latestFrame, null);
-            if (pending != null) Frame = pending;
+            if (pending != null)
+            {
+                if (_disposed)
+                {
+                    try { Infrastructure.MatPool.Return(pending); } catch { }
+                    return;
+                }
+                Frame = pending;
+            }
         }
 
         // 管道内特定的图像处理算子
@@ -241,7 +249,7 @@ namespace camera
             return GetConfigKey(DevicePath, Index);
         }
 
-        public string saveDirectory = "SavedVideos";
+        public string saveDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SavedVideos");
 
         private TimeSpan _saveInterval = TimeSpan.FromMinutes(1);
         public TimeSpan SaveInterval
@@ -1144,10 +1152,8 @@ namespace camera
                     }
                     cap.Dispose();
                     cap = null;
-                    GC.Collect();
-                    GC.WaitForPendingFinalizers();
-                    Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
                 }
+                Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
 
                 Thread.Sleep(200);
 
@@ -1343,6 +1349,9 @@ namespace camera
                         Logger.LogWarning($"[CameraService #{Index}] 同步释放已拔除设备的 VideoCapture 异常: {ex.Message}");
                     }
                 }
+
+                // 拔除设备后及时释放设备占用锁，避免后续热插拔重连被死锁
+                Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
             }
         }
 
@@ -1641,10 +1650,34 @@ namespace camera
 
         private long CalcDiskSpaceEnough()
         {
-            string drive = Path.GetPathRoot(AppDomain.CurrentDomain.BaseDirectory);
-            DriveInfo driveInfo = new DriveInfo(drive);
-            long availableSpace = driveInfo.AvailableFreeSpace / (1024 * 1024); // MB
-            return availableSpace;
+            try
+            {
+                // 1. 核心安全防御: 监控系统盘(C:)空间。如果 C 盘可用空间不足 3072MB (3GB)，直接拦截录像，防止挤爆系统盘
+                try
+                {
+                    DriveInfo cDrive = new DriveInfo("C");
+                    if (cDrive.AvailableFreeSpace < 3072L * 1024 * 1024)
+                    {
+                        Logger.LogWarning($"[CameraService #{Index}] 系统盘(C:)空间极低({cDrive.AvailableFreeSpace / (1024 * 1024)}MB < 3072MB)，安全熔断阻止录像。");
+                        return 0;
+                    }
+                }
+                catch { }
+
+                // 2. 存储盘空间校验（确保解析到绝对路径，优先保存在应用基目录所在磁盘）
+                string targetDir = string.IsNullOrWhiteSpace(saveDirectory)
+                    ? AppDomain.CurrentDomain.BaseDirectory
+                    : (Path.IsPathRooted(saveDirectory) ? saveDirectory : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, saveDirectory));
+                string drive = Path.GetPathRoot(targetDir);
+                DriveInfo driveInfo = new DriveInfo(drive);
+                long availableSpace = driveInfo.AvailableFreeSpace / (1024 * 1024); // MB
+                return availableSpace;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[CameraService #{Index}] 获取磁盘剩余空间异常: {ex.Message}");
+                return 102400;
+            }
         }
 
         private long BatchCleanUpDiskSpace(long targetSpace, long currentAvailableSpace)
@@ -1657,14 +1690,18 @@ namespace camera
                     return currentAvailableSpace;
                 }
 
-                if (!Directory.Exists(saveDirectory))
+                string fullSaveDir = string.IsNullOrWhiteSpace(saveDirectory)
+                    ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SavedVideos")
+                    : (Path.IsPathRooted(saveDirectory) ? saveDirectory : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, saveDirectory));
+
+                if (!Directory.Exists(fullSaveDir))
                 {
                     return currentAvailableSpace;
                 }
 
                 try
                 {
-                    var allMp4Files = Directory.GetFiles(saveDirectory, "*.mp4", SearchOption.AllDirectories)
+                    var allMp4Files = Directory.GetFiles(fullSaveDir, "*.mp4", SearchOption.AllDirectories)
                         .Select(f => new FileInfo(f))
                         .OrderBy(fi => fi.LastWriteTime)
                         .ToList();
@@ -1765,6 +1802,10 @@ namespace camera
                 {
                     Logger.LogWarning($"释放旧采集器异常: {ex.Message}");
                 }
+                finally
+                {
+                    Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
+                }
 
                 // 重新创建 VideoCapture
                 try
@@ -1786,6 +1827,15 @@ namespace camera
                             Logger.LogInfo($"[CameraService] 摄像头 {Name} 索引自适应纠正: {Index} -> {match.Index}");
                             Index = match.Index;
                         }
+                    }
+
+                    if (!Infrastructure.DeviceLockManager.TryAcquireDevice(DevicePath, Index))
+                    {
+                        Logger.LogWarning($"[CameraService #{Index}] 设备已被其它通道锁定，无法打开 (DevicePath: {DevicePath})");
+                        _continuousReadFailCount = 6;
+                        RaisePropertyChanged(nameof(IsConnected));
+                        RefreshFrame();
+                        return;
                     }
 
                     cap = new VideoCapture(Index, VideoCaptureAPIs.DSHOW);
@@ -1998,6 +2048,21 @@ namespace camera
                 {
                     Debug.WriteLine($"释放 CameraService 资源异常: {ex.Message}");
                 }
+            }
+            else
+            {
+                // 终结器 (Finalizer) 兜底保护原生资源
+                try
+                {
+                    Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, Index);
+                    if (cap != null)
+                    {
+                        if (cap.IsOpened()) cap.Release();
+                        cap.Dispose();
+                        cap = null;
+                    }
+                }
+                catch { }
             }
 
             _disposed = true;

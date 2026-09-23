@@ -362,9 +362,10 @@ namespace camera.Recording
             string dateStr = now.ToString("yyyyMMdd");
             string timeStr = now.ToString("HH-mm-ss") + ".mp4";
             
-            string directory = string.IsNullOrEmpty(_options.SaveDirectory)
-                ? AppDomain.CurrentDomain.BaseDirectory
-                : _options.SaveDirectory;
+            string rawDir = string.IsNullOrEmpty(_options.SaveDirectory) ? "SavedVideos" : _options.SaveDirectory;
+            string directory = Path.IsPathRooted(rawDir)
+                ? rawDir
+                : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, rawDir);
 
             string fullDir = Path.Combine(directory, _options.CameraIndex.ToString(), dateStr);
             if (!Directory.Exists(fullDir))
@@ -403,7 +404,6 @@ namespace camera.Recording
             {
                 try
                 {
-                    encoderToDispose.Flush();
                     encoderToDispose.Dispose();
                 }
                 catch { }
@@ -434,7 +434,6 @@ namespace camera.Recording
             {
                 try
                 {
-                    _encoder.Flush();
                     _encoder.Dispose();
                 }
                 catch { }
