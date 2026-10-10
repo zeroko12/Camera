@@ -407,6 +407,30 @@ namespace camera.Views
         [DllImport("kernel32.dll")]
         private static extern bool SetProcessWorkingSetSize(IntPtr proc, IntPtr min, IntPtr max);
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+        public void UpdateDwmDarkMode(bool isDark)
+        {
+            try
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd != IntPtr.Zero)
+                {
+                    int darkMode = isDark ? 1 : 0;
+                    int hr = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
+                    if (hr != 0)
+                    {
+                        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, ref darkMode, sizeof(int));
+                    }
+                }
+            }
+            catch { }
+        }
+
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             // 初始化系统托盘图标
@@ -475,6 +499,7 @@ namespace camera.Views
             var vm = this.DataContext as MainWindowViewModel;
             if (vm != null)
             {
+                UpdateDwmDarkMode(vm.IsDarkTheme);
                 vm.PlaybackPositionRequest += Vm_PlaybackPositionRequest;
                 vm.PropertyChanged += Vm_PropertyChanged;
                 vm.TrayBalloonNotificationRequested += (title, message, isWarning) =>
@@ -1006,7 +1031,11 @@ namespace camera.Views
             var vm = sender as MainWindowViewModel;
             if (vm == null) return;
 
-            if (e.PropertyName == nameof(MainWindowViewModel.PlaybackSpeed))
+            if (e.PropertyName == nameof(MainWindowViewModel.IsDarkTheme))
+            {
+                UpdateDwmDarkMode(vm.IsDarkTheme);
+            }
+            else if (e.PropertyName == nameof(MainWindowViewModel.PlaybackSpeed))
             {
                 if (PlaybackPlayer != null)
                 {

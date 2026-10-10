@@ -167,10 +167,27 @@
             <Border
                 x:Name="MainBorder"
                 Margin="10,2,2,10"
-                BorderBrush="{c:Binding 'HasActiveAlert ? #E53935 : (System.Windows.Media.Brush)null'}"
-                BorderThickness="{c:Binding 'HasActiveAlert ? 2 : 1'}"
+                CornerRadius="6"
                 Effect="{StaticResource EffectShadow3}"
                 Opacity="{Binding Opacity}">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <!-- 默认白天浅色边框：清晰优雅的浅灰边框 -->
+                        <Setter Property="BorderBrush" Value="#D0D7DE" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Style.Triggers>
+                            <!-- 夜间深色边框：质感深灰/暗色金属边框 -->
+                            <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                <Setter Property="BorderBrush" Value="#4B4B52" />
+                            </DataTrigger>
+                            <!-- 告警状态：红色发光加粗边框 -->
+                            <DataTrigger Binding="{Binding HasActiveAlert}" Value="True">
+                                <Setter Property="BorderBrush" Value="#E53935" />
+                                <Setter Property="BorderThickness" Value="2" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
                     <Grid>
                         <!-- 告警横幅：磁盘低于安全阈值停止录像或摄像头物理断开时红屏提示 -->
@@ -859,10 +876,19 @@
                 Height="30"
                 Margin="10,0,0,10"
                 VerticalAlignment="Top"
-                Background="#90000000"
                 MouseEnter="TitleBar_MouseEnter"
                 MouseLeave="TitleBar_MouseLeave"
                 MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Background" Value="#A0000000" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                <Setter Property="Background" Value="#D018181B" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
                 <StackPanel
                     Margin="10,0,0,0"
                     VerticalAlignment="Center"
@@ -949,6 +975,24 @@
                     Width="180"
                     Background="{DynamicResource BackgroundBrush}"
                     CornerRadius="6">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <!-- 默认白天浅色边框 -->
+                            <Setter Property="BorderBrush" Value="#D0D7DE" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Style.Triggers>
+                                <!-- 夜间深色边框 -->
+                                <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                    <Setter Property="BorderBrush" Value="#4B4B52" />
+                                </DataTrigger>
+                                <!-- 告警状态：红色发光边框 -->
+                                <DataTrigger Binding="{Binding HasActiveAlert}" Value="True">
+                                    <Setter Property="BorderBrush" Value="#E53935" />
+                                    <Setter Property="BorderThickness" Value="1.5" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
 
                     <Grid Margin="6">
                         <Grid.RowDefinitions>
