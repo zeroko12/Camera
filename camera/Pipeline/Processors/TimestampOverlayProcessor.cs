@@ -116,12 +116,55 @@ namespace camera.Pipeline.Processors
                     _lastRenderedHeight     = frame.Height;
                 }
 
-                // ─── 第三步: 仅对文字包围盒 ROI 做 SIMD Add（数据量 < 1/100 帧）───
-                // frame[rect] 返回共享底层像素的子矩阵，写入直接作用于 frame 原始数据
+                // ─── 第三步: 仅对文字包围盒 ROI 做直接饱和加法（完全零分配，无 new Mat，无 OpenCV P/Invoke）───
                 foreach (ref var region in _regions.AsSpan())
                 {
-                    using var roi = frame[region.FrameRect];
-                    Cv2.Add(roi, region.SmallMat, roi);
+                    BlendOverlaySaturate(frame, region.SmallMat, region.FrameRect);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 将 SmallMat 直接以饱和加法叠加到 frame 对应区域中（完全零分配，无 new Mat，无 OpenCV P/Invoke）。
+        /// 针对 SSE2 指令集进行了 16 字节矢量化优化，消除原先每秒 120 次 new Mat(roi) 导致的高频对象分配与 C++ 堆碎片。
+        /// </summary>
+        private static unsafe void BlendOverlaySaturate(Mat frame, Mat smallMat, Rect rect)
+        {
+            if (frame == null || smallMat == null || frame.IsDisposed || smallMat.IsDisposed) return;
+            int fx = rect.X;
+            int fy = rect.Y;
+            int fw = rect.Width;
+            int fh = rect.Height;
+
+            if (fx < 0 || fy < 0 || fx + fw > frame.Width || fy + fh > frame.Height) return;
+
+            byte* frameBase = (byte*)frame.DataPointer;
+            byte* smallBase = (byte*)smallMat.DataPointer;
+            long frameStep = (long)frame.Step();
+            long smallStep = (long)smallMat.Step();
+            int rowBytes = fw * 3;
+
+            for (int y = 0; y < fh; y++)
+            {
+                byte* dst = frameBase + (fy + y) * frameStep + (fx * 3);
+                byte* src = smallBase + y * smallStep;
+
+                int i = 0;
+                if (System.Runtime.Intrinsics.X86.Sse2.IsSupported)
+                {
+                    int vecEnd = rowBytes - 16;
+                    for (; i <= vecEnd; i += 16)
+                    {
+                        var vDst = System.Runtime.Intrinsics.Vector128.Load(dst + i);
+                        var vSrc = System.Runtime.Intrinsics.Vector128.Load(src + i);
+                        var vRes = System.Runtime.Intrinsics.X86.Sse2.AddSaturate(vDst, vSrc);
+                        *(System.Runtime.Intrinsics.Vector128<byte>*)(dst + i) = vRes;
+                    }
+                }
+
+                for (; i < rowBytes; i++)
+                {
+                    dst[i] = (byte)Math.Min(255, dst[i] + src[i]);
                 }
             }
         }

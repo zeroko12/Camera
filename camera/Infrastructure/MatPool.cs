@@ -32,7 +32,7 @@ namespace camera.Infrastructure
 
         // 规格键 (Width, Height, Type) -> 缓存队列包装类
         private static readonly ConcurrentDictionary<(int Width, int Height, MatType Type), PoolQueue> _pools = new();
-        private const int MaxPoolSizePerSpec = 8; // 每种分辨率规格最大缓存数量
+        private const int MaxPoolSizePerSpec = 20; // 每种分辨率规格最大缓存数量，满足双路/多路并发下的全生命周期零分配复用
 
         public static Mat Rent(int width, int height, MatType type)
         {
@@ -53,6 +53,11 @@ namespace camera.Infrastructure
         public static void Return(Mat mat)
         {
             if (mat == null || mat.IsDisposed) return;
+            if (mat.Width <= 0 || mat.Height <= 0)
+            {
+                try { mat.Dispose(); } catch { }
+                return;
+            }
 
             var key = (mat.Width, mat.Height, mat.Type());
             var pool = _pools.GetOrAdd(key, _ => new PoolQueue());
@@ -64,6 +69,28 @@ namespace camera.Infrastructure
             else
             {
                 try { mat.Dispose(); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// 当系统发生高内存压力时修剪池中多余的缓存对象
+        /// </summary>
+        public static void TrimExcess(int keepPerSpec = 8)
+        {
+            foreach (var kvp in _pools)
+            {
+                var queue = kvp.Value;
+                while (queue.Count > keepPerSpec && queue.TryDequeue(out var mat))
+                {
+                    try
+                    {
+                        if (mat != null && !mat.IsDisposed)
+                        {
+                            mat.Dispose();
+                        }
+                    }
+                    catch { }
+                }
             }
         }
 

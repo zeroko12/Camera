@@ -186,7 +186,13 @@ namespace camera
                     // 直接同步归还即可。原先 Task.Run 包装是为了避开 UI 线程 native 释放,
                     // 但 MatPool.Return 只是把 Mat 塞回队列或直接 Dispose,
                     // 真正的 P/Invoke 仅在池满时触发(每规格缓存 8 张),概率极低。
-                    try { Infrastructure.MatPool.Return(oldFrame); }
+                    try
+                    {
+                        if (oldFrame.Width > 0 && oldFrame.Height > 0)
+                            Infrastructure.MatPool.Return(oldFrame);
+                        else
+                            oldFrame.Dispose();
+                    }
                     catch (Exception ex) { Logger.LogError($"[CameraService #{Index}] 回收旧 Frame Mat 异常", ex); }
                 }
             }
@@ -385,7 +391,7 @@ namespace camera
             }
         }
 
-        private void RestartSaving()
+        public void RestartSaving()
         {
             lock (_lockObject)
             {

@@ -1150,12 +1150,18 @@
                                                 </ContentControl.ContentTemplate>
                                             </ContentControl>
 
-                                            <!--  编码器状态指示  -->
+                                            <!--  编码器状态指示与设置  -->
                                             <Separator Margin="0,2,0,5" />
                                             <TextBlock
                                                 Margin="0,2,0,2"
                                                 FontSize="11"
-                                                Text="编码加速状态:" />
+                                                FontWeight="SemiBold"
+                                                Text="编码加速:" />
+                                            <CheckBox
+                                                Margin="0,2,0,4"
+                                                Content="仅使用 CPU 编码"
+                                                IsChecked="{Binding ForceCpuEncoding}"
+                                                ToolTip="默认优先使用 GPU 硬件加速(NVENC/QSV/AMF)；勾选后强制使用 CPU 软编(libx264)" />
                                             <Border
                                                 Margin="0,2,0,2"
                                                 Padding="5"
@@ -1163,6 +1169,7 @@
                                                 BorderBrush="#81C784"
                                                 BorderThickness="1"
                                                 CornerRadius="4"
+                                                ToolTip="{Binding SelectedConfigCamera.ActiveCodec, StringFormat='当前活动编码器: {0}'}"
                                                 Visibility="{c:Binding IsGpuEncodingActive,
                                                                        FalseToVisibility=Collapsed}">
                                                 <StackPanel Orientation="Horizontal">
@@ -1186,6 +1193,7 @@
                                                 BorderBrush="#FFF176"
                                                 BorderThickness="1"
                                                 CornerRadius="4"
+                                                ToolTip="{Binding SelectedConfigCamera.ActiveCodec, StringFormat='当前活动编码器: {0}'}"
                                                 Visibility="{c:Binding IsCpuEncodingActive,
                                                                        FalseToVisibility=Collapsed}">
                                                 <StackPanel Orientation="Horizontal">
@@ -1248,7 +1256,7 @@
                                                 Text="空间预计录制" />
                                             <TextBlock
                                                 FontSize="11"
-                                                Foreground="DarkRed"
+                                                Foreground="{Binding DiskSpaceWarningColor}"
                                                 Text="{Binding DiskSpaceWarningText}"
                                                 TextWrapping="Wrap" />
                                         </StackPanel>

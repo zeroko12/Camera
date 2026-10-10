@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using camera.Recording;
+using camera.Encoding;
 
 namespace camera.ViewModels
 {
@@ -60,6 +61,8 @@ namespace camera.ViewModels
                     camera.isSave = false;
                 }
             }
+            UpdateDiskRecordingStatus();
+            UpdateActiveCodecStatus();
         }
 
         private bool _overwriteOldFiles = true;
@@ -85,6 +88,7 @@ namespace camera.ViewModels
             {
                 camera.OverwriteOldFiles = OverwriteOldFiles;
             }
+            UpdateDiskRecordingStatus();
         }
 
 
@@ -145,6 +149,7 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("DiskSpaceThreshold", DiskSpaceThreshold.ToString());
 
             UpdateDiskSpaceThresholdStatus();
+            UpdateDiskRecordingStatus();
             Logger.LogInfo($"[VM] 磁盘空间策略阈值已生效并持久化: {DiskSpaceThreshold} MB");
         }
 
@@ -154,8 +159,10 @@ namespace camera.ViewModels
             get { return _DiskSpaceThreshold; }
             set
             {
-                SetProperty(ref _DiskSpaceThreshold, value);
-                OnDiskSpaceThresholdChanged();
+                if (SetProperty(ref _DiskSpaceThreshold, value))
+                {
+                    OnDiskSpaceThresholdChanged();
+                }
             }
         }
 
@@ -167,6 +174,7 @@ namespace camera.ViewModels
             {
                 camera.DiskThreshold = DiskSpaceThreshold;
             }
+            UpdateDiskRecordingStatus();
         }
 
         private int _Quality = 30;
@@ -181,6 +189,38 @@ namespace camera.ViewModels
             foreach (var camera in Cameras)
             {
                 camera.Quality = Quality;
+            }
+            UpdateDiskRecordingStatus();
+        }
+
+        private bool _forceCpuEncoding = false;
+        public bool ForceCpuEncoding
+        {
+            get => _forceCpuEncoding;
+            set
+            {
+                if (SetProperty(ref _forceCpuEncoding, value))
+                {
+                    VideoEncoderFactory.ForceCpuEncoding = value;
+                    if (!value)
+                    {
+                        VideoEncoderFactory.ResetFailedEncoders();
+                    }
+                    AppSettingsService.Instance.Update(s => s.ForceCpuEncoding = value);
+                    AppSettingsService.Instance.SaveSync();
+                    ConfigurationManager.SaveSetting("ForceCpuEncoding", value.ToString());
+
+                    Logger.LogInfo($"[VM] 编码模式切换: {(value ? "强制使用 CPU 软件编码" : "优先使用 GPU 硬件加速")}");
+
+                    if (isSave)
+                    {
+                        foreach (var cam in Cameras)
+                        {
+                            System.Threading.Tasks.Task.Run(() => cam.RestartSaving());
+                        }
+                    }
+                    UpdateActiveCodecStatus();
+                }
             }
         }
 
@@ -515,10 +555,50 @@ namespace camera.ViewModels
             StorageManager.Instance.StorageWarning += OnStorageWarningTriggered;
             StorageManager.Instance.StorageStatusUpdated += (s, e) => UpdateDiskRecordingStatus();
 
+            Cameras.CollectionChanged += (s, e) =>
+            {
+                if (e.NewItems != null)
+                {
+                    foreach (CameraService cam in e.NewItems)
+                    {
+                        cam.PropertyChanged += OnCameraPropertyChanged;
+                    }
+                }
+                if (e.OldItems != null)
+                {
+                    foreach (CameraService cam in e.OldItems)
+                    {
+                        cam.PropertyChanged -= OnCameraPropertyChanged;
+                    }
+                }
+                UpdateDiskRecordingStatus();
+            };
+
             // ★ 自动保存:任何"持久化属性"被修改后,1 秒防抖落盘。
             // 此前必须等 SaveSettings() 在 Close 时才统一保存,期间崩溃/强杀 → 配置丢失。
             // 现在 setter 改值 → PropertyChanged 触发 → AppSettingsService.RequestSave() 调度落盘。
             this.PropertyChanged += OnPersistentPropertyChanged;
+        }
+
+        private void OnCameraPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(CameraService.isSave) ||
+                e.PropertyName == nameof(CameraService.RecordFps) ||
+                e.PropertyName == nameof(CameraService.SelectedRecordResolution) ||
+                e.PropertyName == nameof(CameraService.SelectedResolution) ||
+                e.PropertyName == nameof(CameraService.Quality) ||
+                e.PropertyName == nameof(CameraService.Width) ||
+                e.PropertyName == nameof(CameraService.Height))
+            {
+                UpdateDiskRecordingStatus();
+            }
+            else if (e.PropertyName == nameof(CameraService.ActiveCodec) ||
+                     e.PropertyName == nameof(CameraService.IsCodecDowngraded))
+            {
+                RaisePropertyChanged(nameof(IsGpuEncodingActive));
+                RaisePropertyChanged(nameof(IsCpuEncodingActive));
+                RaisePropertyChanged(nameof(IsEncodingInactive));
+            }
         }
 
         /// <summary>
@@ -545,6 +625,7 @@ namespace camera.ViewModels
                 nameof(IsGrayHomogenization),
                 nameof(OverlayTextSize),
                 nameof(MaxFps),
+                nameof(ForceCpuEncoding),
                 // MinWindowWidth/MinWindowHeight 属于 MainWindow,在 MainWindow 自己处理
             };
 
@@ -571,6 +652,7 @@ namespace camera.ViewModels
                 s.IsGrayHomogenization = IsGrayHomogenization;
                 s.OverlayTextSize = OverlayTextSize;
                 s.MaxFps = MaxFps;
+                s.ForceCpuEncoding = ForceCpuEncoding;
             });
         }
 
@@ -704,6 +786,7 @@ namespace camera.ViewModels
             {
                 Logger.LogWarning($"[VM-Storage] 存储空间警告: {message}");
                 DiskSpaceWarningText = $"⚠️ 磁盘警告: {message}";
+                DiskSpaceWarningColor = "#C62828";
                 if (StorageManager.Instance.IsStorageCritical && !OverwriteOldFiles)
                 {
                     isSave = false;
@@ -1128,6 +1211,13 @@ namespace camera.ViewModels
             set => SetProperty(ref _diskSpaceWarningText, value);
         }
 
+        private string _diskSpaceWarningColor = "#2E7D32";
+        public string DiskSpaceWarningColor
+        {
+            get => _diskSpaceWarningColor;
+            set => SetProperty(ref _diskSpaceWarningColor, value);
+        }
+
         private void InitializePeriodicTimer()
         {
             _periodicTimer = new DispatcherTimer();
@@ -1174,31 +1264,76 @@ namespace camera.ViewModels
             }
         }
 
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool SetProcessWorkingSetSize(IntPtr proc, IntPtr min, IntPtr max);
+
         private long _lastPressureCollectTicks;
-        private const long PressureCollectIntervalTicks = 30L * 60 * TimeSpan.TicksPerSecond;
-        private const long PressureThresholdBytes = 1024L * 1024 * 1024; // 1 GB
+        private int _isCollectingMemory = 0;
 
         /// <summary>
-        /// 进程占用 > 1 GB 时,每隔 ≥ 30 分钟最多触发一次 Gen 2 GC,
-        /// 主动回收 WPF / DirectShow 持有的 native 资源。
-        /// 实际数据(counters):Process.PrivateBytes 每 17 小时累积到 ~850 MB → GC → 回落 ~400 MB。
-        /// 主动 GC 可缩短这个周期,避免 1 次 850 MB 的尖峰。
+        /// 自适应多级内存压力调控与工作集修剪。
+        /// 根因分析（45小时长跑数据）：
+        /// 1. 原策略硬编码 30 分钟间隔，导致非托管 OpenCV Mat 内存及 DirectShow 缓冲区在 30 分钟窗口内
+        ///    自由累积至 4GB~5.56GB，直到每 30 分钟触发一次 GC 才能剧烈回落 2~3GB。
+        /// 2. 现改为分级动态节流策略：
+        ///    - 常态区 (< 800 MB): 不主动干预，避免无意义的 CPU 波动。
+        ///    - 关注区 (800 MB ~ 1200 MB): 最少间隔 3 分钟触发一次温和回收。
+        ///    - 高压区 (1200 MB ~ 1600 MB): 最少间隔 45 秒触发回收，防止内存持续冲高。
+        ///    - 紧急区 (> 1600 MB): 最少间隔 15 秒触发强力回收与 LOH 内存紧缩。
+        /// 3. 每次回收完成后启用 LOH 紧缩 (CompactOnce)、清理 MatPool 冗余缓存并调用 SetProcessWorkingSetSize(-1, -1) 修剪
+        ///    工作集，立即将释放的物理内存归还给操作系统，彻底消除底线漂移 (Baseline Drift)。
         /// </summary>
         private void TryMemoryPressureCollect()
         {
+            long bytes = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64;
+            if (bytes < 800L * 1024 * 1024) return; // 800MB 以下零开销跳过
+
+            long requiredIntervalTicks = bytes switch
+            {
+                >= 1600L * 1024 * 1024 => 15L * TimeSpan.TicksPerSecond,       // 紧急区: 15 秒
+                >= 1200L * 1024 * 1024 => 45L * TimeSpan.TicksPerSecond,       // 高压区: 45 秒
+                _ => 180L * TimeSpan.TicksPerSecond                            // 关注区: 3 分钟
+            };
+
             long now = DateTime.UtcNow.Ticks;
             long last = Interlocked.Read(ref _lastPressureCollectTicks);
-            if (now - last < PressureCollectIntervalTicks && last != 0) return;
+            if (now - last < requiredIntervalTicks && last != 0) return;
 
-            long bytes = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64;
-            if (bytes < PressureThresholdBytes) return;
+            // 抢占锁：避免多线程并发执行
+            if (Interlocked.CompareExchange(ref _isCollectingMemory, 1, 0) != 0) return;
 
-            // 抢占:防止多个线程同时进入 GC.Collect
-            if (Interlocked.CompareExchange(ref _lastPressureCollectTicks, now, last) != last) return;
+            try
+            {
+                Interlocked.Exchange(ref _lastPressureCollectTicks, now);
+                long mbBefore = bytes / (1024 * 1024);
 
-            Logger.LogInfo($"[VM] 内存占用 {bytes / 1024 / 1024} MB,主动触发 GC");
-            GC.Collect(2, GCCollectionMode.Forced, blocking: true);
-            GC.WaitForPendingFinalizers();
+                // 1. 修剪 MatPool 对象池中的冗余缓存
+                Infrastructure.MatPool.TrimExcess(8);
+
+                // 2. 紧缩 LOH 并触发 Full GC 回收非托管终结器挂起的对象
+                System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+                GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+                GC.WaitForPendingFinalizers();
+                GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+                // 3. 通知操作系统修剪工作集，归还物理页面
+                try
+                {
+                    SetProcessWorkingSetSize(Process.GetCurrentProcess().Handle, (IntPtr)(-1), (IntPtr)(-1));
+                }
+                catch { }
+
+                long mbAfter = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / (1024 * 1024);
+                Logger.LogInfo($"[VM] 内存压力自适应回收完成: {mbBefore} MB -> {mbAfter} MB (释放 {mbBefore - mbAfter} MB)");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("[VM] 执行自适应内存回收异常", ex);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _isCollectingMemory, 0);
+            }
         }
 
         private void PeriodicTimer_Tick(object sender, EventArgs e)
@@ -1207,10 +1342,13 @@ namespace camera.ViewModels
             UpdateActiveCodecStatus();
         }
 
+        private bool _isUpdatingDiskStatus = false;
         private void UpdateDiskRecordingStatus()
         {
+            if (_isUpdatingDiskStatus) return;
             try
             {
+                _isUpdatingDiskStatus = true;
                 double totalMbPerSec = 0.0;
                 double potentialMbPerSec = 0.0;
                 int activeSavingCamerasCount = 0;
@@ -1241,34 +1379,108 @@ namespace camera.ViewModels
                 double availableGB = StorageManager.Instance.AvailableStorageGb;
                 double availableMB = StorageManager.Instance.AvailableStorageMb;
 
+                double thresholdMb = DiskSpaceThreshold;
+                double thresholdGb = thresholdMb / 1024.0;
+                double usableMb = Math.Max(0.0, availableMB - thresholdMb);
+
                 if (isSave && activeSavingCamerasCount > 0 && totalMbPerSec > 0)
                 {
-                    double hoursLeft = availableMB / (totalMbPerSec * 3600.0);
-                    DiskSpaceWarningText = $"磁盘剩余: {availableGB:F1} GB ({drive}), 预计录制: {hoursLeft:F1} 小时";
+                    if (!OverwriteOldFiles)
+                    {
+                        // 策略：停止录像
+                        if (availableMB <= thresholdMb)
+                        {
+                            DiskSpaceWarningText = $"⚠️ 磁盘剩余: {availableGB:F1} GB ({drive})\n已达到阈值: {thresholdGb:F1} GB\n空间不足已停止录像";
+                            DiskSpaceWarningColor = "#C62828";
+                        }
+                        else
+                        {
+                            double hoursLeft = usableMb / (totalMbPerSec * 3600.0);
+                            DiskSpaceWarningText = $"磁盘剩余: {availableGB:F1} GB ({drive})\n阈值保留: {thresholdGb:F1} GB\n预计可录: {hoursLeft:F1} 小时\n(达阈值即停止)";
+                            DiskSpaceWarningColor = hoursLeft < 2.0 ? "#E65100" : "#2E7D32";
+                        }
+                    }
+                    else
+                    {
+                        // 策略：覆盖旧文件
+                        if (availableMB <= thresholdMb)
+                        {
+                            DiskSpaceWarningText = $"磁盘剩余: {availableGB:F1} GB ({drive})\n低水位阈值: {thresholdGb:F1} GB\n循环覆盖旧文件中\n(持续录制)";
+                            DiskSpaceWarningColor = "#E65100";
+                        }
+                        else
+                        {
+                            double hoursLeft = usableMb / (totalMbPerSec * 3600.0);
+                            DiskSpaceWarningText = $"磁盘剩余: {availableGB:F1} GB ({drive})\n低水位保留: {thresholdGb:F1} GB\n直录预计: {hoursLeft:F1} 小时\n(达阈值后循环覆盖)";
+                            DiskSpaceWarningColor = "#2E7D32";
+                        }
+                    }
                 }
                 else
                 {
-                    double hoursLeft = availableMB / (potentialMbPerSec * 3600.0);
-                    DiskSpaceWarningText = $"录像未开启 (开启后预计录制: {hoursLeft:F1} 小时)";
+                    double rate = potentialMbPerSec > 0 ? potentialMbPerSec : 1.0;
+                    double hoursLeft = usableMb / (rate * 3600.0);
+
+                    if (!OverwriteOldFiles)
+                    {
+                        if (availableMB <= thresholdMb)
+                        {
+                            DiskSpaceWarningText = $"录像未开启\n(剩余 {availableGB:F1} GB ≤ 阈值 {thresholdGb:F1} GB\n开启后将无法录制)";
+                            DiskSpaceWarningColor = "#C62828";
+                        }
+                        else
+                        {
+                            DiskSpaceWarningText = $"录像未开启\n(剩余: {availableGB:F1} GB, 保留: {thresholdGb:F1} GB\n开启后预计可录: {hoursLeft:F1} 小时 (达阈值即停止))";
+                            DiskSpaceWarningColor = "#555555";
+                        }
+                    }
+                    else
+                    {
+                        if (availableMB <= thresholdMb)
+                        {
+                            DiskSpaceWarningText = $"录像未开启\n(剩余 {availableGB:F1} GB ≤ 阈值 {thresholdGb:F1} GB\n开启将循环覆盖旧录像)";
+                            DiskSpaceWarningColor = "#E65100";
+                        }
+                        else
+                        {
+                            DiskSpaceWarningText = $"录像未开启\n(剩余: {availableGB:F1} GB, 保留: {thresholdGb:F1} GB\n直录预计: {hoursLeft:F1} 小时, 达阈值后循环覆盖)";
+                            DiskSpaceWarningColor = "#555555";
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"计算磁盘预计时间异常: {ex.Message}");
                 DiskSpaceWarningText = "磁盘计算异常";
+                DiskSpaceWarningColor = "#C62828";
+            }
+            finally
+            {
+                _isUpdatingDiskStatus = false;
             }
         }
 
+        private bool _isUpdatingActiveCodec = false;
         private void UpdateActiveCodecStatus()
         {
-            foreach (var cam in Cameras)
+            if (_isUpdatingActiveCodec) return;
+            try
             {
-                cam.UpdateActiveCodecStatus();
+                _isUpdatingActiveCodec = true;
+                foreach (var cam in Cameras)
+                {
+                    cam.UpdateActiveCodecStatus();
+                }
+                
+                RaisePropertyChanged(nameof(IsGpuEncodingActive));
+                RaisePropertyChanged(nameof(IsCpuEncodingActive));
+                RaisePropertyChanged(nameof(IsEncodingInactive));
             }
-            
-            RaisePropertyChanged(nameof(IsGpuEncodingActive));
-            RaisePropertyChanged(nameof(IsCpuEncodingActive));
-            RaisePropertyChanged(nameof(IsEncodingInactive));
+            finally
+            {
+                _isUpdatingActiveCodec = false;
+            }
         }
 
         public void OnDeviceChangeNotification()
@@ -1469,6 +1681,8 @@ namespace camera.ViewModels
             Luminance = appSettings.Luminance;
             IsGrayHomogenization = appSettings.IsGrayHomogenization;
             OverlayTextSize = appSettings.OverlayTextSize;
+            ForceCpuEncoding = appSettings.ForceCpuEncoding;
+            VideoEncoderFactory.ForceCpuEncoding = ForceCpuEncoding;
 
             // 初始化存储管理器
             StorageManager.Instance.SaveDirectory = appSettings.SaveDirectory;
@@ -1614,6 +1828,7 @@ namespace camera.ViewModels
                 s.Luminance = this.Luminance;
                 s.IsGrayHomogenization = this.IsGrayHomogenization;
                 s.OverlayTextSize = this.OverlayTextSize;
+                s.ForceCpuEncoding = this.ForceCpuEncoding;
                 s.CameraOrder = Cameras.Select(c => c.GetConfigKey()).Where(k => !string.IsNullOrEmpty(k)).ToList();
 
                 foreach (var cam in Cameras)
@@ -1652,6 +1867,7 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("Luminance", this.Luminance.ToString());
             ConfigurationManager.SaveSetting("IsGrayHomogenization", this.IsGrayHomogenization.ToString());
             ConfigurationManager.SaveSetting("OverlayTextSize", this.OverlayTextSize.ToString());
+            ConfigurationManager.SaveSetting("ForceCpuEncoding", this.ForceCpuEncoding.ToString());
 
             foreach (var cam in Cameras)
             {
