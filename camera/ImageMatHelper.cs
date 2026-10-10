@@ -56,6 +56,7 @@ namespace camera
         private static void OnSourceMatChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             if (d == null) return;
+            if (camera.ViewModels.MainWindowViewModel.IsUIRenderingPaused) return;
             var mat = e.NewValue as Mat;
             if (mat == null || mat.Empty())
             {

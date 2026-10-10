@@ -117,6 +117,7 @@ namespace camera
                             MaxQsvSessions = loaded.MaxQsvSessions,
                             UseV3Architecture = loaded.UseV3Architecture,
                             ForceCpuEncoding = loaded.ForceCpuEncoding,
+                            IsDarkTheme = loaded.IsDarkTheme,
                             Cameras = loaded.Cameras ?? new(StringComparer.OrdinalIgnoreCase),
                             CameraOrder = loaded.CameraOrder ?? new(),
                         };
@@ -171,6 +172,7 @@ namespace camera
                     MaxQsvSessions = migrated.MaxQsvSessions,
                     UseV3Architecture = migrated.UseV3Architecture,
                     ForceCpuEncoding = migrated.ForceCpuEncoding,
+                    IsDarkTheme = migrated.IsDarkTheme,
                     Cameras = migrated.Cameras ?? new(StringComparer.OrdinalIgnoreCase),
                     CameraOrder = migrated.CameraOrder ?? new(),
                 };
@@ -344,6 +346,7 @@ namespace camera
                 MaxQsvSessions       = Ip("MaxQsvSessions", AppSettings.DefaultMaxQsvSessions),
                 UseV3Architecture    = Bp("UseV3Architecture", AppSettings.DefaultUseV3Architecture),
                 ForceCpuEncoding     = Bp("ForceCpuEncoding", AppSettings.DefaultForceCpuEncoding),
+                IsDarkTheme          = Bp("IsDarkTheme", AppSettings.DefaultIsDarkTheme),
                 Cameras              = cameras,
             };
         }

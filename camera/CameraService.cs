@@ -866,7 +866,7 @@ namespace camera
             // 订阅预览帧回调(只写共享槽位,不调 BeginInvoke)
             _previewController.PreviewFrameReady += (s, previewFrame) =>
             {
-                if (Application.Current == null)
+                if (Application.Current == null || camera.ViewModels.MainWindowViewModel.IsUIRenderingPaused)
                 {
                     if (previewFrame != null) Infrastructure.MatPool.Return(previewFrame);
                     return;
@@ -1841,7 +1841,8 @@ namespace camera
                     if (!string.IsNullOrEmpty(DevicePath))
                     {
                         var devices = camera.Infrastructure.CameraDeviceEnumerator.EnumerateCameras();
-                        var match = devices.Find(d => d.DevicePath == DevicePath);
+                        var match = devices.Find(d => string.Equals(d.DevicePath, DevicePath, StringComparison.OrdinalIgnoreCase))
+                                    ?? devices.Find(d => d.Name == Name);
                         if (match == null)
                         {
                             Logger.LogWarning($"[CameraService] 尝试修改摄像头 {Name} 分辨率或重载，但该物理设备已被移除，中止操作");
@@ -1849,6 +1850,11 @@ namespace camera
                             RaisePropertyChanged(nameof(IsConnected));
                             RefreshFrame();
                             return;
+                        }
+                        if (DevicePath != match.DevicePath)
+                        {
+                            Logger.LogInfo($"[CameraService] 摄像头 {Name} 路径自适应纠正: {DevicePath} -> {match.DevicePath}");
+                            DevicePath = match.DevicePath;
                         }
                         if (Index != match.Index)
                         {

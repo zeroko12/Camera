@@ -545,11 +545,156 @@ namespace camera.ViewModels
             SelectedCamera = null;
         }
 
+        #region 主题切换 (Day/Night Theme)
+
+        private bool _isDarkTheme;
+        public bool IsDarkTheme
+        {
+            get => _isDarkTheme;
+            set
+            {
+                if (SetProperty(ref _isDarkTheme, value))
+                {
+                    ApplyTheme(value);
+                    AppSettingsService.Instance.Update(s => s.IsDarkTheme = value);
+                    ConfigurationManager.SaveSetting("IsDarkTheme", value.ToString());
+                }
+            }
+        }
+
+        public void ApplyTheme(bool isDark)
+        {
+            try
+            {
+                void DoApply()
+                {
+                    var skinType = isDark ? HandyControl.Data.SkinType.Dark : HandyControl.Data.SkinType.Default;
+                    var skin = HandyControl.Tools.ResourceHelper.GetSkin(skinType);
+                    if (Application.Current != null)
+                    {
+                        var appResources = Application.Current.Resources;
+                        bool replaced = false;
+                        for (int i = 0; i < appResources.MergedDictionaries.Count; i++)
+                        {
+                            var dict = appResources.MergedDictionaries[i];
+                            if (dict.Source != null && (dict.Source.OriginalString.Contains("SkinDefault") || dict.Source.OriginalString.Contains("SkinDark")))
+                            {
+                                appResources.MergedDictionaries[i] = skin;
+                                replaced = true;
+                                break;
+                            }
+                        }
+                        if (!replaced && appResources.MergedDictionaries.Count > 0)
+                        {
+                            appResources.MergedDictionaries[0] = skin;
+                        }
+
+                        if (Application.Current.MainWindow != null)
+                        {
+                            HandyControl.Themes.Theme.SetSkin(Application.Current.MainWindow, skinType);
+                        }
+                    }
+                    Logger.LogInfo($"[Theme] 切换主题为: {(isDark ? "夜间深色模式 (Dark)" : "白天浅色模式 (Light)")}");
+                }
+
+                if (Application.Current?.Dispatcher != null && !Application.Current.Dispatcher.CheckAccess())
+                {
+                    Application.Current.Dispatcher.Invoke(DoApply);
+                }
+                else
+                {
+                    DoApply();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("[Theme] 切换主题失败", ex);
+            }
+        }
+
+        #endregion
+
+        #region 后台挂机渲染暂停 (最小化时零 GPU/CPU 渲染开销)
+
+        public static bool IsUIRenderingPaused { get; set; } = false;
+
+        #endregion
+
+        #region 警示状态与托盘通知
+
+        public event Action<string, string, bool>? TrayBalloonNotificationRequested;
+
+        private bool _hasActiveAlert;
+        public bool HasActiveAlert
+        {
+            get => _hasActiveAlert;
+            set => SetProperty(ref _hasActiveAlert, value);
+        }
+
+        private string _alertMessage = string.Empty;
+        public string AlertMessage
+        {
+            get => _alertMessage;
+            set => SetProperty(ref _alertMessage, value);
+        }
+
+        private DelegateCommand _dismissAlertCommand;
+        public DelegateCommand DismissAlertCommand =>
+            _dismissAlertCommand ?? (_dismissAlertCommand = new DelegateCommand(() => HasActiveAlert = false));
+
+        public void TriggerAlert(string title, string message, bool isWarning = true)
+        {
+            Application.Current?.Dispatcher.InvokeAsync(() =>
+            {
+                HasActiveAlert = true;
+                AlertMessage = message;
+                TrayBalloonNotificationRequested?.Invoke(title, message, isWarning);
+            });
+        }
+
+        public void CheckAndClearAlert()
+        {
+            Application.Current?.Dispatcher.InvokeAsync(() =>
+            {
+                bool diskOk = !StorageManager.Instance.IsStorageCritical;
+                bool camerasOk = Cameras.All(c => c.IsManualDisabled || c.IsConnected);
+                if (diskOk && camerasOk)
+                {
+                    HasActiveAlert = false;
+                    AlertMessage = string.Empty;
+                }
+            });
+        }
+
+        #endregion
+
+        #region 摄像头自愈看门狗
+
+        private DispatcherTimer _cameraWatchdogTimer;
+        private void InitializeWatchdogTimer()
+        {
+            _cameraWatchdogTimer = new DispatcherTimer(DispatcherPriority.Background);
+            _cameraWatchdogTimer.Interval = TimeSpan.FromMilliseconds(1500);
+            _cameraWatchdogTimer.Tick += (s, e) =>
+            {
+                if (_isInitializing || _disposed) return;
+                // 仅当存在非手动禁用且离线的摄像头时，触发自愈重连检查
+                if (Cameras.Any(c => !c.IsManualDisabled && !c.IsConnected))
+                {
+                    ExecuteDeviceChangeHandler();
+                }
+            };
+            _cameraWatchdogTimer.Start();
+        }
+
+        #endregion
+
         public MainWindowViewModel()
         {
             init();
             LoadSettings();
             InitializePeriodicTimer();
+            InitializeWatchdogTimer();
 
             // 订阅存储管理器非模态告警与状态更新
             StorageManager.Instance.StorageWarning += OnStorageWarningTriggered;
@@ -599,6 +744,22 @@ namespace camera.ViewModels
                 RaisePropertyChanged(nameof(IsCpuEncodingActive));
                 RaisePropertyChanged(nameof(IsEncodingInactive));
             }
+            else if (e.PropertyName == nameof(CameraService.IsConnected))
+            {
+                var camera = sender as CameraService;
+                if (camera != null)
+                {
+                    if (!camera.IsConnected && !camera.IsManualDisabled)
+                    {
+                        TriggerAlert("摄像头断开警告", $"⚠️ 摄像头 [{camera.Name}] 物理连接断开！", true);
+                    }
+                    else if (camera.IsConnected)
+                    {
+                        CheckAndClearAlert();
+                        TrayBalloonNotificationRequested?.Invoke("设备恢复在线", $"摄像头 [{camera.Name}] 已自愈重连恢复正常！", false);
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -626,6 +787,7 @@ namespace camera.ViewModels
                 nameof(OverlayTextSize),
                 nameof(MaxFps),
                 nameof(ForceCpuEncoding),
+                nameof(IsDarkTheme),
                 // MinWindowWidth/MinWindowHeight 属于 MainWindow,在 MainWindow 自己处理
             };
 
@@ -653,6 +815,7 @@ namespace camera.ViewModels
                 s.OverlayTextSize = OverlayTextSize;
                 s.MaxFps = MaxFps;
                 s.ForceCpuEncoding = ForceCpuEncoding;
+                s.IsDarkTheme = IsDarkTheme;
             });
         }
 
@@ -787,9 +950,13 @@ namespace camera.ViewModels
                 Logger.LogWarning($"[VM-Storage] 存储空间警告: {message}");
                 DiskSpaceWarningText = $"⚠️ 磁盘警告: {message}";
                 DiskSpaceWarningColor = "#C62828";
-                if (StorageManager.Instance.IsStorageCritical && !OverwriteOldFiles)
+                if (StorageManager.Instance.IsStorageCritical)
                 {
-                    isSave = false;
+                    if (!OverwriteOldFiles)
+                    {
+                        isSave = false;
+                    }
+                    TriggerAlert("磁盘空间严重告警", $"⚠️ 磁盘余量低于安全阈值({DiskSpaceThreshold} MB)，已自动停止录像以保护数据！", true);
                 }
             });
         }
@@ -1246,6 +1413,8 @@ namespace camera.ViewModels
         /// </summary>
         private void SharedFrameTimer_Tick(object sender, EventArgs e)
         {
+            if (IsUIRenderingPaused) return;
+
             var cameras = Cameras;
             if (cameras == null) return;
 
@@ -1502,10 +1671,11 @@ namespace camera.ViewModels
                     try { oldTimer.Dispose(); } catch { }
                 }
 
+                // 防抖：降至 150ms，实现拔插 USB 毫秒级自愈响应
                 _deviceChangeDebounceTimer = new System.Threading.Timer(
                     _ => ExecuteDeviceChangeHandler(),
                     null,
-                    800,
+                    150,
                     System.Threading.Timeout.Infinite);
             }
         }
@@ -1542,9 +1712,15 @@ namespace camera.ViewModels
                 {
                     if (string.IsNullOrEmpty(cam.DevicePath)) continue;
 
-                    var match = devices.Find(d => d.DevicePath == cam.DevicePath);
+                    var match = devices.Find(d => string.Equals(d.DevicePath, cam.DevicePath, StringComparison.OrdinalIgnoreCase))
+                                ?? devices.Find(d => d.Name == cam.Name && !existingCamerasSnapshot.Any(c => c != cam && c.DevicePath == d.DevicePath));
                     if (match != null)
                     {
+                        if (cam.DevicePath != match.DevicePath)
+                        {
+                            Logger.LogInfo($"[OnDeviceChange] 摄像头 {cam.Name} 路径重定向: {cam.DevicePath} -> {match.DevicePath}");
+                            cam.DevicePath = match.DevicePath;
+                        }
                         // 物理设备在线，检查索引是否发生漂移
                         if (cam.Index != match.Index)
                         {
@@ -1552,7 +1728,7 @@ namespace camera.ViewModels
                             cam.Index = match.Index;
                         }
 
-                        if (!cam.IsConnected)
+                        if (!cam.IsConnected && !cam.IsManualDisabled)
                         {
                             Logger.LogInfo($"尝试自动恢复断开后重新插回的摄像头 {cam.Name} (索引: {cam.Index})...");
                             Task.Run(() => cam.ChangeCameraInfo());
@@ -1683,6 +1859,8 @@ namespace camera.ViewModels
             OverlayTextSize = appSettings.OverlayTextSize;
             ForceCpuEncoding = appSettings.ForceCpuEncoding;
             VideoEncoderFactory.ForceCpuEncoding = ForceCpuEncoding;
+            IsDarkTheme = appSettings.IsDarkTheme;
+            ApplyTheme(IsDarkTheme);
 
             // 初始化存储管理器
             StorageManager.Instance.SaveDirectory = appSettings.SaveDirectory;
@@ -1859,6 +2037,7 @@ namespace camera.ViewModels
                 s.IsGrayHomogenization = this.IsGrayHomogenization;
                 s.OverlayTextSize = this.OverlayTextSize;
                 s.ForceCpuEncoding = this.ForceCpuEncoding;
+                s.IsDarkTheme = this.IsDarkTheme;
                 s.CameraOrder = Cameras.Select(c => c.GetConfigKey()).Where(k => !string.IsNullOrEmpty(k)).ToList();
 
                 foreach (var cam in Cameras)
@@ -1901,6 +2080,7 @@ namespace camera.ViewModels
             ConfigurationManager.SaveSetting("IsGrayHomogenization", this.IsGrayHomogenization.ToString());
             ConfigurationManager.SaveSetting("OverlayTextSize", this.OverlayTextSize.ToString());
             ConfigurationManager.SaveSetting("ForceCpuEncoding", this.ForceCpuEncoding.ToString());
+            ConfigurationManager.SaveSetting("IsDarkTheme", this.IsDarkTheme.ToString());
 
             foreach (var cam in Cameras)
             {
@@ -1945,6 +2125,12 @@ namespace camera.ViewModels
 
                 try
                 {
+                    if (_cameraWatchdogTimer != null)
+                    {
+                        _cameraWatchdogTimer.Stop();
+                        _cameraWatchdogTimer = null;
+                    }
+
                     if (_periodicTimer != null)
                     {
                         _periodicTimer.Stop();

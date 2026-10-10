@@ -46,6 +46,7 @@ namespace camera
         public const bool    DefaultTopmost                = true;
         public const string  DefaultExitBehavior           = "Prompt";
         public const double  DefaultAspectRatio           = 4.0 / 3.0;
+        public const bool    DefaultIsDarkTheme           = false;
 
         // ────────────────── 摄像头特定默认值 ──────────────────
         public const int     DefaultCameraRecordFps        = 10;
@@ -81,6 +82,7 @@ namespace camera
         public bool         IsGrayHomogenization { get; set; }
         public double       OverlayTextSize     { get; set; } = DefaultOverlayTextSize;
         public int          MaxFps              { get; set; } = DefaultMaxFps;
+        public bool         IsDarkTheme         { get; set; } = DefaultIsDarkTheme;
 
         // ────────────────── 主窗口几何 ──────────────────
         public double       WindowWidth         { get; set; } = DefaultWindowWidth;

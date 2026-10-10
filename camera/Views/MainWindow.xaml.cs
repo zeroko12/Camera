@@ -404,6 +404,9 @@ namespace camera.Views
         [DllImport("user32.dll")]
         private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
 
+        [DllImport("kernel32.dll")]
+        private static extern bool SetProcessWorkingSetSize(IntPtr proc, IntPtr min, IntPtr max);
+
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             // 初始化系统托盘图标
@@ -474,6 +477,13 @@ namespace camera.Views
             {
                 vm.PlaybackPositionRequest += Vm_PlaybackPositionRequest;
                 vm.PropertyChanged += Vm_PropertyChanged;
+                vm.TrayBalloonNotificationRequested += (title, message, isWarning) =>
+                {
+                    Dispatcher.InvokeAsync(() =>
+                    {
+                        _notifyIcon?.ShowBalloonTip(3000, title, message, isWarning ? System.Windows.Forms.ToolTipIcon.Warning : System.Windows.Forms.ToolTipIcon.Info);
+                    });
+                };
             }
 
             _playbackTimelineTimer = new DispatcherTimer();
@@ -785,8 +795,34 @@ namespace camera.Views
             // 支持窗口任意自由变形，不再强制锁定宽高比
         }
 
+        private void MaximizedView_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount == 2)
+            {
+                if (this.DataContext is MainWindowViewModel vm && vm.IsSingleCameraMode)
+                {
+                    vm.BackToGridCommand.Execute();
+                    e.Handled = true;
+                }
+            }
+        }
+
         private void MainWindow_StateChanged(object sender, EventArgs e)
         {
+            if (this.WindowState == WindowState.Minimized)
+            {
+                MainWindowViewModel.IsUIRenderingPaused = true;
+                try
+                {
+                    SetProcessWorkingSetSize(Process.GetCurrentProcess().Handle, (IntPtr)(-1), (IntPtr)(-1));
+                }
+                catch { }
+            }
+            else
+            {
+                MainWindowViewModel.IsUIRenderingPaused = false;
+            }
+
             if (this.Content is Grid rootGrid)
             {
                 if (this.WindowState == WindowState.Maximized)

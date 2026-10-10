@@ -51,6 +51,73 @@
     </i:Interaction.Triggers>
     <Window.Resources>
         <!-- 已删除 MatToImageSourceConverter 资源,见 ImageMatHelper.cs -->
+        <Style x:Key="SlimScrollBarThumb" TargetType="{x:Type Thumb}">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Thumb}">
+                        <Border
+                            Background="{DynamicResource PrimaryTextBrush}"
+                            CornerRadius="2.5"
+                            Opacity="0.3" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Opacity" Value="0.65" />
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter Property="Opacity" Value="0.85" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SlimScrollBar" TargetType="{x:Type ScrollBar}">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="Width" Value="5" />
+            <Setter Property="MinWidth" Value="5" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource SlimScrollBarThumb}" />
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SlimScrollViewerStyle" TargetType="{x:Type hc:ScrollViewer}">
+            <Setter Property="IsInertiaEnabled" Value="True" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollViewer}">
+                        <Grid Background="{TemplateBinding Background}">
+                            <ScrollContentPresenter CanContentScroll="{TemplateBinding CanContentScroll}" />
+                            <ScrollBar
+                                x:Name="PART_VerticalScrollBar"
+                                HorizontalAlignment="Right"
+                                Maximum="{TemplateBinding ScrollableHeight}"
+                                Minimum="0"
+                                Orientation="Vertical"
+                                Style="{StaticResource SlimScrollBar}"
+                                Value="{TemplateBinding VerticalOffset}"
+                                ViewportSize="{TemplateBinding ViewportHeight}"
+                                Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Storyboard x:Key="FlashStoryboard" RepeatBehavior="Forever">
             <!--  瞬间切换到不透明  -->
             <DoubleAnimation
@@ -100,11 +167,61 @@
             <Border
                 x:Name="MainBorder"
                 Margin="10,2,2,10"
-                BorderThickness="1"
+                BorderBrush="{c:Binding 'HasActiveAlert ? #E53935 : (System.Windows.Media.Brush)null'}"
+                BorderThickness="{c:Binding 'HasActiveAlert ? 2 : 1'}"
                 Effect="{StaticResource EffectShadow3}"
                 Opacity="{Binding Opacity}">
                 <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
                     <Grid>
+                        <!-- 告警横幅：磁盘低于安全阈值停止录像或摄像头物理断开时红屏提示 -->
+                        <Border
+                            Panel.ZIndex="2000"
+                            Margin="8,8,8,0"
+                            Padding="10,6"
+                            VerticalAlignment="Top"
+                            Background="#D32F2F"
+                            CornerRadius="4"
+                            Effect="{StaticResource EffectShadow2}"
+                            Visibility="{c:Binding HasActiveAlert, FalseToVisibility=Collapsed}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <materialDesign:PackIcon
+                                    Width="18"
+                                    Height="18"
+                                    VerticalAlignment="Center"
+                                    Foreground="White"
+                                    Kind="AlertCircle" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    Margin="8,0,8,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="11"
+                                    FontWeight="Bold"
+                                    Foreground="White"
+                                    Text="{Binding AlertMessage}"
+                                    TextWrapping="Wrap" />
+                                <Button
+                                    Grid.Column="2"
+                                    Width="20"
+                                    Height="20"
+                                    Padding="0"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Command="{Binding DismissAlertCommand}"
+                                    ToolTip="关闭提示">
+                                    <materialDesign:PackIcon
+                                        Width="14"
+                                        Height="14"
+                                        Foreground="White"
+                                        Kind="Close" />
+                                </Button>
+                            </Grid>
+                        </Border>
                         <ItemsControl ItemsSource="{Binding Cameras}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -316,8 +433,12 @@
                 Panel.ZIndex="100"
                 Background="{DynamicResource BackgroundBrush}"
                 ClipToBounds="True"
+                PreviewMouseLeftButtonDown="MaximizedView_PreviewMouseLeftButtonDown"
                 Visibility="{c:Binding IsSingleCameraMode,
                                        FalseToVisibility=Collapsed}">
+                <Grid.InputBindings>
+                    <MouseBinding Command="{Binding BackToGridCommand}" MouseAction="LeftDoubleClick" />
+                </Grid.InputBindings>
 
                 <!--  放大画面填满整个网格区域  -->
                 <Image
@@ -401,7 +522,7 @@
                         </ContextMenu>
                     </Image.ContextMenu>
                     <Image.InputBindings>
-                        <MouseBinding Command="{Binding DataContext.BackToGridCommand, RelativeSource={RelativeSource AncestorType=Grid, AncestorLevel=2}}" MouseAction="LeftDoubleClick" />
+                        <MouseBinding Command="{Binding DataContext.BackToGridCommand, RelativeSource={RelativeSource AncestorType=Window}}" MouseAction="LeftDoubleClick" />
                     </Image.InputBindings>
                 </Image>
 
@@ -871,8 +992,11 @@
                             </Button>
                         </Grid>
 
-                        <!--  主控制列表滚动区  -->
-                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <!--  主控制列表滚动区 (平滑细滚动条)  -->
+                        <hc:ScrollViewer
+                            Grid.Row="1"
+                            Style="{StaticResource SlimScrollViewerStyle}"
+                            VerticalScrollBarVisibility="Auto">
                             <StackPanel>
                                 <!--  1. 通道配置 (核心第一优先级，默认展开)  -->
                                 <Expander
@@ -1333,7 +1457,48 @@
                                         BorderThickness="0,1,1,1"
                                         CornerRadius="0,4,4,0">
                                         <StackPanel Margin="6">
-                                            <!--  置顶与夜间模式  -->
+                                            <!--  白天/黑夜主题风格切换  -->
+                                            <Grid Margin="0,0,0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <materialDesign:PackIcon
+                                                        Width="14"
+                                                        Height="14"
+                                                        Margin="0,0,4,0"
+                                                        VerticalAlignment="Center"
+                                                        Foreground="{DynamicResource PrimaryBrush}"
+                                                        Kind="{c:Binding 'IsDarkTheme ? \'WeatherNight\' : \'WhiteBalanceSunny\''}" />
+                                                    <TextBlock
+                                                        FontSize="11"
+                                                        Text="{c:Binding 'IsDarkTheme ? \'夜间深色主题\' : \'白天浅色主题\''}"
+                                                        VerticalAlignment="Center" />
+                                                </StackPanel>
+                                                <ToggleButton
+                                                    Grid.Column="1"
+                                                    IsChecked="{Binding IsDarkTheme, Mode=TwoWay}"
+                                                    ToolTip="切换白天浅色/夜间深色主题风格">
+                                                    <materialDesign:PackIcon Kind="WhiteBalanceSunny" />
+                                                    <materialDesign:ToggleButtonAssist.OnContent>
+                                                        <materialDesign:PackIcon Kind="WeatherNight" Foreground="#FDD835" />
+                                                    </materialDesign:ToggleButtonAssist.OnContent>
+                                                    <ToggleButton.Resources>
+                                                        <ResourceDictionary>
+                                                            <ResourceDictionary.MergedDictionaries>
+                                                                <materialDesign:BundledTheme
+                                                                    BaseTheme="Light"
+                                                                    PrimaryColor="BlueGrey"
+                                                                    SecondaryColor="Lime" />
+                                                                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign2.Defaults.xaml" />
+                                                            </ResourceDictionary.MergedDictionaries>
+                                                        </ResourceDictionary>
+                                                    </ToggleButton.Resources>
+                                                </ToggleButton>
+                                            </Grid>
+
+                                            <!--  窗口始终置顶  -->
                                             <Grid Margin="0,0,0,4">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
@@ -1735,7 +1900,7 @@
                                     </Border>
                                 </Expander>
                             </StackPanel>
-                        </ScrollViewer>
+                        </hc:ScrollViewer>
                     </Grid>
                 </Border>
             </Border>
