@@ -530,6 +530,8 @@ namespace camera.Views
                 {
                     ConsoleToggleButtonTransform.X = vm.ConsoleStatus ? -200 : 0;
                 }
+
+                UpdateConsoleButtonOpacity(animate: false);
             }
 
             _playbackTimelineTimer = new DispatcherTimer();
@@ -811,18 +813,94 @@ namespace camera.Views
         {
             IsMouseOverContentGrid = true;
             WindowResizeGrip.Opacity = 1.0;
-            ConsoleToggleButton.Visibility = Visibility.Visible;
-            ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(ConsoleToggleButton.Opacity, 1.0, TimeSpan.FromSeconds(0.2)));
         }
 
         private void MainContentGrid_MouseLeave(object sender, MouseEventArgs e)
         {
             IsMouseOverContentGrid = false;
             WindowResizeGrip.Opacity = 0.4;
-            var vm = this.DataContext as MainWindowViewModel;
-            double targetOpacity = (vm != null && vm.ConsoleStatus) ? 0.85 : 0.55;
-            ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(ConsoleToggleButton.Opacity, targetOpacity, TimeSpan.FromSeconds(0.2)));
         }
+
+        #region 控制台展开按钮感应悬停与自动隐藏逻辑
+
+        private void ConsoleToggleHotZone_MouseEnter(object sender, MouseEventArgs e)
+        {
+            UpdateConsoleButtonOpacity(animate: true);
+        }
+
+        private void ConsoleToggleHotZone_MouseLeave(object sender, MouseEventArgs e)
+        {
+            Dispatcher.InvokeAsync(() => UpdateConsoleButtonOpacity(animate: true), DispatcherPriority.Input);
+        }
+
+        private void ConsoleToggleButton_MouseEnter(object sender, MouseEventArgs e)
+        {
+            UpdateConsoleButtonOpacity(animate: true);
+        }
+
+        private void ConsoleToggleButton_MouseLeave(object sender, MouseEventArgs e)
+        {
+            Dispatcher.InvokeAsync(() => UpdateConsoleButtonOpacity(animate: true), DispatcherPriority.Input);
+        }
+
+        /// <summary>
+        /// 更新控制台按钮不透明度：
+        /// 1. 控制面板展开时：常驻可见 (0.85，悬停 1.0)
+        /// 2. 控制面板未展开时：仅在鼠标移入附近感应区或按钮时浮现 (0.85/1.0)，离开后彻底隐藏 (0.0)
+        /// </summary>
+        private void UpdateConsoleButtonOpacity(bool animate = true)
+        {
+            if (ConsoleToggleButton == null) return;
+
+            var vm = this.DataContext as MainWindowViewModel;
+            bool isConsoleOpen = vm != null && vm.ConsoleStatus;
+
+            // 抽屉展开后关闭感应区鼠标捕获，避免遮挡抽屉内控件的交互
+            if (ConsoleToggleHotZone != null)
+            {
+                ConsoleToggleHotZone.IsHitTestVisible = !isConsoleOpen;
+            }
+
+            double targetOpacity;
+            if (isConsoleOpen)
+            {
+                // 控制面板展开时：按钮始终常驻可见，便于随时点击收起
+                targetOpacity = ConsoleToggleButton.IsMouseOver ? 1.0 : 0.85;
+            }
+            else
+            {
+                // 控制面板未展开时：仅在鼠标位于附近感应区或按钮自身时浮现，平时完全隐藏
+                bool isNearby = (ConsoleToggleHotZone != null && ConsoleToggleHotZone.IsMouseOver) ||
+                                ConsoleToggleButton.IsMouseOver;
+
+                if (isNearby)
+                {
+                    targetOpacity = ConsoleToggleButton.IsMouseOver ? 1.0 : 0.85;
+                }
+                else
+                {
+                    targetOpacity = 0.0;
+                }
+            }
+
+            if (animate)
+            {
+                var anim = new DoubleAnimation
+                {
+                    To = targetOpacity,
+                    Duration = TimeSpan.FromMilliseconds(targetOpacity > 0 ? 180 : 260),
+                    EasingFunction = new QuarticEase { EasingMode = EasingMode.EaseOut }
+                };
+                ConsoleToggleButton.BeginAnimation(UIElement.OpacityProperty, anim);
+            }
+            else
+            {
+                ConsoleToggleButton.BeginAnimation(UIElement.OpacityProperty, null);
+                ConsoleToggleButton.Opacity = targetOpacity;
+            }
+        }
+
+        #endregion
 
         private void ShowTitleBar()
         {
@@ -1149,6 +1227,7 @@ namespace camera.Views
                     if (vm != null && !vm.ConsoleStatus)
                     {
                         ConsoleDrawer.Visibility = Visibility.Collapsed;
+                        UpdateConsoleButtonOpacity(animate: true);
                     }
                 };
             }
@@ -1170,6 +1249,8 @@ namespace camera.Views
                 };
                 ConsoleToggleButtonTransform.BeginAnimation(TranslateTransform.XProperty, btnMoveAnim);
             }
+
+            UpdateConsoleButtonOpacity(animate: true);
         }
 
         private void PlaybackPlayer_MediaOpened(object sender, RoutedEventArgs e)

@@ -934,6 +934,18 @@
     IsEnabled="True"
     Style="{StaticResource ButtonDashedWarning}" />-->
 
+            <!--  控制台按钮唤出感应区 (未展开时鼠标靠近右侧中部平滑浮现，离开时自动隐藏)  -->
+            <Border
+                x:Name="ConsoleToggleHotZone"
+                Width="56"
+                Height="150"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Background="Transparent"
+                Panel.ZIndex="1009"
+                MouseEnter="ConsoleToggleHotZone_MouseEnter"
+                MouseLeave="ConsoleToggleHotZone_MouseLeave" />
+
             <ToggleButton
                 x:Name="ConsoleToggleButton"
                 Width="32"
@@ -946,8 +958,10 @@
                 hc:IconSwitchElement.GeometrySelected="{StaticResource RightGeometry}"
                 IsChecked="{Binding ConsoleStatus, Mode=TwoWay}"
                 Style="{StaticResource ToggleButtonIcon}"
-                Opacity="0.85"
+                Opacity="0"
                 Effect="{StaticResource EffectShadow2}"
+                MouseEnter="ConsoleToggleButton_MouseEnter"
+                MouseLeave="ConsoleToggleButton_MouseLeave"
                 ToolTip="展开/收起控制面板">
                 <ToggleButton.RenderTransform>
                     <TranslateTransform x:Name="ConsoleToggleButtonTransform" X="0" />
