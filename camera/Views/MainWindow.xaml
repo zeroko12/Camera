@@ -712,12 +712,12 @@
                 Margin="12"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
+                Panel.ZIndex="1005"
                 hc:IconSwitchElement.Geometry="{StaticResource RightGeometry}"
                 hc:IconSwitchElement.GeometrySelected="{StaticResource LeftGeometry}"
                 IsChecked="{Binding ConsoleStatus, Mode=TwoWay}"
-                Command="{Binding ShowConsole}"
                 Style="{StaticResource ToggleButtonIcon}"
-                Opacity="0.45"
+                Opacity="0.6"
                 ToolTip="展开/收起控制面板" />
 
             <ResizeGrip
@@ -817,6 +817,7 @@
             x:Name="MyTransitioningContentControl"
             Grid.RowSpan="2"
             Grid.Column="1"
+            Panel.ZIndex="1005"
             TransitionMode="Left2RightWithFade"
             Visibility="{c:Binding ConsoleStatus,
                                    FalseToVisibility=Hidden}">

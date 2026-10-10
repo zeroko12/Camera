@@ -768,7 +768,7 @@ namespace camera.Views
             IsMouseOverContentGrid = false;
             WindowResizeGrip.Opacity = 0.4;
             var vm = this.DataContext as MainWindowViewModel;
-            double targetOpacity = (vm != null && vm.ConsoleStatus) ? 0.85 : 0.4;
+            double targetOpacity = (vm != null && vm.ConsoleStatus) ? 0.85 : 0.55;
             ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(ConsoleToggleButton.Opacity, targetOpacity, TimeSpan.FromSeconds(0.2)));
         }
 
