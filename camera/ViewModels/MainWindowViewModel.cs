@@ -546,6 +546,24 @@ namespace camera.ViewModels
             SelectedCamera = null;
         }
 
+        private DelegateCommand _escapeKeyCommand;
+        public DelegateCommand EscapeKeyCommand =>
+            _escapeKeyCommand ?? (_escapeKeyCommand = new DelegateCommand(() =>
+            {
+                if (IsPlaybackMode)
+                {
+                    IsPlaybackMode = false;
+                }
+                else if (IsSingleCameraMode)
+                {
+                    ExecuteBackToGridCommand();
+                }
+                else if (ConsoleStatus)
+                {
+                    ConsoleStatus = false;
+                }
+            }));
+
         #region 主题切换 (Day/Night Theme)
 
         private bool _isDarkTheme;

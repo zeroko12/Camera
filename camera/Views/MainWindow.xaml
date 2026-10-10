@@ -49,6 +49,9 @@
             <i:InvokeCommandAction Command="{Binding ClosingCommand}" />
         </i:EventTrigger>
     </i:Interaction.Triggers>
+    <Window.InputBindings>
+        <KeyBinding Key="Escape" Command="{Binding EscapeKeyCommand}" />
+    </Window.InputBindings>
     <Window.Resources>
         <!-- 已删除 MatToImageSourceConverter 资源,见 ImageMatHelper.cs -->
         <Style x:Key="SlimScrollBarThumb" TargetType="{x:Type Thumb}">
@@ -149,10 +152,6 @@
         </Storyboard>
     </Window.Resources>
     <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition />
-            <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition />
@@ -597,7 +596,7 @@
                 </Grid.Style>
 
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="270" MinWidth="250" MaxWidth="320" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
@@ -607,96 +606,129 @@
                     Background="{DynamicResource RegionBrush}"
                     BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,1,0">
-                    <Grid Margin="10">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
+                    <hc:ScrollViewer
+                        Style="{StaticResource SlimScrollViewerStyle}"
+                        VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
 
-                        <!--  日期选择  -->
-                        <TextBlock
-                            Grid.Row="0"
-                            Margin="0,0,0,5"
-                            FontWeight="Bold"
-                            Foreground="{DynamicResource PrimaryTextBrush}"
-                            Text="选择回放日期" />
-                        <Calendar
-                            Grid.Row="1"
-                            Margin="0,0,0,15"
-                            HorizontalAlignment="Center"
-                            DisplayDateEnd="{x:Static System:DateTime.Today}"
-                            SelectedDate="{Binding PlaybackSelectedDate, Mode=TwoWay}" />
+                            <!--  左侧栏顶部快捷返回按钮  -->
+                            <Button
+                                Grid.Row="0"
+                                Height="32"
+                                Margin="0,0,0,12"
+                                HorizontalAlignment="Stretch"
+                                Command="{Binding BackToMonitoringCommand}"
+                                Style="{StaticResource ButtonDefault.Small}"
+                                ToolTip="快捷键: Esc">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <materialDesign:PackIcon
+                                        Width="16"
+                                        Height="16"
+                                        Margin="0,0,6,0"
+                                        VerticalAlignment="Center"
+                                        Kind="ArrowLeft" />
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontWeight="SemiBold"
+                                        Text="返回实时监控 (Esc)" />
+                                </StackPanel>
+                            </Button>
 
-                        <!--  通道选择  -->
-                        <TextBlock
-                            Grid.Row="2"
-                            Margin="0,0,0,5"
-                            FontWeight="Bold"
-                            Foreground="{DynamicResource PrimaryTextBrush}"
-                            Text="选择监控通道" />
-                        <ListBox
-                            Grid.Row="3"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            ItemsSource="{Binding Cameras}"
-                            SelectedItem="{Binding PlaybackSelectedCamera, Mode=TwoWay}"
-                            SelectionMode="Single">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock VerticalAlignment="Center">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                                        <Setter Property="Foreground" Value="Black" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                        <Run Text="{Binding Name, Mode=OneWay}" />
-                                        <Run Text=" (" />
-                                        <Run Text="{Binding CustomOverlayText, Mode=OneWay}">
-                                            <Run.Style>
-                                                <Style TargetType="Run">
-                                                    <Setter Property="Foreground" Value="Gray" />
+                            <!--  日期选择  -->
+                            <TextBlock
+                                Grid.Row="1"
+                                Margin="0,0,0,5"
+                                FontWeight="Bold"
+                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                Text="选择回放日期" />
+                            <Viewbox
+                                Grid.Row="2"
+                                Margin="0,0,0,14"
+                                HorizontalAlignment="Center"
+                                Stretch="Uniform"
+                                MaxWidth="250">
+                                <Calendar
+                                    DisplayDateEnd="{x:Static System:DateTime.Today}"
+                                    SelectedDate="{Binding PlaybackSelectedDate, Mode=TwoWay}" />
+                            </Viewbox>
+
+                            <!--  通道选择  -->
+                            <TextBlock
+                                Grid.Row="3"
+                                Margin="0,0,0,5"
+                                FontWeight="Bold"
+                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                Text="选择监控通道" />
+                            <ListBox
+                                Grid.Row="4"
+                                MinHeight="100"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                ItemsSource="{Binding Cameras}"
+                                SelectedItem="{Binding PlaybackSelectedCamera, Mode=TwoWay}"
+                                SelectionMode="Single">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                                            <Setter Property="Foreground" Value="#555555" />
+                                                            <Setter Property="Foreground" Value="Black" />
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
-                                            </Run.Style>
-                                        </Run>
-                                        <Run Text=")" />
-                                    </TextBlock>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                            <ListBox.ItemContainerStyle>
-                                <Style TargetType="ListBoxItem">
-                                    <Setter Property="Padding" Value="10,8" />
-                                    <Setter Property="Margin" Value="0,2" />
-                                    <Setter Property="BorderThickness" Value="1" />
-                                    <Setter Property="BorderBrush" Value="Transparent" />
-                                    <Setter Property="ToolTip">
-                                        <Setter.Value>
-                                            <StackPanel>
-                                                <TextBlock FontWeight="Bold" Text="{Binding Name, StringFormat='通道: {0}'}" />
-                                                <TextBlock Text="{Binding CustomOverlayText, StringFormat='自定义水印: {0}'}" />
-                                            </StackPanel>
-                                        </Setter.Value>
-                                    </Setter>
-                                    <Style.Triggers>
-                                        <Trigger Property="IsSelected" Value="True">
-                                            <Setter Property="Background" Value="{DynamicResource PrimaryBrush}" />
-                                        </Trigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </ListBox.ItemContainerStyle>
-                        </ListBox>
-                    </Grid>
+                                            </TextBlock.Style>
+                                            <Run Text="{Binding Name, Mode=OneWay}" />
+                                            <Run Text=" (" />
+                                            <Run Text="{Binding CustomOverlayText, Mode=OneWay}">
+                                                <Run.Style>
+                                                    <Style TargetType="Run">
+                                                        <Setter Property="Foreground" Value="Gray" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                                <Setter Property="Foreground" Value="#555555" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Run.Style>
+                                            </Run>
+                                            <Run Text=")" />
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="10,8" />
+                                        <Setter Property="Margin" Value="0,2" />
+                                        <Setter Property="BorderThickness" Value="1" />
+                                        <Setter Property="BorderBrush" Value="Transparent" />
+                                        <Setter Property="ToolTip">
+                                            <Setter.Value>
+                                                <StackPanel>
+                                                    <TextBlock FontWeight="Bold" Text="{Binding Name, StringFormat='通道: {0}'}" />
+                                                    <TextBlock Text="{Binding CustomOverlayText, StringFormat='自定义水印: {0}'}" />
+                                                </StackPanel>
+                                            </Setter.Value>
+                                        </Setter>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource PrimaryBrush}" />
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                            </ListBox>
+                        </Grid>
+                    </hc:ScrollViewer>
                 </Border>
 
                 <!--  右侧：播放画面与时间轴  -->
@@ -707,13 +739,27 @@
                         <RowDefinition Height="60" />
                     </Grid.RowDefinitions>
 
-                    <!--  视频播放区域  -->
+                    <!--  视频播放区域 (双击或右键均可快速退出回放)  -->
                     <Border
                         Grid.Row="0"
                         Margin="5"
                         Background="Black"
                         ClipToBounds="True"
                         CornerRadius="4">
+                        <Border.InputBindings>
+                            <MouseBinding Command="{Binding BackToMonitoringCommand}" MouseAction="LeftDoubleClick" />
+                        </Border.InputBindings>
+                        <Border.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem
+                                    Header="返回实时监控 (Esc)"
+                                    Command="{Binding BackToMonitoringCommand}">
+                                    <MenuItem.Icon>
+                                        <materialDesign:PackIcon Kind="ArrowLeft" Foreground="{DynamicResource PrimaryBrush}" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                            </ContextMenu>
+                        </Border.ContextMenu>
                         <MediaElement
                             x:Name="PlaybackPlayer"
                             LoadedBehavior="Manual"
@@ -841,16 +887,29 @@
                 <!--  悬浮返回按钮，叠加在画面右上角  -->
                 <Button
                     Grid.Column="1"
-                    MinHeight="28"
-                    Margin="10"
-                    Padding="10,6"
+                    MinHeight="30"
+                    Margin="12"
+                    Padding="12,6"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Panel.ZIndex="111"
                     Command="{Binding BackToMonitoringCommand}"
-                    Content="返回实时监控"
-                    Opacity="0.85"
-                    Style="{StaticResource ButtonPrimary.Small}" />
+                    Opacity="0.9"
+                    Style="{StaticResource ButtonPrimary.Small}"
+                    ToolTip="快捷键: Esc">
+                    <StackPanel Orientation="Horizontal">
+                        <materialDesign:PackIcon
+                            Width="16"
+                            Height="16"
+                            Margin="0,0,6,0"
+                            VerticalAlignment="Center"
+                            Kind="CloseCircleOutline" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="退出回放 (Esc)" />
+                    </StackPanel>
+                </Button>
             </Grid>
 
             <!--<materialDesign:PackIcon
@@ -992,18 +1051,23 @@
             <CheckBox VerticalAlignment="Center" IsChecked="{Binding isSave}" />
         </WrapPanel>-->
 
-        <hc:TransitioningContentControl
-            x:Name="MyTransitioningContentControl"
-            Grid.RowSpan="2"
-            Grid.Column="1"
+        <!--  右侧控制面板悬浮抽屉 (硬件加速平滑缓动，零视频重排与挤压)  -->
+        <Border
+            x:Name="ConsoleDrawer"
+            Grid.Row="1"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Stretch"
+            Margin="0,2,10,10"
             Panel.ZIndex="1005"
-            TransitionMode="Left2RightWithFade"
-            Visibility="{c:Binding ConsoleStatus,
-                                   FalseToVisibility=Collapsed}">
-            <Border Margin="10" Effect="{StaticResource EffectShadow3}">
-                <Border
-                    Width="180"
-                    CornerRadius="6">
+            Visibility="Collapsed"
+            Opacity="0"
+            Effect="{StaticResource EffectShadow3}">
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="ConsoleDrawerTransform" X="240" />
+            </Border.RenderTransform>
+            <Border
+                Width="190"
+                CornerRadius="6">
                     <Border.Style>
                         <Style TargetType="Border">
                             <!-- 默认白天浅色底色与边框 -->
@@ -1978,16 +2042,13 @@
                         </hc:ScrollViewer>
                     </Grid>
                 </Border>
-            </Border>
-        </hc:TransitioningContentControl>
+        </Border>
 
         <!--  窗口 8 向自由变形与缩放边缘控制层 (全向自由拖拽，杜绝比例锁定)  -->
         <Grid
             x:Name="WindowResizeBorderGrid"
             Grid.Row="0"
             Grid.RowSpan="2"
-            Grid.Column="0"
-            Grid.ColumnSpan="2"
             Panel.ZIndex="1000"
             IsHitTestVisible="{c:Binding 'WindowState != System.Windows.WindowState.Maximized'}">
             <!-- 四边 -->

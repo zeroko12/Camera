@@ -509,6 +509,22 @@ namespace camera.Views
                         _notifyIcon?.ShowBalloonTip(3000, title, message, isWarning ? System.Windows.Forms.ToolTipIcon.Warning : System.Windows.Forms.ToolTipIcon.Info);
                     });
                 };
+                // 初始化控制面板悬浮抽屉初始状态
+                if (ConsoleDrawer != null && ConsoleDrawerTransform != null)
+                {
+                    if (vm.ConsoleStatus)
+                    {
+                        ConsoleDrawer.Visibility = Visibility.Visible;
+                        ConsoleDrawerTransform.X = 0;
+                        ConsoleDrawer.Opacity = 1.0;
+                    }
+                    else
+                    {
+                        ConsoleDrawer.Visibility = Visibility.Collapsed;
+                        ConsoleDrawerTransform.X = 240;
+                        ConsoleDrawer.Opacity = 0.0;
+                    }
+                }
             }
 
             _playbackTimelineTimer = new DispatcherTimer();
@@ -1083,6 +1099,57 @@ namespace camera.Views
                     }
                 }
             }
+            else if (e.PropertyName == nameof(MainWindowViewModel.ConsoleStatus))
+            {
+                AnimateConsoleDrawer(vm.ConsoleStatus);
+            }
+        }
+
+        /// <summary>
+        /// 控制面板悬浮抽屉开合动画 (GPU 硬件加速 TranslateTransform + Opacity，Quartic 减速缓动)
+        /// 彻底消除传统布局挤压导致的视频渲染重排卡顿与掉帧
+        /// </summary>
+        private void AnimateConsoleDrawer(bool isOpen)
+        {
+            if (ConsoleDrawer == null || ConsoleDrawerTransform == null) return;
+
+            double targetX = isOpen ? 0 : 240;
+            double targetOpacity = isOpen ? 1.0 : 0.0;
+
+            if (isOpen)
+            {
+                ConsoleDrawer.Visibility = Visibility.Visible;
+            }
+
+            var moveAnim = new DoubleAnimation
+            {
+                To = targetX,
+                Duration = new Duration(TimeSpan.FromMilliseconds(isOpen ? 280 : 220)),
+                EasingFunction = isOpen
+                    ? new QuarticEase { EasingMode = EasingMode.EaseOut }
+                    : new QuarticEase { EasingMode = EasingMode.EaseIn }
+            };
+
+            var fadeAnim = new DoubleAnimation
+            {
+                To = targetOpacity,
+                Duration = new Duration(TimeSpan.FromMilliseconds(isOpen ? 280 : 220))
+            };
+
+            if (!isOpen)
+            {
+                fadeAnim.Completed += (s, ev) =>
+                {
+                    var vm = this.DataContext as MainWindowViewModel;
+                    if (vm != null && !vm.ConsoleStatus)
+                    {
+                        ConsoleDrawer.Visibility = Visibility.Collapsed;
+                    }
+                };
+            }
+
+            ConsoleDrawerTransform.BeginAnimation(TranslateTransform.XProperty, moveAnim);
+            ConsoleDrawer.BeginAnimation(UIElement.OpacityProperty, fadeAnim);
         }
 
         private void PlaybackPlayer_MediaOpened(object sender, RoutedEventArgs e)
