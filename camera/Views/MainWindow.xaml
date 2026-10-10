@@ -111,9 +111,13 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Margin="5">
-                                        <hc:ImageBlock
+                                    <Grid Margin="5" ClipToBounds="True">
+                                        <Border Background="#161616" CornerRadius="4" />
+                                        <Image
                                             Margin="0"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Stretch="{Binding VideoStretch, Mode=OneWay, FallbackValue=Uniform}"
                                             local:ImageMatHelper.SourceMat="{Binding Frame}"
                                             AllowDrop="True"
                                             Cursor="Hand"
@@ -121,7 +125,7 @@
                                             Drop="ImageBlock_Drop"
                                             MouseMove="ImageBlock_MouseMove"
                                             PreviewMouseLeftButtonDown="ImageBlock_PreviewMouseLeftButtonDown">
-                                            <hc:ImageBlock.ContextMenu>
+                                            <Image.ContextMenu>
                                                 <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <MenuItem
                                                         Header="开启摄像头"
@@ -156,15 +160,51 @@
                                                             <materialDesign:PackIcon Kind="FlipVertical" Foreground="#3498DB" />
                                                         </MenuItem.Icon>
                                                     </MenuItem>
+                                                    <Separator />
+                                                    <MenuItem Header="画面比例">
+                                                        <MenuItem.Icon>
+                                                            <materialDesign:PackIcon Kind="AspectRatio" Foreground="#3498DB" />
+                                                        </MenuItem.Icon>
+                                                        <MenuItem
+                                                            Header="等比适应 (不变形)"
+                                                            IsCheckable="True"
+                                                            IsChecked="{Binding IsStretchUniform, Mode=OneWay}"
+                                                            Command="{Binding SetStretchCommand}"
+                                                            CommandParameter="Uniform">
+                                                            <MenuItem.Icon>
+                                                                <materialDesign:PackIcon Kind="FitToPageOutline" Foreground="#2ECC71" />
+                                                            </MenuItem.Icon>
+                                                        </MenuItem>
+                                                        <MenuItem
+                                                            Header="等比裁剪 (填满不变形)"
+                                                            IsCheckable="True"
+                                                            IsChecked="{Binding IsStretchUniformToFill, Mode=OneWay}"
+                                                            Command="{Binding SetStretchCommand}"
+                                                            CommandParameter="UniformToFill">
+                                                            <MenuItem.Icon>
+                                                                <materialDesign:PackIcon Kind="Crop" Foreground="#E67E22" />
+                                                            </MenuItem.Icon>
+                                                        </MenuItem>
+                                                        <MenuItem
+                                                            Header="拉伸铺满 (可能变形)"
+                                                            IsCheckable="True"
+                                                            IsChecked="{Binding IsStretchFill, Mode=OneWay}"
+                                                            Command="{Binding SetStretchCommand}"
+                                                            CommandParameter="Fill">
+                                                            <MenuItem.Icon>
+                                                                <materialDesign:PackIcon Kind="ArrowExpandAll" Foreground="#E74C3C" />
+                                                            </MenuItem.Icon>
+                                                        </MenuItem>
+                                                    </MenuItem>
                                                 </ContextMenu>
-                                            </hc:ImageBlock.ContextMenu>
-                                            <hc:ImageBlock.InputBindings>
+                                            </Image.ContextMenu>
+                                            <Image.InputBindings>
                                                 <MouseBinding
                                                     Command="{Binding DataContext.ToggleMaximizeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                     CommandParameter="{Binding}"
                                                     MouseAction="LeftDoubleClick" />
-                                            </hc:ImageBlock.InputBindings>
-                                        </hc:ImageBlock>
+                                            </Image.InputBindings>
+                                        </Image>
                                         <!--  零 CPU 损耗 UI 水印叠加  -->
                                         <StackPanel
                                             Margin="15"
@@ -278,13 +318,14 @@
                                        FalseToVisibility=Collapsed}">
 
                 <!--  放大画面填满整个网格区域  -->
-                <hc:ImageBlock
+                <Image
                     Margin="5"
-                    HorizontalAlignment="Stretch"
-                    VerticalAlignment="Stretch"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Stretch="{Binding VideoStretch, Mode=OneWay, FallbackValue=Uniform}"
                     DataContext="{Binding SelectedCamera}"
                     local:ImageMatHelper.SourceMat="{Binding Frame}">
-                    <hc:ImageBlock.ContextMenu>
+                    <Image.ContextMenu>
                         <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                             <MenuItem
                                 Header="开启摄像头"
@@ -319,12 +360,48 @@
                                     <materialDesign:PackIcon Kind="FlipVertical" Foreground="#3498DB" />
                                 </MenuItem.Icon>
                             </MenuItem>
+                            <Separator />
+                            <MenuItem Header="画面比例">
+                                <MenuItem.Icon>
+                                    <materialDesign:PackIcon Kind="AspectRatio" Foreground="#3498DB" />
+                                </MenuItem.Icon>
+                                <MenuItem
+                                    Header="等比适应 (不变形)"
+                                    IsCheckable="True"
+                                    IsChecked="{Binding IsStretchUniform, Mode=OneWay}"
+                                    Command="{Binding SetStretchCommand}"
+                                    CommandParameter="Uniform">
+                                    <MenuItem.Icon>
+                                        <materialDesign:PackIcon Kind="FitToPageOutline" Foreground="#2ECC71" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem
+                                    Header="等比裁剪 (填满不变形)"
+                                    IsCheckable="True"
+                                    IsChecked="{Binding IsStretchUniformToFill, Mode=OneWay}"
+                                    Command="{Binding SetStretchCommand}"
+                                    CommandParameter="UniformToFill">
+                                    <MenuItem.Icon>
+                                        <materialDesign:PackIcon Kind="Crop" Foreground="#E67E22" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem
+                                    Header="拉伸铺满 (可能变形)"
+                                    IsCheckable="True"
+                                    IsChecked="{Binding IsStretchFill, Mode=OneWay}"
+                                    Command="{Binding SetStretchCommand}"
+                                    CommandParameter="Fill">
+                                    <MenuItem.Icon>
+                                        <materialDesign:PackIcon Kind="ArrowExpandAll" Foreground="#E74C3C" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                            </MenuItem>
                         </ContextMenu>
-                    </hc:ImageBlock.ContextMenu>
-                    <hc:ImageBlock.InputBindings>
+                    </Image.ContextMenu>
+                    <Image.InputBindings>
                         <MouseBinding Command="{Binding DataContext.BackToGridCommand, RelativeSource={RelativeSource AncestorType=Grid, AncestorLevel=2}}" MouseAction="LeftDoubleClick" />
-                    </hc:ImageBlock.InputBindings>
-                </hc:ImageBlock>
+                    </Image.InputBindings>
+                </Image>
 
                 <!--  悬浮返回按钮，叠加在画面左上角  -->
                 <Button
@@ -1198,6 +1275,35 @@
                                                                     IsChecked="{Binding IsFlipVertical, Mode=TwoWay}"
                                                                     ToolTip="垂直上下翻转" />
                                                             </StackPanel>
+
+                                                            <Separator Margin="0,2,0,5" />
+                                                            <TextBlock
+                                                                Margin="0,2,0,2"
+                                                                FontSize="11"
+                                                                Text="画面比例:" />
+                                                            <hc:ButtonGroup Margin="0,0,0,5">
+                                                                <RadioButton
+                                                                    Content="适应"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsStretchUniform, Mode=OneWay}"
+                                                                    Command="{Binding SetStretchCommand}"
+                                                                    CommandParameter="Uniform"
+                                                                    ToolTip="等比适应（不变形）" />
+                                                                <RadioButton
+                                                                    Content="裁剪"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsStretchUniformToFill, Mode=OneWay}"
+                                                                    Command="{Binding SetStretchCommand}"
+                                                                    CommandParameter="UniformToFill"
+                                                                    ToolTip="等比裁剪（填满不变形）" />
+                                                                <RadioButton
+                                                                    Content="拉伸"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsStretchFill, Mode=OneWay}"
+                                                                    Command="{Binding SetStretchCommand}"
+                                                                    CommandParameter="Fill"
+                                                                    ToolTip="拉伸铺满（可能变形）" />
+                                                            </hc:ButtonGroup>
                                                         </StackPanel>
                                                     </DataTemplate>
                                                 </ContentControl.ContentTemplate>

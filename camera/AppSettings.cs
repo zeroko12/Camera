@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 
@@ -119,6 +120,7 @@ namespace camera
             public bool?   IsManualDisabled  { get; set; }
             public bool?   IsFlipHorizontal  { get; set; }
             public bool?   IsFlipVertical    { get; set; }
+            public string? StretchMode       { get; set; }
         }
 
         /// <summary>

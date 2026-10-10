@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -303,6 +304,7 @@ namespace camera
                             case "ismanualdisabled": if (bool.TryParse(val, out bool dis)) camSetting.IsManualDisabled = dis; break;
                             case "isfliphorizontal": if (bool.TryParse(val, out bool fh)) camSetting.IsFlipHorizontal = fh; break;
                             case "isflipvertical": if (bool.TryParse(val, out bool fv)) camSetting.IsFlipVertical = fv; break;
+                            case "stretchmode": camSetting.StretchMode = val; break;
                         }
                     }
                 }

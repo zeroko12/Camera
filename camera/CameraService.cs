@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Media;
 using camera.Pipeline;
 using camera.Pipeline.Processors;
 using camera.Preview;
@@ -598,6 +599,32 @@ namespace camera
             }
         }
 
+        private Stretch _videoStretch = Stretch.Uniform;
+        public Stretch VideoStretch
+        {
+            get => _videoStretch;
+            set
+            {
+                if (SetProperty(ref _videoStretch, value))
+                {
+                    string key = GetConfigKey();
+                    if (!string.IsNullOrEmpty(key))
+                    {
+                        SaveCameraSetting(s => s.StretchMode = value.ToString());
+                        ConfigurationManager.SaveSetting($"Camera_{key}_StretchMode", value.ToString());
+                    }
+                    RaisePropertyChanged(nameof(IsStretchUniform));
+                    RaisePropertyChanged(nameof(IsStretchFill));
+                    RaisePropertyChanged(nameof(IsStretchUniformToFill));
+                    Logger.LogInfo($"[CameraService #{Index}] 设置画面比例模式: {value}");
+                }
+            }
+        }
+
+        public bool IsStretchUniform => VideoStretch == Stretch.Uniform;
+        public bool IsStretchFill => VideoStretch == Stretch.Fill;
+        public bool IsStretchUniformToFill => VideoStretch == Stretch.UniformToFill;
+
         private void SaveCameraSetting(Action<AppSettings.CameraSettings> mutator)
         {
             try
@@ -627,6 +654,7 @@ namespace camera
         public DelegateCommand DisableCameraCommand { get; private set; }
         public DelegateCommand ToggleFlipHorizontalCommand { get; private set; }
         public DelegateCommand ToggleFlipVerticalCommand { get; private set; }
+        public DelegateCommand<string> SetStretchCommand { get; private set; }
 
         public void EnableCamera()
         {
@@ -793,6 +821,13 @@ namespace camera
             DisableCameraCommand = new DelegateCommand(DisableCamera, () => !IsManualDisabled && IsConnected);
             ToggleFlipHorizontalCommand = new DelegateCommand(() => IsFlipHorizontal = !IsFlipHorizontal);
             ToggleFlipVerticalCommand = new DelegateCommand(() => IsFlipVertical = !IsFlipVertical);
+            SetStretchCommand = new DelegateCommand<string>(mode =>
+            {
+                if (Enum.TryParse<Stretch>(mode, true, out var s))
+                {
+                    VideoStretch = s;
+                }
+            });
             StorageManager.Instance.StorageWarning += OnStorageWarningForward;
             InitializeModules();
         }
@@ -1129,6 +1164,21 @@ namespace camera
                 if (_flipProcessor != null) _flipProcessor.FlipVertical = true;
                 RaisePropertyChanged(nameof(IsFlipVertical));
             }
+
+            // 读取已保存的画面比例拉伸设置（默认保持比例 Uniform）
+            string savedStretch = camConfig?.StretchMode ?? ConfigurationManager.GetSetting($"Camera_{configKey}_StretchMode");
+            if (!string.IsNullOrEmpty(savedStretch) && Enum.TryParse<Stretch>(savedStretch, true, out var st))
+            {
+                _videoStretch = st;
+            }
+            else
+            {
+                _videoStretch = Stretch.Uniform;
+            }
+            RaisePropertyChanged(nameof(VideoStretch));
+            RaisePropertyChanged(nameof(IsStretchUniform));
+            RaisePropertyChanged(nameof(IsStretchFill));
+            RaisePropertyChanged(nameof(IsStretchUniformToFill));
 
             // 将摄像头设置回最终确定的分辨率（避免保留探测循环最后一项的值）
             cap.Set(VideoCaptureProperties.FrameWidth, Width);

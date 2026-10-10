@@ -1826,6 +1826,16 @@ namespace camera.ViewModels
             {
                 cam.IsFlipVertical = true;
             }
+
+            string savedStretch = camConfig?.StretchMode ?? ConfigurationManager.GetSetting($"Camera_{configKey}_StretchMode");
+            if (!string.IsNullOrEmpty(savedStretch) && Enum.TryParse<System.Windows.Media.Stretch>(savedStretch, true, out var st))
+            {
+                cam.VideoStretch = st;
+            }
+            else
+            {
+                cam.VideoStretch = System.Windows.Media.Stretch.Uniform;
+            }
         }
 
         private void SaveSettings()
@@ -1869,6 +1879,7 @@ namespace camera.ViewModels
                     camSetting.IsManualDisabled = cam.IsManualDisabled;
                     camSetting.IsFlipHorizontal = cam.IsFlipHorizontal;
                     camSetting.IsFlipVertical = cam.IsFlipVertical;
+                    camSetting.StretchMode = cam.VideoStretch.ToString();
                 }
             });
             AppSettingsService.Instance.SaveSync();
@@ -1901,6 +1912,7 @@ namespace camera.ViewModels
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_IsManualDisabled", cam.IsManualDisabled.ToString());
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_IsFlipHorizontal", cam.IsFlipHorizontal.ToString());
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_IsFlipVertical", cam.IsFlipVertical.ToString());
+                 ConfigurationManager.SaveSetting($"Camera_{configKey}_StretchMode", cam.VideoStretch.ToString());
             }
         }
 
