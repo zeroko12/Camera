@@ -525,6 +525,11 @@ namespace camera.Views
                         ConsoleDrawer.Opacity = 0.0;
                     }
                 }
+
+                if (ConsoleToggleButtonTransform != null)
+                {
+                    ConsoleToggleButtonTransform.X = vm.ConsoleStatus ? -200 : 0;
+                }
             }
 
             _playbackTimelineTimer = new DispatcherTimer();
@@ -1150,6 +1155,21 @@ namespace camera.Views
 
             ConsoleDrawerTransform.BeginAnimation(TranslateTransform.XProperty, moveAnim);
             ConsoleDrawer.BeginAnimation(UIElement.OpacityProperty, fadeAnim);
+
+            // 同步平移控制面板切换按钮，使其展开时自然移至抽屉左侧，收起时平滑归位至右边缘
+            if (ConsoleToggleButtonTransform != null)
+            {
+                double targetBtnX = isOpen ? -200 : 0;
+                var btnMoveAnim = new DoubleAnimation
+                {
+                    To = targetBtnX,
+                    Duration = new Duration(TimeSpan.FromMilliseconds(isOpen ? 280 : 220)),
+                    EasingFunction = isOpen
+                        ? new QuarticEase { EasingMode = EasingMode.EaseOut }
+                        : new QuarticEase { EasingMode = EasingMode.EaseIn }
+                };
+                ConsoleToggleButtonTransform.BeginAnimation(TranslateTransform.XProperty, btnMoveAnim);
+            }
         }
 
         private void PlaybackPlayer_MediaOpened(object sender, RoutedEventArgs e)

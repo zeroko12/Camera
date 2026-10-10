@@ -941,13 +941,18 @@
                 Margin="12"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
-                Panel.ZIndex="1005"
-                hc:IconSwitchElement.Geometry="{StaticResource RightGeometry}"
-                hc:IconSwitchElement.GeometrySelected="{StaticResource LeftGeometry}"
+                Panel.ZIndex="1010"
+                hc:IconSwitchElement.Geometry="{StaticResource LeftGeometry}"
+                hc:IconSwitchElement.GeometrySelected="{StaticResource RightGeometry}"
                 IsChecked="{Binding ConsoleStatus, Mode=TwoWay}"
                 Style="{StaticResource ToggleButtonIcon}"
-                Opacity="0.6"
-                ToolTip="展开/收起控制面板" />
+                Opacity="0.85"
+                Effect="{StaticResource EffectShadow2}"
+                ToolTip="展开/收起控制面板">
+                <ToggleButton.RenderTransform>
+                    <TranslateTransform x:Name="ConsoleToggleButtonTransform" X="0" />
+                </ToggleButton.RenderTransform>
+            </ToggleButton>
 
             <ResizeGrip
                 x:Name="WindowResizeGrip"
