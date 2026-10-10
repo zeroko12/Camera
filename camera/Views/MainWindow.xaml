@@ -14,6 +14,8 @@
     Title="{Binding SystemTitle}"
     Width="900"
     Height="480"
+    MinWidth="450"
+    MinHeight="240"
     prism:ViewModelLocator.AutoWireViewModel="True"
     AllowsTransparency="True"
     Background="Transparent"
@@ -820,7 +822,7 @@
             Panel.ZIndex="1005"
             TransitionMode="Left2RightWithFade"
             Visibility="{c:Binding ConsoleStatus,
-                                   FalseToVisibility=Hidden}">
+                                   FalseToVisibility=Collapsed}">
             <Border Margin="10" Effect="{StaticResource EffectShadow3}">
                 <Border
                     Width="180"

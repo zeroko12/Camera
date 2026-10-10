@@ -25,12 +25,8 @@ namespace camera.Views
 
         private const double TitleBarHeight = 30; // 设置一个合适的标题栏高度
 
-        private double OriginWidth = 900; // 设置宽度
-        private double OriginHeight = 480; // 设置高度
-
         private double _normalWidth = 900;
         private double _normalHeight = 480;
-        private GridLength _normalRightColumnWidth = GridLength.Auto;
 
         public bool CanClickThrough { get; set; } = false;
 
@@ -795,12 +791,6 @@ namespace camera.Views
             {
                 if (this.WindowState == WindowState.Maximized)
                 {
-                    if (rootGrid.ColumnDefinitions.Count > 1)
-                    {
-                        _normalRightColumnWidth = rootGrid.ColumnDefinitions[1].Width;
-                        rootGrid.ColumnDefinitions[1].Width = new GridLength(0);
-                    }
-
                     this.ClearValue(WidthProperty);
                     this.ClearValue(HeightProperty);
 
@@ -819,11 +809,6 @@ namespace camera.Views
                 }
                 else if (this.WindowState == WindowState.Normal)
                 {
-                    if (rootGrid.ColumnDefinitions.Count > 1)
-                    {
-                        rootGrid.ColumnDefinitions[1].Width = _normalRightColumnWidth;
-                    }
-
                     this.Width = _normalWidth;
                     this.Height = _normalHeight;
 
