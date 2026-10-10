@@ -117,6 +117,8 @@ namespace camera
             public string? RecordResolution  { get; set; }
             public int?    RecordFps         { get; set; }
             public bool?   IsManualDisabled  { get; set; }
+            public bool?   IsFlipHorizontal  { get; set; }
+            public bool?   IsFlipVertical    { get; set; }
         }
 
         /// <summary>

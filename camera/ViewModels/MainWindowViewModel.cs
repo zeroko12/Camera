@@ -1806,6 +1806,26 @@ namespace camera.ViewModels
             {
                 cam.IsManualDisabled = true;
             }
+
+            bool? savedFlipH = camConfig?.IsFlipHorizontal;
+            if (!savedFlipH.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsFlipHorizontal"), out bool sfh))
+            {
+                savedFlipH = sfh;
+            }
+            if (savedFlipH == true)
+            {
+                cam.IsFlipHorizontal = true;
+            }
+
+            bool? savedFlipV = camConfig?.IsFlipVertical;
+            if (!savedFlipV.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsFlipVertical"), out bool sfv))
+            {
+                savedFlipV = sfv;
+            }
+            if (savedFlipV == true)
+            {
+                cam.IsFlipVertical = true;
+            }
         }
 
         private void SaveSettings()
@@ -1847,6 +1867,8 @@ namespace camera.ViewModels
                     camSetting.RecordResolution = cam.SelectedRecordResolution;
                     camSetting.RecordFps = cam.RecordFps;
                     camSetting.IsManualDisabled = cam.IsManualDisabled;
+                    camSetting.IsFlipHorizontal = cam.IsFlipHorizontal;
+                    camSetting.IsFlipVertical = cam.IsFlipVertical;
                 }
             });
             AppSettingsService.Instance.SaveSync();
@@ -1877,6 +1899,8 @@ namespace camera.ViewModels
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_RecordResolution", cam.SelectedRecordResolution ?? "与采集分辨率一致");
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_RecordFps", cam.RecordFps.ToString());
                  ConfigurationManager.SaveSetting($"Camera_{configKey}_IsManualDisabled", cam.IsManualDisabled.ToString());
+                 ConfigurationManager.SaveSetting($"Camera_{configKey}_IsFlipHorizontal", cam.IsFlipHorizontal.ToString());
+                 ConfigurationManager.SaveSetting($"Camera_{configKey}_IsFlipVertical", cam.IsFlipVertical.ToString());
             }
         }
 

@@ -65,6 +65,7 @@ namespace camera
         // 管道内特定的图像处理算子
         private ClaheProcessor _claheProcessor;
         private ContrastLuminanceProcessor _contrastLuminanceProcessor;
+        private FlipProcessor _flipProcessor;
         private TimestampOverlayProcessor _timestampOverlayProcessor;
         private RecordingProcessor _recordingProcessor;
 
@@ -551,6 +552,52 @@ namespace camera
             }
         }
 
+        private bool _isFlipHorizontal = false;
+        public bool IsFlipHorizontal
+        {
+            get => _isFlipHorizontal;
+            set
+            {
+                if (SetProperty(ref _isFlipHorizontal, value))
+                {
+                    if (_flipProcessor != null)
+                    {
+                        _flipProcessor.FlipHorizontal = value;
+                    }
+                    string key = GetConfigKey();
+                    if (!string.IsNullOrEmpty(key))
+                    {
+                        SaveCameraSetting(s => s.IsFlipHorizontal = value);
+                        ConfigurationManager.SaveSetting($"Camera_{key}_IsFlipHorizontal", value.ToString());
+                    }
+                    Logger.LogInfo($"[CameraService #{Index}] 设置水平翻转: {value}");
+                }
+            }
+        }
+
+        private bool _isFlipVertical = false;
+        public bool IsFlipVertical
+        {
+            get => _isFlipVertical;
+            set
+            {
+                if (SetProperty(ref _isFlipVertical, value))
+                {
+                    if (_flipProcessor != null)
+                    {
+                        _flipProcessor.FlipVertical = value;
+                    }
+                    string key = GetConfigKey();
+                    if (!string.IsNullOrEmpty(key))
+                    {
+                        SaveCameraSetting(s => s.IsFlipVertical = value);
+                        ConfigurationManager.SaveSetting($"Camera_{key}_IsFlipVertical", value.ToString());
+                    }
+                    Logger.LogInfo($"[CameraService #{Index}] 设置垂直翻转: {value}");
+                }
+            }
+        }
+
         private void SaveCameraSetting(Action<AppSettings.CameraSettings> mutator)
         {
             try
@@ -578,6 +625,8 @@ namespace camera
 
         public DelegateCommand EnableCameraCommand { get; private set; }
         public DelegateCommand DisableCameraCommand { get; private set; }
+        public DelegateCommand ToggleFlipHorizontalCommand { get; private set; }
+        public DelegateCommand ToggleFlipVerticalCommand { get; private set; }
 
         public void EnableCamera()
         {
@@ -742,6 +791,8 @@ namespace camera
         {
             EnableCameraCommand = new DelegateCommand(EnableCamera, () => IsManualDisabled || !IsConnected);
             DisableCameraCommand = new DelegateCommand(DisableCamera, () => !IsManualDisabled && IsConnected);
+            ToggleFlipHorizontalCommand = new DelegateCommand(() => IsFlipHorizontal = !IsFlipHorizontal);
+            ToggleFlipVerticalCommand = new DelegateCommand(() => IsFlipVertical = !IsFlipVertical);
             StorageManager.Instance.StorageWarning += OnStorageWarningForward;
             InitializeModules();
         }
@@ -756,12 +807,14 @@ namespace camera
             // 1. 初始化模块参数与流水线
             _claheProcessor = new ClaheProcessor { Enabled = IsGrayHomogenization, Order = 10 };
             _contrastLuminanceProcessor = new ContrastLuminanceProcessor { Contrast = Contrast, Luminance = Luminance, Order = 20 };
+            _flipProcessor = new FlipProcessor { FlipHorizontal = IsFlipHorizontal, FlipVertical = IsFlipVertical, Order = 25 };
             _timestampOverlayProcessor = new TimestampOverlayProcessor { Enabled = false, Order = 30 };
             _recordingProcessor = new RecordingProcessor { Enabled = true, Order = 90 };
 
             _pipeline = FramePipelineBuilder.Create()
                 .AddProcessor(_claheProcessor)
                 .AddProcessor(_contrastLuminanceProcessor)
+                .AddProcessor(_flipProcessor)
                 .AddProcessor(_timestampOverlayProcessor)
                 .AddProcessor(_recordingProcessor)
                 .Build();
@@ -1050,6 +1103,31 @@ namespace camera
             if (savedDisabled == true)
             {
                 _isManualDisabled = true;
+            }
+
+            // 读取已保存的翻转配置
+            bool? savedFlipH = camConfig?.IsFlipHorizontal;
+            if (!savedFlipH.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsFlipHorizontal"), out bool sfh))
+            {
+                savedFlipH = sfh;
+            }
+            if (savedFlipH == true)
+            {
+                _isFlipHorizontal = true;
+                if (_flipProcessor != null) _flipProcessor.FlipHorizontal = true;
+                RaisePropertyChanged(nameof(IsFlipHorizontal));
+            }
+
+            bool? savedFlipV = camConfig?.IsFlipVertical;
+            if (!savedFlipV.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsFlipVertical"), out bool sfv))
+            {
+                savedFlipV = sfv;
+            }
+            if (savedFlipV == true)
+            {
+                _isFlipVertical = true;
+                if (_flipProcessor != null) _flipProcessor.FlipVertical = true;
+                RaisePropertyChanged(nameof(IsFlipVertical));
             }
 
             // 将摄像头设置回最终确定的分辨率（避免保留探测循环最后一项的值）
@@ -1928,6 +2006,7 @@ namespace camera
                         }
                         _claheProcessor = null;
                         _contrastLuminanceProcessor = null;
+                        _flipProcessor = null;
                         _timestampOverlayProcessor = null;
                         _recordingProcessor = null;
 

@@ -139,6 +139,23 @@
                                                             <materialDesign:PackIcon Kind="StopCircle" Foreground="#E74C3C" />
                                                         </MenuItem.Icon>
                                                     </MenuItem>
+                                                    <Separator />
+                                                    <MenuItem
+                                                        Header="水平翻转"
+                                                        IsCheckable="True"
+                                                        IsChecked="{Binding IsFlipHorizontal, Mode=TwoWay}">
+                                                        <MenuItem.Icon>
+                                                            <materialDesign:PackIcon Kind="FlipHorizontal" Foreground="#3498DB" />
+                                                        </MenuItem.Icon>
+                                                    </MenuItem>
+                                                    <MenuItem
+                                                        Header="垂直翻转"
+                                                        IsCheckable="True"
+                                                        IsChecked="{Binding IsFlipVertical, Mode=TwoWay}">
+                                                        <MenuItem.Icon>
+                                                            <materialDesign:PackIcon Kind="FlipVertical" Foreground="#3498DB" />
+                                                        </MenuItem.Icon>
+                                                    </MenuItem>
                                                 </ContextMenu>
                                             </hc:ImageBlock.ContextMenu>
                                             <hc:ImageBlock.InputBindings>
@@ -283,6 +300,23 @@
                                 IsEnabled="{Binding IsConnected}">
                                 <MenuItem.Icon>
                                     <materialDesign:PackIcon Kind="StopCircle" Foreground="#E74C3C" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <Separator />
+                            <MenuItem
+                                Header="水平翻转"
+                                IsCheckable="True"
+                                IsChecked="{Binding IsFlipHorizontal, Mode=TwoWay}">
+                                <MenuItem.Icon>
+                                    <materialDesign:PackIcon Kind="FlipHorizontal" Foreground="#3498DB" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem
+                                Header="垂直翻转"
+                                IsCheckable="True"
+                                IsChecked="{Binding IsFlipVertical, Mode=TwoWay}">
+                                <MenuItem.Icon>
+                                    <materialDesign:PackIcon Kind="FlipVertical" Foreground="#3498DB" />
                                 </MenuItem.Icon>
                             </MenuItem>
                         </ContextMenu>
@@ -1144,6 +1178,25 @@
                                                                     FontSize="10"
                                                                     Foreground="Gray"
                                                                     Text="{Binding Height}" />
+                                                            </StackPanel>
+
+                                                            <Separator Margin="0,2,0,5" />
+                                                            <TextBlock
+                                                                Margin="0,2,0,2"
+                                                                FontSize="11"
+                                                                Text="画面翻转:" />
+                                                            <StackPanel Margin="0,2,0,5" Orientation="Horizontal">
+                                                                <CheckBox
+                                                                    Margin="0,0,10,0"
+                                                                    Content="水平"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsFlipHorizontal, Mode=TwoWay}"
+                                                                    ToolTip="水平镜像翻转" />
+                                                                <CheckBox
+                                                                    Content="垂直"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsFlipVertical, Mode=TwoWay}"
+                                                                    ToolTip="垂直上下翻转" />
                                                             </StackPanel>
                                                         </StackPanel>
                                                     </DataTemplate>

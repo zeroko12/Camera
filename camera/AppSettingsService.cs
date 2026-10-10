@@ -301,6 +301,8 @@ namespace camera
                             case "recordresolution": camSetting.RecordResolution = val; break;
                             case "recordfps": if (int.TryParse(val, out int rfps)) camSetting.RecordFps = rfps; break;
                             case "ismanualdisabled": if (bool.TryParse(val, out bool dis)) camSetting.IsManualDisabled = dis; break;
+                            case "isfliphorizontal": if (bool.TryParse(val, out bool fh)) camSetting.IsFlipHorizontal = fh; break;
+                            case "isflipvertical": if (bool.TryParse(val, out bool fv)) camSetting.IsFlipVertical = fv; break;
                         }
                     }
                 }
