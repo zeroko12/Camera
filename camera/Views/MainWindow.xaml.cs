@@ -757,21 +757,19 @@ namespace camera.Views
 
         private void MainContentGrid_MouseEnter(object sender, MouseEventArgs e)
         {
-            //Debug.WriteLine("鼠标进入摄像头显示");
-            ConsoleToggleButton.Visibility = Visibility.Visible;
-            ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.3)));
             IsMouseOverContentGrid = true;
             WindowResizeGrip.Opacity = 1.0;
+            ConsoleToggleButton.Visibility = Visibility.Visible;
+            ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(ConsoleToggleButton.Opacity, 1.0, TimeSpan.FromSeconds(0.2)));
         }
 
         private void MainContentGrid_MouseLeave(object sender, MouseEventArgs e)
         {
-            //Debug.WriteLine("鼠标离开摄像头显示");
-            var animation = new DoubleAnimation(1, 0, TimeSpan.FromSeconds(0.3));
-            animation.Completed += (s, _) => ConsoleToggleButton.Visibility = Visibility.Collapsed;
-            ConsoleToggleButton.BeginAnimation(OpacityProperty, animation);
             IsMouseOverContentGrid = false;
             WindowResizeGrip.Opacity = 0.4;
+            var vm = this.DataContext as MainWindowViewModel;
+            double targetOpacity = (vm != null && vm.ConsoleStatus) ? 0.85 : 0.4;
+            ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(ConsoleToggleButton.Opacity, targetOpacity, TimeSpan.FromSeconds(0.2)));
         }
 
         private void ShowTitleBar()

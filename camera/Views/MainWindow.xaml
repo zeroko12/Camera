@@ -707,15 +707,18 @@
 
             <ToggleButton
                 x:Name="ConsoleToggleButton"
-                Width="30"
-                Margin="20"
+                Width="32"
+                Height="32"
+                Margin="12"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
                 hc:IconSwitchElement.Geometry="{StaticResource RightGeometry}"
                 hc:IconSwitchElement.GeometrySelected="{StaticResource LeftGeometry}"
+                IsChecked="{Binding ConsoleStatus, Mode=TwoWay}"
                 Command="{Binding ShowConsole}"
                 Style="{StaticResource ToggleButtonIcon}"
-                Visibility="Collapsed" />
+                Opacity="0.45"
+                ToolTip="展开/收起控制面板" />
 
             <ResizeGrip
                 x:Name="WindowResizeGrip"
@@ -818,14 +821,344 @@
             Visibility="{c:Binding ConsoleStatus,
                                    FalseToVisibility=Hidden}">
             <Border Margin="10" Effect="{StaticResource EffectShadow3}">
-                <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
+                <Border
+                    Width="180"
+                    Background="{DynamicResource BackgroundBrush}"
+                    CornerRadius="6">
 
-                    <Grid Margin="5">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!--  顶部面板标题栏与快速收起按钮  -->
+                        <Grid Grid.Row="0" Margin="4,2,4,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <materialDesign:PackIcon
+                                    Width="16"
+                                    Height="16"
+                                    Margin="0,0,6,0"
+                                    VerticalAlignment="Center"
+                                    Foreground="{DynamicResource PrimaryBrush}"
+                                    Kind="TuneVariant" />
+                                <TextBlock
+                                    FontSize="12"
+                                    FontWeight="Bold"
+                                    Foreground="{DynamicResource PrimaryTextBrush}"
+                                    Text="控制面板"
+                                    VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Button
+                                Grid.Column="1"
+                                Width="22"
+                                Height="22"
+                                Padding="0"
+                                Command="{Binding ShowConsole}"
+                                Style="{StaticResource ButtonDefault.Small}"
+                                ToolTip="收起控制面板">
+                                <materialDesign:PackIcon
+                                    Width="13"
+                                    Height="13"
+                                    Kind="Close" />
+                            </Button>
+                        </Grid>
+
+                        <!--  主控制列表滚动区  -->
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                             <StackPanel>
+                                <!--  1. 通道配置 (核心第一优先级，默认展开)  -->
                                 <Expander
-                                    Width="125"
-                                    Margin="2"
+                                    Margin="0,0,0,4"
+                                    ExpandDirection="Down"
+                                    Header="通道配置"
+                                    IsExpanded="True">
+                                    <Border
+                                        Background="{DynamicResource RegionBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="0,1,1,1"
+                                        CornerRadius="0,4,4,0">
+                                        <StackPanel Margin="6">
+                                            <TextBlock
+                                                Margin="0,0,0,3"
+                                                FontSize="11"
+                                                FontWeight="SemiBold"
+                                                Text="选择通道:" />
+                                            <ComboBox
+                                                Margin="0,0,0,6"
+                                                DisplayMemberPath="Name"
+                                                ItemsSource="{Binding Cameras}"
+                                                SelectedItem="{Binding SelectedConfigCamera, Mode=TwoWay}"
+                                                Style="{StaticResource ComboBoxExtend}" />
+
+                                            <ContentControl Content="{Binding SelectedConfigCamera}">
+                                                <ContentControl.ContentTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel>
+                                                            <!--  通道在线状态与启停控制行  -->
+                                                            <Grid Margin="0,0,0,6">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <!-- 在线状态指示 -->
+                                                                <StackPanel
+                                                                    Orientation="Horizontal"
+                                                                    VerticalAlignment="Center"
+                                                                    Visibility="{c:Binding !IsManualDisabled,
+                                                                                           FalseToVisibility=Collapsed}">
+                                                                    <Ellipse
+                                                                        Width="7"
+                                                                        Height="7"
+                                                                        Margin="0,0,5,0"
+                                                                        VerticalAlignment="Center"
+                                                                        Fill="#4CAF50" />
+                                                                    <TextBlock
+                                                                        FontSize="11"
+                                                                        FontWeight="SemiBold"
+                                                                        Foreground="#2E7D32"
+                                                                        Text="通道运行中"
+                                                                        VerticalAlignment="Center" />
+                                                                </StackPanel>
+                                                                <!-- 已停用指示 -->
+                                                                <StackPanel
+                                                                    Orientation="Horizontal"
+                                                                    VerticalAlignment="Center"
+                                                                    Visibility="{c:Binding IsManualDisabled,
+                                                                                           FalseToVisibility=Collapsed}">
+                                                                    <Ellipse
+                                                                        Width="7"
+                                                                        Height="7"
+                                                                        Margin="0,0,5,0"
+                                                                        VerticalAlignment="Center"
+                                                                        Fill="#9E9E9E" />
+                                                                    <TextBlock
+                                                                        FontSize="11"
+                                                                        Foreground="Gray"
+                                                                        Text="通道已停用"
+                                                                        VerticalAlignment="Center" />
+                                                                </StackPanel>
+                                                                <!-- 启停操作按钮 -->
+                                                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                                    <Button
+                                                                        Height="22"
+                                                                        Padding="8,0"
+                                                                        Command="{Binding EnableCameraCommand}"
+                                                                        Content="开启"
+                                                                        FontSize="11"
+                                                                        Style="{StaticResource ButtonPrimary.Small}"
+                                                                        ToolTip="重新开启此摄像头采集"
+                                                                        Visibility="{c:Binding IsManualDisabled,
+                                                                                               FalseToVisibility=Collapsed}" />
+                                                                    <Button
+                                                                        Height="22"
+                                                                        Padding="8,0"
+                                                                        Command="{Binding DisableCameraCommand}"
+                                                                        Content="停用"
+                                                                        FontSize="11"
+                                                                        Style="{StaticResource ButtonDanger.Small}"
+                                                                        ToolTip="临时停用此摄像头，释放系统资源"
+                                                                        Visibility="{c:Binding !IsManualDisabled,
+                                                                                               FalseToVisibility=Collapsed}" />
+                                                                </StackPanel>
+                                                            </Grid>
+
+                                                            <Separator Margin="0,0,0,6" />
+
+                                                            <!--  画面比例：纵向排布核心要求  -->
+                                                            <TextBlock
+                                                                Margin="0,0,0,3"
+                                                                FontSize="11"
+                                                                FontWeight="SemiBold"
+                                                                Text="画面比例:" />
+                                                            <hc:ButtonGroup Margin="0,0,0,6" Orientation="Vertical">
+                                                                <RadioButton
+                                                                    Height="26"
+                                                                    HorizontalAlignment="Stretch"
+                                                                    HorizontalContentAlignment="Center"
+                                                                    Command="{Binding SetStretchCommand}"
+                                                                    CommandParameter="Uniform"
+                                                                    Content="等比适应 (不变形)"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsStretchUniform,
+                                                                                        Mode=OneWay}"
+                                                                    ToolTip="保持原始比例不变形，窗口空隙显示黑边" />
+                                                                <RadioButton
+                                                                    Height="26"
+                                                                    HorizontalAlignment="Stretch"
+                                                                    HorizontalContentAlignment="Center"
+                                                                    Command="{Binding SetStretchCommand}"
+                                                                    CommandParameter="UniformToFill"
+                                                                    Content="等比裁剪 (填满不变形)"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsStretchUniformToFill,
+                                                                                        Mode=OneWay}"
+                                                                    ToolTip="保持原始比例不变形，填满窗口并裁剪超出部分" />
+                                                                <RadioButton
+                                                                    Height="26"
+                                                                    HorizontalAlignment="Stretch"
+                                                                    HorizontalContentAlignment="Center"
+                                                                    Command="{Binding SetStretchCommand}"
+                                                                    CommandParameter="Fill"
+                                                                    Content="拉伸铺满 (可能变形)"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsStretchFill,
+                                                                                        Mode=OneWay}"
+                                                                    ToolTip="填满整个窗口，比例不一致时画面会被拉伸或压扁" />
+                                                            </hc:ButtonGroup>
+
+                                                            <Separator Margin="0,0,0,6" />
+
+                                                            <!--  画面翻转控制  -->
+                                                            <TextBlock
+                                                                Margin="0,0,0,3"
+                                                                FontSize="11"
+                                                                FontWeight="SemiBold"
+                                                                Text="画面翻转:" />
+                                                            <UniformGrid Columns="2" Margin="0,0,0,6">
+                                                                <CheckBox
+                                                                    Content="水平镜像"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsFlipHorizontal,
+                                                                                        Mode=TwoWay}"
+                                                                    ToolTip="左右水平镜像翻转" />
+                                                                <CheckBox
+                                                                    Content="垂直翻转"
+                                                                    FontSize="11"
+                                                                    IsChecked="{Binding IsFlipVertical,
+                                                                                        Mode=TwoWay}"
+                                                                    ToolTip="上下垂直翻转" />
+                                                            </UniformGrid>
+
+                                                            <Separator Margin="0,0,0,6" />
+
+                                                            <!--  物理接口规格与分辨率设置  -->
+                                                            <StackPanel Margin="0,0,0,4" Orientation="Vertical">
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="Gray"
+                                                                    Text="物理接口规格:" />
+                                                                <TextBlock
+                                                                    Margin="0,1,0,0"
+                                                                    FontSize="11"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="{DynamicResource PrimaryBrush}"
+                                                                    Text="{Binding UsbSpeedDescription}" />
+                                                            </StackPanel>
+
+                                                            <TextBlock
+                                                                Margin="0,2,0,2"
+                                                                FontSize="11"
+                                                                Text="采集分辨率:"
+                                                                ToolTip="摄像头硬件采集分辨率，决定源画面细节" />
+                                                            <ComboBox
+                                                                Margin="0,0,0,3"
+                                                                ItemsSource="{Binding SupportedResolutions}"
+                                                                SelectedItem="{Binding SelectedResolution,
+                                                                                       Mode=TwoWay}"
+                                                                Style="{StaticResource ComboBoxExtend}" />
+
+                                                            <StackPanel Margin="0,1,0,4" Orientation="Horizontal">
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="Gray"
+                                                                    Text="传输带宽: " />
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="DarkOrange"
+                                                                    Text="{Binding EstimatedMbPerSec,
+                                                                                   StringFormat={}{0:F1} MB/s}" />
+                                                            </StackPanel>
+
+                                                            <TextBlock
+                                                                Margin="0,2,0,2"
+                                                                FontSize="11"
+                                                                Text="录制分辨率:"
+                                                                ToolTip="写入视频文件的分辨率，低于采集分辨率时会自动缩放以节省空间" />
+                                                            <ComboBox
+                                                                Margin="0,0,0,4"
+                                                                ItemsSource="{Binding SupportedRecordResolutions}"
+                                                                SelectedItem="{Binding SelectedRecordResolution,
+                                                                                       Mode=TwoWay}"
+                                                                Style="{StaticResource ComboBoxExtend}" />
+
+                                                            <!--  录制帧率  -->
+                                                            <Grid Margin="0,2,0,1">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock
+                                                                    FontSize="11"
+                                                                    Text="录制帧率:"
+                                                                    VerticalAlignment="Center" />
+                                                                <TextBlock
+                                                                    Grid.Column="1"
+                                                                    FontSize="11"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="{DynamicResource PrimaryBrush}"
+                                                                    Text="{Binding RecordFps,
+                                                                                   StringFormat={}{0} FPS}" />
+                                                            </Grid>
+                                                            <Slider
+                                                                Margin="0,1,0,4"
+                                                                IsSnapToTickEnabled="True"
+                                                                Maximum="{Binding Fps}"
+                                                                Minimum="1"
+                                                                TickFrequency="1"
+                                                                ToolTip="录制帧率，越低越省CPU和存储空间"
+                                                                Value="{Binding RecordFps,
+                                                                                Mode=TwoWay}" />
+
+                                                            <StackPanel Margin="0,1,0,4" Orientation="Horizontal">
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="Gray"
+                                                                    Text="当前采集尺寸: " />
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="Gray"
+                                                                    Text="{Binding Width}" />
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="Gray"
+                                                                    Text=" × " />
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="Gray"
+                                                                    Text="{Binding Height}" />
+                                                            </StackPanel>
+
+                                                            <Separator Margin="0,2,0,5" />
+
+                                                            <!--  自定义水印  -->
+                                                            <TextBlock
+                                                                Margin="0,0,0,2"
+                                                                FontSize="11"
+                                                                Text="自定义水印:" />
+                                                            <TextBox
+                                                                Margin="0,0,0,2"
+                                                                hc:InfoElement.Placeholder="输入水印文字(实时生效)"
+                                                                infrastructure:InputBehavior.UpdateOnEnter="True"
+                                                                Style="{StaticResource TextBoxExtend}"
+                                                                Text="{Binding CustomOverlayText,
+                                                                               UpdateSourceTrigger=PropertyChanged}" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ContentControl.ContentTemplate>
+                                            </ContentControl>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+
+                                <!--  2. 录像相关 (录像开关、回放目录、压缩与存储保护)  -->
+                                <Expander
+                                    Margin="0,0,0,4"
                                     ExpandDirection="Down"
                                     Header="录像相关"
                                     IsExpanded="False">
@@ -834,128 +1167,182 @@
                                         BorderBrush="{DynamicResource BorderBrush}"
                                         BorderThickness="0,1,1,1"
                                         CornerRadius="0,4,4,0">
-                                        <StackPanel>
-                                            <hc:ButtonGroup Margin="5">
-                                                <RadioButton Content="录像关" IsChecked="{c:Binding !isSave}" />
-                                                <RadioButton Content="录像开" IsChecked="{c:Binding isSave}" />
+                                        <StackPanel Margin="6">
+                                            <!--  录像总开关  -->
+                                            <TextBlock
+                                                Margin="0,0,0,3"
+                                                FontSize="11"
+                                                FontWeight="SemiBold"
+                                                Text="录像状态:" />
+                                            <hc:ButtonGroup Margin="0,0,0,6">
+                                                <RadioButton
+                                                    Content="录像关"
+                                                    FontSize="11"
+                                                    IsChecked="{c:Binding !isSave}" />
+                                                <RadioButton
+                                                    Content="录像开"
+                                                    FontSize="11"
+                                                    IsChecked="{c:Binding isSave}" />
                                             </hc:ButtonGroup>
-                                            <UniformGrid Columns="2">
-                                                <TextBlock
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    FontSize="12"
-                                                    Foreground="Black">
-                                                    压缩程度
-                                                </TextBlock>
 
+                                            <!--  快捷操作按钮  -->
+                                            <UniformGrid Columns="2" Margin="0,0,0,6">
+                                                <Button
+                                                    Margin="0,0,2,0"
+                                                    Command="{Binding ViewPlayback}"
+                                                    Content="查看回放"
+                                                    FontSize="11"
+                                                    Style="{StaticResource ButtonDefault.Small}" />
+                                                <Button
+                                                    Margin="2,0,0,0"
+                                                    Command="{Binding OpenRecordingFolderCommand}"
+                                                    Content="录像目录"
+                                                    FontSize="11"
+                                                    Style="{StaticResource ButtonDefault.Small}"
+                                                    ToolTip="打开保存录像的文件夹" />
+                                            </UniformGrid>
+
+                                            <Separator Margin="0,0,0,6" />
+
+                                            <!--  压缩程度与保存间隔  -->
+                                            <Grid Margin="0,0,0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Text="压缩程度 (CRF)"
+                                                    ToolTip="数值越大压缩率越高，文件体积越小 (0-51)"
+                                                    VerticalAlignment="Center" />
                                                 <hc:NumericUpDown
                                                     Name="NumericUpDownCustomVerify"
-                                                    Margin="5"
+                                                    Grid.Column="1"
+                                                    Width="72"
+                                                    Height="24"
                                                     infrastructure:InputBehavior.UpdateOnEnter="True"
                                                     Maximum="51"
                                                     Minimum="0"
                                                     Style="{StaticResource NumericUpDownPlus}"
-                                                    ToolTip="当前值越大,保存文件越小"
+                                                    ToolTip="当前值越大，保存文件越小 (推荐 23-28)"
                                                     Value="{Binding Quality}" />
+                                            </Grid>
 
+                                            <Grid Margin="0,0,0,6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
                                                 <TextBlock
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="Black">
-                                                    保存间隔
-                                                </TextBlock>
-
+                                                    FontSize="11"
+                                                    Text="分段间隔 (分钟)"
+                                                    ToolTip="录像单文件切片保存间隔时间"
+                                                    VerticalAlignment="Center" />
                                                 <hc:NumericUpDown
-                                                    Margin="5"
+                                                    Grid.Column="1"
+                                                    Width="72"
+                                                    Height="24"
                                                     infrastructure:InputBehavior.UpdateOnEnter="True"
                                                     Maximum="99"
                                                     Minimum="1"
                                                     Style="{StaticResource NumericUpDownPlus}"
                                                     ToolTip="分钟"
                                                     Value="{Binding SaveInterval}" />
-                                            </UniformGrid>
-                                            <Separator />
-                                            <Button
-                                                Margin="5"
-                                                Command="{Binding ViewPlayback}"
-                                                Content="查看回放" />
-                                            <Button
-                                                Margin="5"
-                                                Command="{Binding OpenRecordingFolderCommand}"
-                                                Content="打开录像文件夹" />
+                                            </Grid>
 
-                                            <!--<hc:Divider HorizontalContentAlignment="Left" Content="空间策略" />-->
-                                            <Separator />
+                                            <Separator Margin="0,0,0,6" />
+
+                                            <!--  空间防护策略  -->
                                             <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11">
-                                                空间策略
-                                            </TextBlock>
-                                            <StackPanel Orientation="Horizontal" ToolTip="当前磁盘空间少于此MB数时">
+                                                Margin="0,0,0,3"
+                                                FontSize="11"
+                                                FontWeight="SemiBold"
+                                                Text="空间保护阈值:" />
+                                            <Grid Margin="0,0,0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
                                                 <TextBlock
-                                                    Margin="2,0,0,0"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="Black">
-                                                    少于
-                                                </TextBlock>
-
+                                                    Margin="0,0,3,0"
+                                                    FontSize="11"
+                                                    Text="余量 &lt;"
+                                                    VerticalAlignment="Center" />
                                                 <hc:NumericUpDown
-                                                    Width="78"
-                                                    Margin="2"
-                                                    infrastructure:InputBehavior.UpdateOnEnter="True"
+                                                    Grid.Column="1"
+                                                    Margin="0,0,3,0"
+                                                    Height="24"
                                                     infrastructure:InputBehavior.EnterCommand="{Binding ConfirmDiskThresholdCommand}"
+                                                    infrastructure:InputBehavior.UpdateOnEnter="True"
                                                     Maximum="1024000"
                                                     Minimum="1"
                                                     Style="{StaticResource NumericUpDownPlus}"
                                                     Value="{Binding DiskSpaceThresholdInput}" />
                                                 <TextBlock
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="Black">
-                                                    M
-                                                </TextBlock>
-                                            </StackPanel>
-                                            <Button
-                                                Margin="2"
-                                                Command="{Binding ConfirmDiskThresholdCommand}"
-                                                Content="确定"
-                                                Style="{StaticResource ButtonPrimary.Small}" />
+                                                    Grid.Column="2"
+                                                    Margin="0,0,4,0"
+                                                    FontSize="11"
+                                                    Text="MB"
+                                                    VerticalAlignment="Center" />
+                                                <Button
+                                                    Grid.Column="3"
+                                                    Height="24"
+                                                    Padding="6,0"
+                                                    Command="{Binding ConfirmDiskThresholdCommand}"
+                                                    Content="应用"
+                                                    FontSize="11"
+                                                    Style="{StaticResource ButtonPrimary.Small}" />
+                                            </Grid>
                                             <TextBlock
-                                                Margin="2,2,2,4"
-                                                HorizontalAlignment="Center"
+                                                Margin="0,0,0,5"
                                                 FontSize="10"
                                                 Foreground="{Binding DiskSpaceThresholdStatusColor}"
                                                 Text="{Binding DiskSpaceThresholdStatusText}"
                                                 TextWrapping="Wrap" />
-                                            <Separator />
-                                            <hc:ButtonGroup Margin="4" Orientation="Vertical">
-                                                <RadioButton Content="覆盖旧文件" IsChecked="{c:Binding OverwriteOldFiles}" />
-                                                <RadioButton Content="停止录像" IsChecked="{c:Binding !OverwriteOldFiles}" />
+
+                                            <hc:ButtonGroup Margin="0,0,0,2" Orientation="Vertical">
+                                                <RadioButton
+                                                    Height="24"
+                                                    Content="空间不足覆盖旧文件"
+                                                    FontSize="11"
+                                                    IsChecked="{c:Binding OverwriteOldFiles}" />
+                                                <RadioButton
+                                                    Height="24"
+                                                    Content="空间不足停止录像"
+                                                    FontSize="11"
+                                                    IsChecked="{c:Binding !OverwriteOldFiles}" />
                                             </hc:ButtonGroup>
                                         </StackPanel>
                                     </Border>
                                 </Expander>
 
+                                <!--  3. 显示增强 (置顶、透明度、夜间、亮度和对比度、预览优化)  -->
                                 <Expander
-                                    Width="125"
-                                    Margin="2"
+                                    Margin="0,0,0,4"
                                     ExpandDirection="Down"
-                                    Header="其他设置"
+                                    Header="显示增强"
                                     IsExpanded="False">
                                     <Border
                                         Background="{DynamicResource RegionBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
                                         BorderThickness="0,1,1,1"
                                         CornerRadius="0,4,4,0">
-                                        <StackPanel>
-                                            <UniformGrid Columns="2">
-
-                                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center">是否置顶</TextBlock>
+                                        <StackPanel Margin="6">
+                                            <!--  置顶与夜间模式  -->
+                                            <Grid Margin="0,0,0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Text="窗口始终置顶"
+                                                    VerticalAlignment="Center" />
                                                 <ToggleButton
                                                     x:Name="topMostButton"
-                                                    HorizontalAlignment="Center"
+                                                    Grid.Column="1"
                                                     Click="ToggleButton_Click"
                                                     IsChecked="True"
                                                     ToolTip="窗口置顶">
@@ -979,135 +1366,20 @@
                                                         </ResourceDictionary>
                                                     </ToggleButton.Resources>
                                                 </ToggleButton>
-                                            </UniformGrid>
-                                            <Separator />
-                                            <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11">
-                                                透明度调节
-                                            </TextBlock>
-                                            <Slider
-                                                x:Name="OpacitySlider"
-                                                hc:TipElement.Placement="Top"
-                                                hc:TipElement.Visibility="Visible"
-                                                IsSnapToTickEnabled="True"
-                                                Maximum="1.0"
-                                                Minimum="0.1"
-                                                TickFrequency="0.1"
-                                                ToolTip="窗口几乎透明--窗口不透明"
-                                                Value="{Binding Opacity}" />
-                                            <Separator />
-                                            <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11">
-                                                预览帧率
-                                            </TextBlock>
-                                            <Slider
-                                                hc:TipElement.Placement="Top"
-                                                hc:TipElement.Visibility="Visible"
-                                                IsSnapToTickEnabled="True"
-                                                Maximum="{Binding MaxFps}"
-                                                Minimum="1"
-                                                TickFrequency="1"
-                                                ToolTip="预览帧率，越低越省CPU"
-                                                Value="{Binding PreviewFps}" />
-                                            <Separator />
-                                            <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11"
-                                                ToolTip="仅影响UI预览画面的显示分辨率，不影响录像质量。降低可减少CPU占用。">
-                                                预览显示分辨率
-                                            </TextBlock>
-                                            <ComboBox
-                                                Margin="5"
-                                                ItemsSource="{Binding PreviewWidthOptions}"
-                                                SelectedItem="{Binding SelectedPreviewWidth, Mode=TwoWay}"
-                                                Style="{StaticResource ComboBoxExtend}"
-                                                ToolTip="UI预览画面的显示分辨率，不影响录像分辨率" />
-                                            <Separator />
-                                            <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11">
-                                                穿透模式快捷键
-                                            </TextBlock>
-                                            <hk:HotKeyBox
-                                                Width="120"
-                                                Height="14"
-                                                Margin="0,4,0,4"
-                                                ActualBackground="LightGray"
-                                                CurrentKeyA="0x0002"
-                                                CurrentKeyB="F1"
-                                                FontSize="8"
-                                                Handler="GlobalDo"
-                                                HoverBorderBrush="#326cf3"
-                                                HoverTextColor="#326cf3"
-                                                ToolTip="穿透模式快捷键" />
-                                            <Separator />
-                                            <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11">
-                                                亮度调节
-                                            </TextBlock>
-                                            <Slider
-                                                hc:TipElement.Placement="Top"
-                                                hc:TipElement.Visibility="Visible"
-                                                IsSnapToTickEnabled="True"
-                                                Maximum="100.0"
-                                                Minimum="-100.0"
-                                                TickFrequency="0.1"
-                                                ToolTip="亮度暗--亮"
-                                                Value="{Binding Luminance}" />
-                                            <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11">
-                                                对比度调节
-                                            </TextBlock>
-                                            <Slider
-                                                hc:TipElement.Placement="Top"
-                                                hc:TipElement.Visibility="Visible"
-                                                IsSnapToTickEnabled="True"
-                                                Maximum="4"
-                                                Minimum="0"
-                                                TickFrequency="0.1"
-                                                ToolTip="对比度低--高"
-                                                Value="{Binding Contrast}" />
-                                            <Button
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                Command="{Binding ResetImageSettings}"
-                                                Content="恢复默认"
-                                                FontSize="10"
-                                                Style="{StaticResource ButtonDashedWarning.Small}"
-                                                ToolTip="重置亮度为0、对比度为1.0" />
-                                            <Separator />
-                                            <TextBlock
-                                                Margin="4"
-                                                HorizontalAlignment="Center"
-                                                FontSize="11">
-                                                水印大小调节
-                                            </TextBlock>
-                                            <Slider
-                                                hc:TipElement.Placement="Top"
-                                                hc:TipElement.Visibility="Visible"
-                                                IsSnapToTickEnabled="True"
-                                                Maximum="2.0"
-                                                Minimum="0.3"
-                                                TickFrequency="0.1"
-                                                ToolTip="全局水印和时间戳大小比例"
-                                                Value="{Binding OverlayTextSize, Mode=TwoWay}" />
+                                            </Grid>
 
-                                            <Separator />
-                                            <UniformGrid Columns="2">
-
-                                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center">夜间处理</TextBlock>
+                                            <Grid Margin="0,0,0,6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Text="夜间暗光增强"
+                                                    ToolTip="自适应直方图均衡化(CLAHE)，大幅提升夜间或逆光暗部清晰度"
+                                                    VerticalAlignment="Center" />
                                                 <ToggleButton
-                                                    HorizontalAlignment="Center"
+                                                    Grid.Column="1"
                                                     IsChecked="{Binding IsGrayHomogenization}"
                                                     ToolTip="是否开启自适应直方图均衡化">
                                                     <materialDesign:PackIcon Kind="WhiteBalanceSunny" RenderTransformOrigin=".5,.5">
@@ -1130,211 +1402,264 @@
                                                         </ResourceDictionary>
                                                     </ToggleButton.Resources>
                                                 </ToggleButton>
-                                            </UniformGrid>
-                                        </StackPanel>
+                                            </Grid>
 
+                                            <Separator Margin="0,0,0,5" />
+
+                                            <!--  透明度调节  -->
+                                            <Grid Margin="0,0,0,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Text="窗口透明度"
+                                                    VerticalAlignment="Center" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    FontSize="10"
+                                                    Foreground="Gray"
+                                                    Text="{Binding Opacity,
+                                                                   StringFormat={}{0:P0}}" />
+                                            </Grid>
+                                            <Slider
+                                                x:Name="OpacitySlider"
+                                                Margin="0,0,0,4"
+                                                hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="1.0"
+                                                Minimum="0.1"
+                                                TickFrequency="0.05"
+                                                ToolTip="窗口几乎透明--窗口不透明"
+                                                Value="{Binding Opacity}" />
+
+                                            <Separator Margin="0,0,0,5" />
+
+                                            <!--  预览帧率与分辨率优化  -->
+                                            <Grid Margin="0,0,0,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Text="预览帧率上限"
+                                                    VerticalAlignment="Center" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    FontSize="10"
+                                                    Foreground="Gray"
+                                                    Text="{Binding PreviewFps,
+                                                                   StringFormat={}{0} FPS}" />
+                                            </Grid>
+                                            <Slider
+                                                Margin="0,0,0,4"
+                                                hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="{Binding MaxFps}"
+                                                Minimum="1"
+                                                TickFrequency="1"
+                                                ToolTip="预览帧率，越低越省CPU/GPU"
+                                                Value="{Binding PreviewFps}" />
+
+                                            <TextBlock
+                                                Margin="0,0,0,2"
+                                                FontSize="11"
+                                                Text="预览显示分辨率:"
+                                                ToolTip="仅影响UI预览画面的显示分辨率，不影响录像质量。降低可减少CPU占用。" />
+                                            <ComboBox
+                                                Margin="0,0,0,5"
+                                                ItemsSource="{Binding PreviewWidthOptions}"
+                                                SelectedItem="{Binding SelectedPreviewWidth,
+                                                                       Mode=TwoWay}"
+                                                Style="{StaticResource ComboBoxExtend}"
+                                                ToolTip="UI预览画面的显示分辨率，不影响录像分辨率" />
+
+                                            <TextBlock
+                                                Margin="0,0,0,2"
+                                                FontSize="11"
+                                                Text="穿透模式快捷键:" />
+                                            <hk:HotKeyBox
+                                                Height="22"
+                                                Margin="0,0,0,5"
+                                                ActualBackground="LightGray"
+                                                CurrentKeyA="0x0002"
+                                                CurrentKeyB="F1"
+                                                FontSize="10"
+                                                Handler="GlobalDo"
+                                                HoverBorderBrush="#326cf3"
+                                                HoverTextColor="#326cf3"
+                                                ToolTip="穿透模式快捷键" />
+
+                                            <Separator Margin="0,0,0,5" />
+
+                                            <!--  画面亮度与对比度  -->
+                                            <Grid Margin="0,0,0,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Text="亮度调节"
+                                                    VerticalAlignment="Center" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    FontSize="10"
+                                                    Foreground="Gray"
+                                                    Text="{Binding Luminance,
+                                                                   StringFormat={}{0:F0}}" />
+                                            </Grid>
+                                            <Slider
+                                                Margin="0,0,0,3"
+                                                hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="100.0"
+                                                Minimum="-100.0"
+                                                TickFrequency="1"
+                                                ToolTip="亮度暗--亮"
+                                                Value="{Binding Luminance}" />
+
+                                            <Grid Margin="0,0,0,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Text="对比度调节"
+                                                    VerticalAlignment="Center" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    FontSize="10"
+                                                    Foreground="Gray"
+                                                    Text="{Binding Contrast,
+                                                                   StringFormat={}{0:F1}}" />
+                                            </Grid>
+                                            <Slider
+                                                Margin="0,0,0,4"
+                                                hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="4"
+                                                Minimum="0"
+                                                TickFrequency="0.1"
+                                                ToolTip="对比度低--高"
+                                                Value="{Binding Contrast}" />
+
+                                            <Button
+                                                Height="22"
+                                                Margin="0,0,0,6"
+                                                Padding="6,0"
+                                                HorizontalAlignment="Right"
+                                                Command="{Binding ResetImageSettings}"
+                                                Content="重置亮度和对比度"
+                                                FontSize="10"
+                                                Style="{StaticResource ButtonDashedWarning.Small}"
+                                                ToolTip="重置亮度为0、对比度为1.0" />
+
+                                            <Separator Margin="0,0,0,5" />
+
+                                            <!--  水印大小调节  -->
+                                            <Grid Margin="0,0,0,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Text="水印大小调节"
+                                                    VerticalAlignment="Center" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    FontSize="10"
+                                                    Foreground="Gray"
+                                                    Text="{Binding OverlayTextSize,
+                                                                   StringFormat={}{0:F1}x}" />
+                                            </Grid>
+                                            <Slider
+                                                Margin="0,0,0,2"
+                                                hc:TipElement.Placement="Top"
+                                                hc:TipElement.Visibility="Visible"
+                                                IsSnapToTickEnabled="True"
+                                                Maximum="2.0"
+                                                Minimum="0.3"
+                                                TickFrequency="0.1"
+                                                ToolTip="全局水印和时间戳大小比例"
+                                                Value="{Binding OverlayTextSize,
+                                                                Mode=TwoWay}" />
+                                        </StackPanel>
                                     </Border>
                                 </Expander>
 
+                                <!--  4. 系统状态 (磁盘空间监控、编码硬件加速状态)  -->
                                 <Expander
-                                    Width="125"
-                                    Margin="2"
+                                    Margin="0,0,0,2"
                                     ExpandDirection="Down"
-                                    Header="通道配置"
+                                    Header="系统状态"
                                     IsExpanded="True">
                                     <Border
                                         Background="{DynamicResource RegionBrush}"
                                         BorderBrush="{DynamicResource BorderBrush}"
                                         BorderThickness="0,1,1,1"
                                         CornerRadius="0,4,4,0">
-                                        <StackPanel Margin="5">
+                                        <StackPanel Margin="6">
+                                            <!--  磁盘空间与预估时长  -->
                                             <TextBlock
-                                                Margin="0,2,0,2"
+                                                Margin="0,0,0,3"
                                                 FontSize="11"
-                                                Text="选择通道:" />
-                                            <ComboBox
-                                                Margin="0,0,0,5"
-                                                DisplayMemberPath="Name"
-                                                ItemsSource="{Binding Cameras}"
-                                                SelectedItem="{Binding SelectedConfigCamera, Mode=TwoWay}"
-                                                Style="{StaticResource ComboBoxExtend}" />
+                                                FontWeight="SemiBold"
+                                                Text="空间预计录制:" />
+                                            <Border
+                                                Margin="0,0,0,6"
+                                                Padding="6,4"
+                                                Background="#FAFAFA"
+                                                BorderBrush="#E0E0E0"
+                                                BorderThickness="1"
+                                                CornerRadius="4">
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Foreground="{Binding DiskSpaceWarningColor}"
+                                                    LineHeight="16"
+                                                    Text="{Binding DiskSpaceWarningText}"
+                                                    TextWrapping="Wrap" />
+                                            </Border>
 
-                                            <ContentControl Content="{Binding SelectedConfigCamera}">
-                                                <ContentControl.ContentTemplate>
-                                                    <DataTemplate>
-                                                        <StackPanel>
-                                                            <Separator Margin="0,2,0,5" />
+                                            <Separator Margin="0,0,0,5" />
 
-                                                            <TextBlock
-                                                                Margin="0,2,0,2"
-                                                                FontSize="11"
-                                                                Text="自定义水印:" />
-                                                            <TextBox
-                                                                Margin="0,0,0,5"
-                                                                hc:InfoElement.Placeholder="输入水印文字(实时生效)"
-                                                                infrastructure:InputBehavior.UpdateOnEnter="True"
-                                                                Style="{StaticResource TextBoxExtend}"
-                                                                Text="{Binding CustomOverlayText, UpdateSourceTrigger=PropertyChanged}" />
-
-                                                            <Separator Margin="0,2,0,5" />
-
-                                                            <StackPanel Margin="0,2,0,4" Orientation="Vertical">
-                                                                <TextBlock FontSize="11" Foreground="Gray" Text="物理接口规格:" />
-                                                                <TextBlock
-                                                                    Margin="0,1,0,0"
-                                                                    FontSize="11"
-                                                                    FontWeight="SemiBold"
-                                                                    Foreground="{DynamicResource PrimaryBrush}"
-                                                                    Text="{Binding UsbSpeedDescription}" />
-                                                            </StackPanel>
-
-                                                            <TextBlock
-                                                                Margin="0,2,0,2"
-                                                                FontSize="11"
-                                                                Text="采集分辨率:"
-                                                                ToolTip="摄像头实际采集的分辨率，影响录像质量" />
-                                                            <ComboBox
-                                                                Margin="0,0,0,3"
-                                                                ItemsSource="{Binding SupportedResolutions}"
-                                                                SelectedItem="{Binding SelectedResolution, Mode=TwoWay}"
-                                                                Style="{StaticResource ComboBoxExtend}" />
-
-                                                            <StackPanel Margin="0,2,0,5" Orientation="Vertical">
-                                                                <TextBlock FontSize="10" Foreground="Gray" Text="估算传输数据流:" />
-                                                                <TextBlock
-                                                                    Margin="0,1,0,0"
-                                                                    FontSize="11"
-                                                                    FontWeight="SemiBold"
-                                                                    Foreground="DarkOrange"
-                                                                    Text="{Binding EstimatedMbPerSec, StringFormat={}{0:F1} MB/s}" />
-                                                            </StackPanel>
-
-                                                            <TextBlock
-                                                                Margin="0,2,0,2"
-                                                                FontSize="11"
-                                                                Text="录制分辨率:"
-                                                                ToolTip="保存的视频文件分辨率，低于采集分辨率时会自动缩放以节省空间" />
-                                                            <ComboBox
-                                                                Margin="0,0,0,3"
-                                                                ItemsSource="{Binding SupportedRecordResolutions}"
-                                                                SelectedItem="{Binding SelectedRecordResolution, Mode=TwoWay}"
-                                                                Style="{StaticResource ComboBoxExtend}" />
-
-                                                            <Separator Margin="0,2,0,5" />
-
-                                                            <StackPanel Margin="0,2,0,2" Orientation="Horizontal">
-                                                                <TextBlock FontSize="11" Text="录制帧率:" />
-                                                                <TextBlock
-                                                                    Margin="5,0,0,0"
-                                                                    FontSize="11"
-                                                                    Foreground="{DynamicResource PrimaryBrush}"
-                                                                    Text="{Binding RecordFps}" />
-                                                            </StackPanel>
-                                                            <Slider
-                                                                IsSnapToTickEnabled="True"
-                                                                Maximum="{Binding Fps}"
-                                                                Minimum="1"
-                                                                TickFrequency="1"
-                                                                ToolTip="录制帧率，越低越省CPU和存储空间"
-                                                                Value="{Binding RecordFps, Mode=TwoWay}" />
-
-                                                            <TextBlock
-                                                                FontSize="10"
-                                                                Foreground="Gray"
-                                                                Text="当前采集:" />
-                                                            <StackPanel Margin="0,0,0,5" Orientation="Horizontal">
-                                                                <TextBlock
-                                                                    FontSize="10"
-                                                                    Foreground="Gray"
-                                                                    Text="{Binding Width}" />
-                                                                <TextBlock
-                                                                    FontSize="10"
-                                                                    Foreground="Gray"
-                                                                    Text=" x " />
-                                                                <TextBlock
-                                                                    FontSize="10"
-                                                                    Foreground="Gray"
-                                                                    Text="{Binding Height}" />
-                                                            </StackPanel>
-
-                                                            <Separator Margin="0,2,0,5" />
-                                                            <TextBlock
-                                                                Margin="0,2,0,2"
-                                                                FontSize="11"
-                                                                Text="画面翻转:" />
-                                                            <StackPanel Margin="0,2,0,5" Orientation="Horizontal">
-                                                                <CheckBox
-                                                                    Margin="0,0,10,0"
-                                                                    Content="水平"
-                                                                    FontSize="11"
-                                                                    IsChecked="{Binding IsFlipHorizontal, Mode=TwoWay}"
-                                                                    ToolTip="水平镜像翻转" />
-                                                                <CheckBox
-                                                                    Content="垂直"
-                                                                    FontSize="11"
-                                                                    IsChecked="{Binding IsFlipVertical, Mode=TwoWay}"
-                                                                    ToolTip="垂直上下翻转" />
-                                                            </StackPanel>
-
-                                                            <Separator Margin="0,2,0,5" />
-                                                            <TextBlock
-                                                                Margin="0,2,0,2"
-                                                                FontSize="11"
-                                                                Text="画面比例:" />
-                                                            <hc:ButtonGroup Margin="0,0,0,5">
-                                                                <RadioButton
-                                                                    Content="适应"
-                                                                    FontSize="11"
-                                                                    IsChecked="{Binding IsStretchUniform, Mode=OneWay}"
-                                                                    Command="{Binding SetStretchCommand}"
-                                                                    CommandParameter="Uniform"
-                                                                    ToolTip="等比适应（不变形）" />
-                                                                <RadioButton
-                                                                    Content="裁剪"
-                                                                    FontSize="11"
-                                                                    IsChecked="{Binding IsStretchUniformToFill, Mode=OneWay}"
-                                                                    Command="{Binding SetStretchCommand}"
-                                                                    CommandParameter="UniformToFill"
-                                                                    ToolTip="等比裁剪（填满不变形）" />
-                                                                <RadioButton
-                                                                    Content="拉伸"
-                                                                    FontSize="11"
-                                                                    IsChecked="{Binding IsStretchFill, Mode=OneWay}"
-                                                                    Command="{Binding SetStretchCommand}"
-                                                                    CommandParameter="Fill"
-                                                                    ToolTip="拉伸铺满（可能变形）" />
-                                                            </hc:ButtonGroup>
-                                                        </StackPanel>
-                                                    </DataTemplate>
-                                                </ContentControl.ContentTemplate>
-                                            </ContentControl>
-
-                                            <!--  编码器状态指示与设置  -->
-                                            <Separator Margin="0,2,0,5" />
+                                            <!--  编码硬件加速状态指示与强制CPU选项  -->
                                             <TextBlock
-                                                Margin="0,2,0,2"
+                                                Margin="0,0,0,3"
                                                 FontSize="11"
                                                 FontWeight="SemiBold"
                                                 Text="编码加速:" />
                                             <CheckBox
-                                                Margin="0,2,0,4"
+                                                Margin="0,0,0,4"
                                                 Content="仅使用 CPU 编码"
+                                                FontSize="11"
                                                 IsChecked="{Binding ForceCpuEncoding}"
                                                 ToolTip="默认优先使用 GPU 硬件加速(NVENC/QSV/AMF)；勾选后强制使用 CPU 软编(libx264)" />
+
+                                            <!--  GPU 硬件加速徽章  -->
                                             <Border
-                                                Margin="0,2,0,2"
-                                                Padding="5"
+                                                Margin="0,1,0,2"
+                                                Padding="5,4"
                                                 Background="#E8F5E9"
                                                 BorderBrush="#81C784"
                                                 BorderThickness="1"
                                                 CornerRadius="4"
-                                                ToolTip="{Binding SelectedConfigCamera.ActiveCodec, StringFormat='当前活动编码器: {0}'}"
+                                                ToolTip="{Binding SelectedConfigCamera.ActiveCodec,
+                                                                  StringFormat='当前活动编码器: {0}'}"
                                                 Visibility="{c:Binding IsGpuEncodingActive,
                                                                        FalseToVisibility=Collapsed}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <Ellipse
-                                                        Width="8"
-                                                        Height="8"
+                                                        Width="7"
+                                                        Height="7"
                                                         Margin="0,0,5,0"
                                                         VerticalAlignment="Center"
                                                         Fill="#4CAF50" />
@@ -1345,20 +1670,23 @@
                                                         Text="GPU 硬件加速" />
                                                 </StackPanel>
                                             </Border>
+
+                                            <!--  CPU 软编徽章  -->
                                             <Border
-                                                Margin="0,2,0,2"
-                                                Padding="5"
+                                                Margin="0,1,0,2"
+                                                Padding="5,4"
                                                 Background="#FFFDE7"
                                                 BorderBrush="#FFF176"
                                                 BorderThickness="1"
                                                 CornerRadius="4"
-                                                ToolTip="{Binding SelectedConfigCamera.ActiveCodec, StringFormat='当前活动编码器: {0}'}"
+                                                ToolTip="{Binding SelectedConfigCamera.ActiveCodec,
+                                                                  StringFormat='当前活动编码器: {0}'}"
                                                 Visibility="{c:Binding IsCpuEncodingActive,
                                                                        FalseToVisibility=Collapsed}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <Ellipse
-                                                        Width="8"
-                                                        Height="8"
+                                                        Width="7"
+                                                        Height="7"
                                                         Margin="0,0,5,0"
                                                         VerticalAlignment="Center"
                                                         Fill="#FBC02D" />
@@ -1369,9 +1697,11 @@
                                                         Text="CPU 软件编码" />
                                                 </StackPanel>
                                             </Border>
+
+                                            <!--  未录制徽章  -->
                                             <Border
-                                                Margin="0,2,0,2"
-                                                Padding="5"
+                                                Margin="0,1,0,2"
+                                                Padding="5,4"
                                                 Background="#ECEFF1"
                                                 BorderBrush="#B0BEC5"
                                                 BorderThickness="1"
@@ -1380,8 +1710,8 @@
                                                                        FalseToVisibility=Collapsed}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <Ellipse
-                                                        Width="8"
-                                                        Height="8"
+                                                        Width="7"
+                                                        Height="7"
                                                         Margin="0,0,5,0"
                                                         VerticalAlignment="Center"
                                                         Fill="#78909C" />
@@ -1395,64 +1725,9 @@
                                         </StackPanel>
                                     </Border>
                                 </Expander>
-
-                                <Expander
-                                    Width="125"
-                                    Margin="2"
-                                    ExpandDirection="Down"
-                                    Header="系统状态"
-                                    IsExpanded="True">
-                                    <Border
-                                        Background="{DynamicResource RegionBrush}"
-                                        BorderBrush="{DynamicResource BorderBrush}"
-                                        BorderThickness="0,1,1,1"
-                                        CornerRadius="0,4,4,0">
-                                        <StackPanel Margin="5">
-                                            <TextBlock
-                                                Margin="0,2,0,2"
-                                                FontSize="11"
-                                                FontWeight="Bold"
-                                                Text="空间预计录制" />
-                                            <TextBlock
-                                                FontSize="11"
-                                                Foreground="{Binding DiskSpaceWarningColor}"
-                                                Text="{Binding DiskSpaceWarningText}"
-                                                TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </Border>
-                                </Expander>
                             </StackPanel>
-
-
-
-
-
-
-
-
                         </ScrollViewer>
-
                     </Grid>
-
-                    <!--<TabControl TabStripPlacement="Left">
-                        <TabControl.Resources>
-                            <ResourceDictionary>
-                                <ResourceDictionary.MergedDictionaries>
-                                    <materialDesign:BundledTheme
-                                        BaseTheme="Light"
-                                        PrimaryColor="DeepPurple"
-                                        SecondaryColor="Lime" />
-                                    <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign2.Defaults.xaml" />
-                                </ResourceDictionary.MergedDictionaries>
-                            </ResourceDictionary>
-                        </TabControl.Resources>
-                        <TabItem Header="TAB 1">
-                            <TextBlock Margin="8" Text="Left placement" />
-                        </TabItem>
-                        <TabItem Header="TAB 2">
-                            <TextBlock Margin="8" Text="Left placement" />
-                        </TabItem>
-                    </TabControl>-->
                 </Border>
             </Border>
         </hc:TransitioningContentControl>
