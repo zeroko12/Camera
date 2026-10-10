@@ -172,13 +172,15 @@
                 Opacity="{Binding Opacity}">
                 <Border.Style>
                     <Style TargetType="Border">
-                        <!-- 默认白天浅色边框：清晰优雅的浅灰边框 -->
+                        <!-- 默认白天浅色边框与底色 -->
                         <Setter Property="BorderBrush" Value="#D0D7DE" />
                         <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="Background" Value="#F3F4F6" />
                         <Style.Triggers>
-                            <!-- 夜间深色边框：质感深灰/暗色金属边框 -->
+                            <!-- 夜间深色边框与纯正深邃黑底 -->
                             <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
-                                <Setter Property="BorderBrush" Value="#4B4B52" />
+                                <Setter Property="BorderBrush" Value="#2D2D32" />
+                                <Setter Property="Background" Value="#121214" />
                             </DataTrigger>
                             <!-- 告警状态：红色发光加粗边框 -->
                             <DataTrigger Binding="{Binding HasActiveAlert}" Value="True">
@@ -188,7 +190,17 @@
                         </Style.Triggers>
                     </Style>
                 </Border.Style>
-                <Border Background="{DynamicResource BackgroundBrush}" CornerRadius="5">
+                <Border CornerRadius="5">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="#F3F4F6" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                    <Setter Property="Background" Value="#121214" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <Grid>
                         <!-- 告警横幅：磁盘低于安全阈值停止录像或摄像头物理断开时红屏提示 -->
                         <Border
@@ -448,11 +460,20 @@
             <Grid
                 x:Name="MaximizedView"
                 Panel.ZIndex="100"
-                Background="{DynamicResource BackgroundBrush}"
                 ClipToBounds="True"
                 PreviewMouseLeftButtonDown="MaximizedView_PreviewMouseLeftButtonDown"
                 Visibility="{c:Binding IsSingleCameraMode,
                                        FalseToVisibility=Collapsed}">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Background" Value="#F3F4F6" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                <Setter Property="Background" Value="#0A0A0C" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
                 <Grid.InputBindings>
                     <MouseBinding Command="{Binding BackToGridCommand}" MouseAction="LeftDoubleClick" />
                 </Grid.InputBindings>
@@ -561,10 +582,19 @@
             <Grid
                 x:Name="PlaybackView"
                 Panel.ZIndex="110"
-                Background="{DynamicResource BackgroundBrush}"
                 ClipToBounds="True"
                 Visibility="{c:Binding IsPlaybackMode,
                                        FalseToVisibility=Collapsed}">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Background" Value="#F3F4F6" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                <Setter Property="Background" Value="#121214" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
 
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="220" />
@@ -973,17 +1003,18 @@
             <Border Margin="10" Effect="{StaticResource EffectShadow3}">
                 <Border
                     Width="180"
-                    Background="{DynamicResource BackgroundBrush}"
                     CornerRadius="6">
                     <Border.Style>
                         <Style TargetType="Border">
-                            <!-- 默认白天浅色边框 -->
+                            <!-- 默认白天浅色底色与边框 -->
+                            <Setter Property="Background" Value="#FFFFFF" />
                             <Setter Property="BorderBrush" Value="#D0D7DE" />
                             <Setter Property="BorderThickness" Value="1" />
                             <Style.Triggers>
-                                <!-- 夜间深色边框 -->
+                                <!-- 夜间深色底色与边框 -->
                                 <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
-                                    <Setter Property="BorderBrush" Value="#4B4B52" />
+                                    <Setter Property="Background" Value="#1E1E22" />
+                                    <Setter Property="BorderBrush" Value="#3F3F46" />
                                 </DataTrigger>
                                 <!-- 告警状态：红色发光边框 -->
                                 <DataTrigger Binding="{Binding HasActiveAlert}" Value="True">

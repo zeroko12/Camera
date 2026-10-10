@@ -11,6 +11,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Threading;
 using camera.Recording;
 using camera.Encoding;
@@ -589,9 +590,25 @@ namespace camera.ViewModels
                             appResources.MergedDictionaries[0] = skin;
                         }
 
+                        // 纠正 HandyControl 皮肤中 BackgroundBrush 始终为 #EEEEEE (浅灰白) 的库设计缺陷:
+                        // 在深色模式下显式赋予纯正深邃黑底，白天浅色赋予现代清爽浅色
+                        var bgBrush = new SolidColorBrush(isDark ? Color.FromRgb(0x12, 0x12, 0x14) : Color.FromRgb(0xF3, 0xF4, 0xF6));
+                        var regionBrush = new SolidColorBrush(isDark ? Color.FromRgb(0x1C, 0x1C, 0x20) : Color.FromRgb(0xFF, 0xFF, 0xFF));
+                        var borderBrush = new SolidColorBrush(isDark ? Color.FromRgb(0x3F, 0x3F, 0x46) : Color.FromRgb(0xD0, 0xD7, 0xDE));
+                        var textBrush = new SolidColorBrush(isDark ? Color.FromRgb(0xFD, 0xFD, 0xFD) : Color.FromRgb(0x21, 0x21, 0x21));
+
+                        appResources["BackgroundBrush"] = bgBrush;
+                        appResources["RegionBrush"] = regionBrush;
+                        appResources["BorderBrush"] = borderBrush;
+                        appResources["PrimaryTextBrush"] = textBrush;
+
                         if (Application.Current.MainWindow != null)
                         {
                             HandyControl.Themes.Theme.SetSkin(Application.Current.MainWindow, skinType);
+                            Application.Current.MainWindow.Resources["BackgroundBrush"] = bgBrush;
+                            Application.Current.MainWindow.Resources["RegionBrush"] = regionBrush;
+                            Application.Current.MainWindow.Resources["BorderBrush"] = borderBrush;
+                            Application.Current.MainWindow.Resources["PrimaryTextBrush"] = textBrush;
                         }
                     }
                     Logger.LogInfo($"[Theme] 切换主题为: {(isDark ? "夜间深色模式 (Dark)" : "白天浅色模式 (Light)")}");
