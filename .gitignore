@@ -1,3 +1,17 @@
 /.vs/
 /camera/.claude
 /MonitorLogs
+/check_memory_monitor.ps1
+/scratch/analyze_8day_run.py
+/scratch/analyze_big_drops.py
+/scratch/analyze_peaks.py
+/scratch/check_mat.ps1
+/scratch/inspect_peak_window.py
+/scratch/launch_and_monitor.ps1
+/scratch/quick_stats.py
+/scratch/verify_fixes.ps1
+/start_memory_monitor.ps1
+/stop_memory_monitor.ps1
+/camera/camera-mem-monitor-v2.ps1
+/camera/camera-mem-monitor-v2.ps1
+/scratch/launch_and_monitor.ps1
