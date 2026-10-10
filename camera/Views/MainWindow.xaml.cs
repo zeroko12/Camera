@@ -904,14 +904,12 @@ namespace camera.Views
 
         private void ShowTitleBar()
         {
-            TitleBar.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.3)));
-            //Debug.WriteLine("标题栏显示");
+            TitleBar.BeginAnimation(OpacityProperty, new DoubleAnimation(TitleBar.Opacity, 1.0, TimeSpan.FromSeconds(0.2)));
         }
 
         private void HideTitleBar()
         {
-            TitleBar.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromSeconds(0.3)));
-            //Debug.WriteLine("标题栏隐藏");
+            TitleBar.BeginAnimation(OpacityProperty, new DoubleAnimation(TitleBar.Opacity, 0.45, TimeSpan.FromSeconds(0.3)));
         }
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -966,6 +964,15 @@ namespace camera.Views
                     TitleBar.Margin = new Thickness(0);
                     WindowResizeGrip.Visibility = Visibility.Collapsed;
                     if (WindowResizeBorderGrid != null) WindowResizeBorderGrid.Visibility = Visibility.Collapsed;
+
+                    if (MaximizeRestoreBtn != null)
+                    {
+                        MaximizeRestoreBtn.ToolTip = "向下还原";
+                        if (TryFindResource("WindowRestoreGeometry") is Geometry restoreGeom)
+                        {
+                            HandyControl.Controls.IconElement.SetGeometry(MaximizeRestoreBtn, restoreGeom);
+                        }
+                    }
                 }
                 else if (this.WindowState == WindowState.Normal)
                 {
@@ -984,13 +991,35 @@ namespace camera.Views
                     TitleBar.Margin = new Thickness(10, 0, 0, 10);
                     WindowResizeGrip.Visibility = Visibility.Visible;
                     if (WindowResizeBorderGrid != null) WindowResizeBorderGrid.Visibility = Visibility.Visible;
+
+                    if (MaximizeRestoreBtn != null)
+                    {
+                        MaximizeRestoreBtn.ToolTip = "最大化";
+                        if (TryFindResource("WindowMaxGeometry") is Geometry maxGeom)
+                        {
+                            HandyControl.Controls.IconElement.SetGeometry(MaximizeRestoreBtn, maxGeom);
+                        }
+                    }
                 }
             }
         }
 
         private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            this.DragMove();
+            if (e.ClickCount == 2)
+            {
+                MaximizeRestoreButton_Click(sender, e);
+                return;
+            }
+
+            if (e.ButtonState == MouseButtonState.Pressed)
+            {
+                try
+                {
+                    this.DragMove();
+                }
+                catch { }
+            }
         }
 
         private void MinimizeButton_Click(object sender, RoutedEventArgs e)
@@ -1004,6 +1033,15 @@ namespace camera.Views
                 this.WindowState = WindowState.Normal;
             else
                 this.WindowState = WindowState.Maximized;
+        }
+
+        private void PlaybackVideo_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount == 2)
+            {
+                MaximizeRestoreButton_Click(sender, e);
+                e.Handled = true;
+            }
         }
 
         private void CloseButton_Click(object sender, RoutedEventArgs e)

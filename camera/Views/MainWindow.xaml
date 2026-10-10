@@ -563,10 +563,10 @@
                     </Image.InputBindings>
                 </Image>
 
-                <!--  悬浮返回按钮，叠加在画面左上角  -->
+                <!--  悬浮返回按钮，叠加在画面左上角 (避让顶部标题栏)  -->
                 <Button
                     MinHeight="28"
-                    Margin="10"
+                    Margin="10,38,0,0"
                     Padding="10,6"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Top"
@@ -609,7 +609,7 @@
                     <hc:ScrollViewer
                         Style="{StaticResource SlimScrollViewerStyle}"
                         VerticalScrollBarVisibility="Auto">
-                        <Grid Margin="10">
+                        <Grid Margin="10,36,10,10">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -739,18 +739,24 @@
                         <RowDefinition Height="60" />
                     </Grid.RowDefinitions>
 
-                    <!--  视频播放区域 (双击或右键均可快速退出回放)  -->
+                    <!--  视频播放区域 (双击全屏/还原窗口，右键快捷菜单)  -->
                     <Border
                         Grid.Row="0"
-                        Margin="5"
+                        Margin="5,36,5,5"
                         Background="Black"
                         ClipToBounds="True"
-                        CornerRadius="4">
-                        <Border.InputBindings>
-                            <MouseBinding Command="{Binding BackToMonitoringCommand}" MouseAction="LeftDoubleClick" />
-                        </Border.InputBindings>
+                        CornerRadius="4"
+                        MouseLeftButtonDown="PlaybackVideo_MouseLeftButtonDown">
                         <Border.ContextMenu>
                             <ContextMenu>
+                                <MenuItem
+                                    Header="全屏 / 还原窗口 (双击)"
+                                    Click="MaximizeRestoreButton_Click">
+                                    <MenuItem.Icon>
+                                        <materialDesign:PackIcon Kind="Fullscreen" Foreground="{DynamicResource PrimaryBrush}" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <Separator />
                                 <MenuItem
                                     Header="返回实时监控 (Esc)"
                                     Command="{Binding BackToMonitoringCommand}">
@@ -829,7 +835,7 @@
                                 </TextBlock>
                             </StackPanel>
 
-                            <!--  倍速控制  -->
+                            <!--  倍速控制与全屏窗口按钮  -->
                             <StackPanel
                                 Grid.Column="2"
                                 VerticalAlignment="Center"
@@ -867,6 +873,34 @@
                                     IsEnabled="{c:Binding 'PlaybackSpeed &lt; 32.0'}"
                                     Style="{StaticResource ButtonDefault.Small}"
                                     ToolTip="加速" />
+
+                                <Border
+                                    Width="1"
+                                    Height="16"
+                                    Margin="8,0"
+                                    Background="{DynamicResource BorderBrush}" />
+
+                                <!--  全屏 / 还原窗口控制按钮  -->
+                                <Button
+                                    Height="24"
+                                    Padding="8,2"
+                                    VerticalAlignment="Center"
+                                    Click="MaximizeRestoreButton_Click"
+                                    Style="{StaticResource ButtonDefault.Small}"
+                                    ToolTip="全屏 / 还原窗口 (双击画面亦可切换)">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon
+                                            Width="14"
+                                            Height="14"
+                                            Margin="0,0,4,0"
+                                            VerticalAlignment="Center"
+                                            Kind="Fullscreen" />
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="11"
+                                            Text="全屏/还原" />
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -884,11 +918,11 @@
                     </Grid>
                 </Grid>
 
-                <!--  悬浮返回按钮，叠加在画面右上角  -->
+                <!--  悬浮返回按钮，叠加在画面右上角 (避让顶部标题栏)  -->
                 <Button
                     Grid.Column="1"
                     MinHeight="30"
-                    Margin="12"
+                    Margin="0,42,12,0"
                     Padding="12,6"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Top"
@@ -974,16 +1008,19 @@
                 HorizontalAlignment="Right"
                 VerticalAlignment="Bottom"
                 Cursor="SizeNWSE"
+                Panel.ZIndex="1500"
                 MouseLeftButtonDown="ResizeGrip_MouseLeftButtonDown"
                 Opacity="0.4" />
 
-            <!--  自定义标题栏  -->
+            <!--  自定义标题栏 (始终置顶于所有覆盖层之上，ZIndex=1500)  -->
             <Grid
                 x:Name="TitleBar"
                 Grid.Row="0"
                 Height="30"
                 Margin="10,0,0,10"
                 VerticalAlignment="Top"
+                Panel.ZIndex="1500"
+                Opacity="0.45"
                 MouseEnter="TitleBar_MouseEnter"
                 MouseLeave="TitleBar_MouseLeave"
                 MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
@@ -1037,13 +1074,16 @@
                         hc:IconElement.Width="16"
                         Click="MinimizeButton_Click"
                         IsEnabled="True"
+                        ToolTip="最小化"
                         Style="{StaticResource ButtonDashedWarning.Small}" />
                     <Button
+                        x:Name="MaximizeRestoreBtn"
                         Width="25"
                         Margin="5,0,5,0"
                         hc:IconElement.Geometry="{StaticResource WindowMaxGeometry}"
                         Click="MaximizeRestoreButton_Click"
                         IsEnabled="True"
+                        ToolTip="最大化"
                         Style="{StaticResource ButtonDashedSuccess.Small}" />
                     <Button
                         Width="25"
@@ -1051,6 +1091,7 @@
                         hc:IconElement.Geometry="{StaticResource DeleteGeometry}"
                         Click="CloseButton_Click"
                         IsEnabled="True"
+                        ToolTip="关闭"
                         Style="{StaticResource ButtonDashedDanger.Small}" />
                 </StackPanel>
             </Grid>
