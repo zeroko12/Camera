@@ -32,8 +32,6 @@ namespace camera.Views
         private double _normalHeight = 480;
         private GridLength _normalRightColumnWidth = GridLength.Auto;
 
-        private double AspectRatio = 12.0 / 9.0;
-
         public bool CanClickThrough { get; set; } = false;
 
         private System.Windows.Forms.NotifyIcon _notifyIcon;
@@ -73,7 +71,6 @@ namespace camera.Views
             InitializeComponent();
             LoadSettings();
             InitializeTitleBar();
-            AspectRatio = this.Width / this.Height;
 
             Loaded += MainWindow_Loaded;
             StateChanged += MainWindow_StateChanged;
@@ -531,72 +528,209 @@ namespace camera.Views
 
         private bool isMouseOverTitleBar = false;
         private bool IsMouseOverContentGrid = false;
-
-        private Point lastMousePosition;
-
         public bool isHotKeyPressed { get; private set; } = false;
 
-        #region 拖拽修改窗口大小相关
+        #region 拖拽修改窗口大小相关 (8向自由缩放/变形，杜绝锁定宽高比)
+
+        private ResizeDirection _activeResizeDir = ResizeDirection.None;
+        private Point _resizeStartScreenPoint;
+        private double _resizeStartLeft;
+        private double _resizeStartTop;
+        private double _resizeStartWidth;
+        private double _resizeStartHeight;
+
         private void ResizeGrip_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ClickCount == 2)
             {
                 ToggleMaximize();
+                return;
             }
-            else
+
+            StartWindowResize(ResizeDirection.BottomRight, e);
+        }
+
+        private void ResizeBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount == 2)
             {
-                lastMousePosition = e.GetPosition(this);
-                this.MouseMove += ResizeWindow_MouseMove;
-                this.MouseLeftButtonUp += ResizeWindow_MouseLeftButtonUp;
-                this.CaptureMouse();
+                ToggleMaximize();
+                return;
+            }
+
+            if (sender is FrameworkElement fe && fe.Tag is string tag && Enum.TryParse<ResizeDirection>(tag, out var dir))
+            {
+                StartWindowResize(dir, e);
             }
         }
 
-        private void ResizeWindow_MouseMove(object sender, MouseEventArgs e)
+        private void StartWindowResize(ResizeDirection direction, MouseButtonEventArgs e)
         {
-            if (e.LeftButton == MouseButtonState.Pressed)
-            {
-                Point currentPosition = e.GetPosition(this);
-                double deltaX = currentPosition.X - lastMousePosition.X;
-                double deltaY = currentPosition.Y - lastMousePosition.Y;
+            if (WindowState == WindowState.Maximized) return;
+            if (e.LeftButton != MouseButtonState.Pressed) return;
 
-                ResizeWindow(deltaX, deltaY);
+            _activeResizeDir = direction;
+            _resizeStartScreenPoint = this.PointToScreen(e.GetPosition(this));
+            _resizeStartLeft = this.Left;
+            _resizeStartTop = this.Top;
+            _resizeStartWidth = this.ActualWidth > 0 ? this.ActualWidth : this.Width;
+            _resizeStartHeight = this.ActualHeight > 0 ? this.ActualHeight : this.Height;
 
-                lastMousePosition = currentPosition;
-            }
+            this.MouseMove += Window_Resize_MouseMove;
+            this.MouseLeftButtonUp += Window_Resize_MouseLeftButtonUp;
+            this.CaptureMouse();
+            e.Handled = true;
         }
 
-        private void ResizeWindow_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private void Window_Resize_MouseMove(object sender, MouseEventArgs e)
         {
-            this.MouseMove -= ResizeWindow_MouseMove;
-            this.MouseLeftButtonUp -= ResizeWindow_MouseLeftButtonUp;
-            this.ReleaseMouseCapture();
-        }
+            if (_activeResizeDir == ResizeDirection.None || e.LeftButton != MouseButtonState.Pressed)
+                return;
 
-        private double MinWindowWidth = 450; // 设置最小宽度
-        private double MinWindowHeight = 240; // 设置最小高度
+            Point currentScreenPoint = this.PointToScreen(e.GetPosition(this));
 
-        private void ResizeWindow(double deltaX, double deltaY)
-        {
-            double newWidth = Math.Max(MinWindowWidth, this.Width + deltaX);
-            double newHeight = Math.Max(MinWindowHeight, this.Height + deltaY);
+            var source = PresentationSource.FromVisual(this);
+            double dpiX = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+            double dpiY = source?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
 
-            // 保持宽高比
-            if (newWidth / newHeight > AspectRatio)
+            double dx = (currentScreenPoint.X - _resizeStartScreenPoint.X) / (dpiX > 0 ? dpiX : 1.0);
+            double dy = (currentScreenPoint.Y - _resizeStartScreenPoint.Y) / (dpiY > 0 ? dpiY : 1.0);
+
+            double newWidth = _resizeStartWidth;
+            double newHeight = _resizeStartHeight;
+            double newLeft = _resizeStartLeft;
+            double newTop = _resizeStartTop;
+
+            switch (_activeResizeDir)
             {
-                newWidth = Math.Max(newHeight * AspectRatio, MinWindowWidth);
-            }
-            else
-            {
-                newHeight = Math.Max(newWidth / AspectRatio, MinWindowHeight);
+                case ResizeDirection.Right:
+                    newWidth = Math.Max(MinWindowWidth, _resizeStartWidth + dx);
+                    break;
+
+                case ResizeDirection.Bottom:
+                    newHeight = Math.Max(MinWindowHeight, _resizeStartHeight + dy);
+                    break;
+
+                case ResizeDirection.BottomRight:
+                    newWidth = Math.Max(MinWindowWidth, _resizeStartWidth + dx);
+                    newHeight = Math.Max(MinWindowHeight, _resizeStartHeight + dy);
+                    break;
+
+                case ResizeDirection.Left:
+                {
+                    double prospectiveWidth = _resizeStartWidth - dx;
+                    if (prospectiveWidth >= MinWindowWidth)
+                    {
+                        newWidth = prospectiveWidth;
+                        newLeft = _resizeStartLeft + dx;
+                    }
+                    else
+                    {
+                        newWidth = MinWindowWidth;
+                        newLeft = _resizeStartLeft + (_resizeStartWidth - MinWindowWidth);
+                    }
+                    break;
+                }
+
+                case ResizeDirection.Top:
+                {
+                    double prospectiveHeight = _resizeStartHeight - dy;
+                    if (prospectiveHeight >= MinWindowHeight)
+                    {
+                        newHeight = prospectiveHeight;
+                        newTop = _resizeStartTop + dy;
+                    }
+                    else
+                    {
+                        newHeight = MinWindowHeight;
+                        newTop = _resizeStartTop + (_resizeStartHeight - MinWindowHeight);
+                    }
+                    break;
+                }
+
+                case ResizeDirection.TopLeft:
+                {
+                    double prospectiveWidth = _resizeStartWidth - dx;
+                    if (prospectiveWidth >= MinWindowWidth)
+                    {
+                        newWidth = prospectiveWidth;
+                        newLeft = _resizeStartLeft + dx;
+                    }
+                    else
+                    {
+                        newWidth = MinWindowWidth;
+                        newLeft = _resizeStartLeft + (_resizeStartWidth - MinWindowWidth);
+                    }
+
+                    double prospectiveHeight = _resizeStartHeight - dy;
+                    if (prospectiveHeight >= MinWindowHeight)
+                    {
+                        newHeight = prospectiveHeight;
+                        newTop = _resizeStartTop + dy;
+                    }
+                    else
+                    {
+                        newHeight = MinWindowHeight;
+                        newTop = _resizeStartTop + (_resizeStartHeight - MinWindowHeight);
+                    }
+                    break;
+                }
+
+                case ResizeDirection.TopRight:
+                {
+                    newWidth = Math.Max(MinWindowWidth, _resizeStartWidth + dx);
+
+                    double prospectiveHeight = _resizeStartHeight - dy;
+                    if (prospectiveHeight >= MinWindowHeight)
+                    {
+                        newHeight = prospectiveHeight;
+                        newTop = _resizeStartTop + dy;
+                    }
+                    else
+                    {
+                        newHeight = MinWindowHeight;
+                        newTop = _resizeStartTop + (_resizeStartHeight - MinWindowHeight);
+                    }
+                    break;
+                }
+
+                case ResizeDirection.BottomLeft:
+                {
+                    double prospectiveWidth = _resizeStartWidth - dx;
+                    if (prospectiveWidth >= MinWindowWidth)
+                    {
+                        newWidth = prospectiveWidth;
+                        newLeft = _resizeStartLeft + dx;
+                    }
+                    else
+                    {
+                        newWidth = MinWindowWidth;
+                        newLeft = _resizeStartLeft + (_resizeStartWidth - MinWindowWidth);
+                    }
+
+                    newHeight = Math.Max(MinWindowHeight, _resizeStartHeight + dy);
+                    break;
+                }
             }
 
-            // 直接应用新的尺寸，不需要额外的判断
+            this.Left = newLeft;
+            this.Top = newTop;
             this.Width = newWidth;
             this.Height = newHeight;
             _normalWidth = newWidth;
             _normalHeight = newHeight;
         }
+
+        private void Window_Resize_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            _activeResizeDir = ResizeDirection.None;
+            this.MouseMove -= Window_Resize_MouseMove;
+            this.MouseLeftButtonUp -= Window_Resize_MouseLeftButtonUp;
+            this.ReleaseMouseCapture();
+        }
+
+        private double MinWindowWidth = 450; // 设置最小宽度
+        private double MinWindowHeight = 240; // 设置最小高度
 
         private void ToggleMaximize()
         {
@@ -606,56 +740,9 @@ namespace camera.Views
                 WindowState = WindowState.Maximized;
         }
 
-        private void ResizeWindow(ResizeDirection direction)
+        public enum ResizeDirection
         {
-            WindowInteropHelper helper = new WindowInteropHelper(this);
-            var hwnd = helper.Handle;
-
-            // 获取当前窗口的大小
-            var currentWidth = this.Width;
-            var currentHeight = this.Height;
-
-            // 设置比例因子（例如，1.1 表示增加 10%）
-            double scaleFactor = 1.0001;
-
-            // 根据方向计算新的宽度和高度
-            double newWidth = currentWidth;
-            double newHeight = currentHeight;
-
-            switch (direction)
-            {
-                case ResizeDirection.Left:
-                case ResizeDirection.Right:
-                    newWidth *= scaleFactor; // 只调整宽度
-                    break;
-                case ResizeDirection.Top:
-                case ResizeDirection.Bottom:
-                    newHeight *= scaleFactor; // 只调整高度
-                    break;
-                case ResizeDirection.TopLeft:
-                case ResizeDirection.BottomRight:
-                    newWidth *= scaleFactor;
-                    newHeight *= scaleFactor; // 同时调整宽度和高度
-                    break;
-                case ResizeDirection.TopRight:
-                case ResizeDirection.BottomLeft:
-                    newWidth *= scaleFactor;
-                    newHeight *= scaleFactor; // 同时调整宽度和高度
-                    break;
-            }
-            SendMessage(helper.Handle, 0x112, (IntPtr)(61440 + direction), IntPtr.Zero);
-            // 设置新的宽度和高度
-            this.Width = newWidth;
-            this.Height = newHeight;
-            _normalWidth = newWidth;
-            _normalHeight = newHeight;
-        }
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-
-        enum ResizeDirection
-        {
+            None = 0,
             Left = 1,
             Right = 2,
             Top = 3,
@@ -674,7 +761,7 @@ namespace camera.Views
             ConsoleToggleButton.Visibility = Visibility.Visible;
             ConsoleToggleButton.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.3)));
             IsMouseOverContentGrid = true;
-            WindowResizeGrip.Opacity = 50;
+            WindowResizeGrip.Opacity = 1.0;
         }
 
         private void MainContentGrid_MouseLeave(object sender, MouseEventArgs e)
@@ -684,7 +771,7 @@ namespace camera.Views
             animation.Completed += (s, _) => ConsoleToggleButton.Visibility = Visibility.Collapsed;
             ConsoleToggleButton.BeginAnimation(OpacityProperty, animation);
             IsMouseOverContentGrid = false;
-            WindowResizeGrip.Opacity = 0;
+            WindowResizeGrip.Opacity = 0.4;
         }
 
         private void ShowTitleBar()
@@ -701,18 +788,7 @@ namespace camera.Views
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            if (this.WindowState == WindowState.Maximized)
-            {
-                return;
-            }
-            if (e.NewSize.Width / e.NewSize.Height > AspectRatio)
-            {
-                this.Width = this.Height * AspectRatio;
-            }
-            else
-            {
-                this.Height = this.Width / AspectRatio;
-            }
+            // 支持窗口任意自由变形，不再强制锁定宽高比
         }
 
         private void MainWindow_StateChanged(object sender, EventArgs e)
@@ -741,6 +817,7 @@ namespace camera.Views
 
                     TitleBar.Margin = new Thickness(0);
                     WindowResizeGrip.Visibility = Visibility.Collapsed;
+                    if (WindowResizeBorderGrid != null) WindowResizeBorderGrid.Visibility = Visibility.Collapsed;
                 }
                 else if (this.WindowState == WindowState.Normal)
                 {
@@ -763,6 +840,7 @@ namespace camera.Views
 
                     TitleBar.Margin = new Thickness(10, 0, 0, 10);
                     WindowResizeGrip.Visibility = Visibility.Visible;
+                    if (WindowResizeBorderGrid != null) WindowResizeBorderGrid.Visibility = Visibility.Visible;
                 }
             }
         }

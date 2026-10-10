@@ -724,7 +724,7 @@
                 VerticalAlignment="Bottom"
                 Cursor="SizeNWSE"
                 MouseLeftButtonDown="ResizeGrip_MouseLeftButtonDown"
-                Opacity="0" />
+                Opacity="0.4" />
 
             <!--  自定义标题栏  -->
             <Grid
@@ -1456,5 +1456,87 @@
                 </Border>
             </Border>
         </hc:TransitioningContentControl>
+
+        <!--  窗口 8 向自由变形与缩放边缘控制层 (全向自由拖拽，杜绝比例锁定)  -->
+        <Grid
+            x:Name="WindowResizeBorderGrid"
+            Grid.Row="0"
+            Grid.RowSpan="2"
+            Grid.Column="0"
+            Grid.ColumnSpan="2"
+            Panel.ZIndex="1000"
+            IsHitTestVisible="{c:Binding 'WindowState != System.Windows.WindowState.Maximized'}">
+            <!-- 四边 -->
+            <Rectangle
+                Height="6"
+                Margin="12,0"
+                VerticalAlignment="Top"
+                Cursor="SizeNS"
+                Fill="Transparent"
+                MouseLeftButtonDown="ResizeBorder_MouseLeftButtonDown"
+                Tag="Top" />
+            <Rectangle
+                Height="6"
+                Margin="12,0"
+                VerticalAlignment="Bottom"
+                Cursor="SizeNS"
+                Fill="Transparent"
+                MouseLeftButtonDown="ResizeBorder_MouseLeftButtonDown"
+                Tag="Bottom" />
+            <Rectangle
+                Width="6"
+                Margin="0,12"
+                HorizontalAlignment="Left"
+                Cursor="SizeWE"
+                Fill="Transparent"
+                MouseLeftButtonDown="ResizeBorder_MouseLeftButtonDown"
+                Tag="Left" />
+            <Rectangle
+                Width="6"
+                Margin="0,12"
+                HorizontalAlignment="Right"
+                Cursor="SizeWE"
+                Fill="Transparent"
+                MouseLeftButtonDown="ResizeBorder_MouseLeftButtonDown"
+                Tag="Right" />
+
+            <!-- 四角 -->
+            <Rectangle
+                Width="12"
+                Height="12"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Cursor="SizeNWSE"
+                Fill="Transparent"
+                MouseLeftButtonDown="ResizeBorder_MouseLeftButtonDown"
+                Tag="TopLeft" />
+            <Rectangle
+                Width="12"
+                Height="12"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Cursor="SizeNESW"
+                Fill="Transparent"
+                MouseLeftButtonDown="ResizeBorder_MouseLeftButtonDown"
+                Tag="TopRight" />
+            <Rectangle
+                Width="12"
+                Height="12"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                Cursor="SizeNESW"
+                Fill="Transparent"
+                MouseLeftButtonDown="ResizeBorder_MouseLeftButtonDown"
+                Tag="BottomLeft" />
+            <Rectangle
+                Width="12"
+                Height="12"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Cursor="SizeNWSE"
+                Fill="Transparent"
+                MouseLeftButtonDown="ResizeBorder_MouseLeftButtonDown"
+                Tag="BottomRight" />
+        </Grid>
     </Grid>
 </Window>
