@@ -1482,18 +1482,24 @@
                                             <TextBlock
                                                 Margin="0,0,0,2"
                                                 FontSize="11"
-                                                Text="穿透模式快捷键:" />
+                                                Text="穿透模式快捷键:"
+                                                ToolTip="点击输入框后按下新的快捷键组合可快速修改（默认: Ctrl+F1）" />
                                             <hk:HotKeyBox
-                                                Height="22"
+                                                Width="Auto"
+                                                Height="24"
                                                 Margin="0,0,0,5"
-                                                ActualBackground="LightGray"
+                                                HorizontalAlignment="Stretch"
+                                                ActualBackground="#F5F5F5"
+                                                CornerRadius="4"
                                                 CurrentKeyA="0x0002"
                                                 CurrentKeyB="F1"
-                                                FontSize="10"
+                                                FixedBorderBrush="#D0D0D0"
+                                                FixedBorderThickness="1"
                                                 Handler="GlobalDo"
                                                 HoverBorderBrush="#326cf3"
                                                 HoverTextColor="#326cf3"
-                                                ToolTip="穿透模式快捷键" />
+                                                TextColor="#333333"
+                                                ToolTip="点击后按下新快捷键即可修改（当前: Ctrl+F1）" />
 
                                             <Separator Margin="0,0,0,5" />
 
