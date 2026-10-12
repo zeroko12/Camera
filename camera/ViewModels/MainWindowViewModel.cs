@@ -897,6 +897,9 @@ namespace camera.ViewModels
                             camera.DevicePath = device.DevicePath; // 绑定唯一硬件路径
                             camera.Name = device.Name; // 使用物理设备名称显示
 
+                            // 在启动硬件采集前预先应用已持久化的参数（分辨率、帧率、水印等），一步到位，杜绝二次重新打开
+                            ApplySettingsToCamera(camera);
+
                             // StartCapture 启动该相机，即使被占用也总是返回 true
                             if (camera.StartCapture(device.Index))
                             {
@@ -914,21 +917,20 @@ namespace camera.ViewModels
                                         return;
                                     }
 
-                                    ApplySettingsToCamera(camera);
                                     Cameras.Add(camera);
                                     camera.DiskSpaceLow += Camera_DiskSpaceLow;
 
                                     Logger.LogInfo($"✓ 摄像头 #{device.Index} ({device.Name}) 加载成功 (当前在线: {camera.IsConnected})");
                                 });
 
-                                // 分时初始化：若成功开启，为防抢带宽延时 600ms，否则仅 50ms 
+                                // 轻量错峰缓冲：仅需 60ms（原 600ms），给 USB Host Controller 端点分配提供缓冲
                                 if (camera.IsConnected)
                                 {
-                                    System.Threading.Thread.Sleep(600);
+                                    System.Threading.Thread.Sleep(60);
                                 }
                                 else
                                 {
-                                    System.Threading.Thread.Sleep(50);
+                                    System.Threading.Thread.Sleep(30);
                                 }
                             }
                             else
@@ -1806,6 +1808,9 @@ namespace camera.ViewModels
                         newCam.DevicePath = device.DevicePath;
                         newCam.Name = device.Name;
 
+                        // 开启前预先应用已持久化的参数，一步到位
+                        ApplySettingsToCamera(newCam);
+
                         if (newCam.StartCapture(device.Index))
                         {
                             Application.Current?.Dispatcher.Invoke(() =>
@@ -1818,7 +1823,6 @@ namespace camera.ViewModels
                                     return;
                                 }
 
-                                ApplySettingsToCamera(newCam);
                                 Cameras.Add(newCam);
                                 newCam.DiskSpaceLow += Camera_DiskSpaceLow;
 

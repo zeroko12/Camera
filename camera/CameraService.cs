@@ -2,6 +2,7 @@ using OpenCvSharp;
 using Prism.Commands;
 using Prism.Mvvm;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -77,6 +78,7 @@ namespace camera
         private readonly object _lockObject = new();
         private readonly Stopwatch _fpsTimer = new();
         private volatile bool _isStartingSaving = false;
+        private volatile bool _isFirstFrame = true;
 
         #endregion
 
@@ -455,7 +457,12 @@ namespace camera
                         Width = w;
                         Height = h;
                         RaisePropertyChanged(nameof(EstimatedMbPerSec));
-                        System.Threading.Tasks.Task.Run(() => ChangeCameraInfo());
+                        // 仅当底层采集器已打开运行时才异步触发 ChangeCameraInfo 动态重载；
+                        // 在初始化阶段（cap == null）仅更新目标参数，避免冗余创建并销毁设备
+                        if (cap != null && cap.IsOpened())
+                        {
+                            System.Threading.Tasks.Task.Run(() => ChangeCameraInfo());
+                        }
                     }
                 }
             }
@@ -881,6 +888,15 @@ namespace camera
                     try { Infrastructure.MatPool.Return(previous); }
                     catch (Exception ex) { Logger.LogError($"[CameraService #{Index}] 回收预览旧帧异常", ex); }
                 }
+
+                // 首帧零延迟直通：在拿到首个预览帧的瞬间立即通知 UI 线程拉帧呈现，消灭 100ms 周期等待
+                if (_isFirstFrame)
+                {
+                    _isFirstFrame = false;
+                    Application.Current?.Dispatcher.BeginInvoke(
+                        System.Windows.Threading.DispatcherPriority.Send,
+                        new Action(() => PullAndApplyLatestFrame()));
+                }
             };
 
             // 共享帧拉取定时器由 MainWindowViewModel 统一管理(CameraService 不再单独创建 DispatcherTimer)。
@@ -961,143 +977,152 @@ namespace camera
 
         private void ShowVideoInfo()
         {
-            var testResolutions = new (int Width, int Height)[]
-            {
-                (3840, 2160), // 4K
-                (2560, 1440), // QHD
-                (1920, 1080), // 1080p
-                (1600, 1200), // UXGA
-                (1280, 720),  // 720p
-                (1024, 768),  // XGA
-                (800, 600),   // SVGA
-                (640, 480),   // VGA
-            };
-
-            int bestWidth = 0;
-            int bestHeight = 0;
-            double bestFps = 0;
-
             double defaultFps = cap.Get(VideoCaptureProperties.Fps);
             double defaultWidth = cap.Get(VideoCaptureProperties.FrameWidth);
             double defaultHeight = cap.Get(VideoCaptureProperties.FrameHeight);
 
-            Logger.LogInfo($"摄像头默认配置: {defaultWidth}x{defaultHeight} @ {defaultFps}fps");
-
-            // 清理旧的分辨率列表并确保 UI 线程安全
-            Application.Current?.Dispatcher.Invoke(() =>
-            {
-                SupportedResolutions.Clear();
-                SupportedRecordResolutions.Clear();
-                SupportedRecordResolutions.Add("与采集分辨率一致");
-            });
-
-            foreach (var (width, height) in testResolutions)
-            {
-                try
-                {
-                    cap.Set(VideoCaptureProperties.FrameWidth, width);
-                    cap.Set(VideoCaptureProperties.FrameHeight, height);
-                    if (_preferredFormat == CaptureFormat.MJPG)
-                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
-                    else if (_preferredFormat == CaptureFormat.YUY2)
-                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
-                    else
-                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
-                    Thread.Sleep(30);
-
-                    double actualWidth = cap.Get(VideoCaptureProperties.FrameWidth);
-                    double actualHeight = cap.Get(VideoCaptureProperties.FrameHeight);
-                    double actualFps = cap.Get(VideoCaptureProperties.Fps);
-
-                    if (Math.Abs(actualWidth - width) < 10 && Math.Abs(actualHeight - height) < 10)
-                    {
-                        string resStr = $"{width}x{height}";
-                        Application.Current?.Dispatcher.Invoke(() =>
-                        {
-                            if (!SupportedResolutions.Contains(resStr))
-                                SupportedResolutions.Add(resStr);
-                            if (!SupportedRecordResolutions.Contains(resStr))
-                                SupportedRecordResolutions.Add(resStr);
-                        });
-
-                        if (bestWidth == 0 || bestHeight == 0)
-                        {
-                            bestWidth = (int)actualWidth;
-                            bestHeight = (int)actualHeight;
-                            bestFps = actualFps > 0 ? actualFps : 30;
-                            Logger.LogInfo($"摄像头支持的最大分辨率: {bestWidth}x{bestHeight} @ {bestFps}fps");
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            if (bestWidth == 0 || bestHeight == 0)
-            {
-                bestWidth = (int)defaultWidth;
-                bestHeight = (int)defaultHeight;
-                bestFps = defaultFps > 0 ? defaultFps : 30;
-                string resStr = $"{bestWidth}x{bestHeight}";
-                Application.Current?.Dispatcher.Invoke(() =>
-                {
-                    if (!SupportedResolutions.Contains(resStr))
-                        SupportedResolutions.Add(resStr);
-                    if (!SupportedRecordResolutions.Contains(resStr))
-                        SupportedRecordResolutions.Add(resStr);
-                });
-                Logger.LogInfo($"使用摄像头默认分辨率: {bestWidth}x{bestHeight} @ {bestFps}fps");
-            }
-
-            FpsOrigin = bestFps;
-            WidthOrigin = bestWidth;
-            HeightOrigin = bestHeight;
+            Logger.LogInfo($"摄像头默认硬件报告: {defaultWidth}x{defaultHeight} @ {defaultFps}fps");
 
             string configKey = GetConfigKey();
             AppSettings.CameraSettings camConfig = null;
             AppSettingsService.Instance.Current.Cameras.TryGetValue(configKey, out camConfig);
 
-            // 读取已保存的分辨率配置，如果在支持的列表中，则优先应用
+            List<string> resList = new List<string>();
+
+            // 1. 优先读取已缓存的硬件支持分辨率列表
+            if (camConfig?.SupportedResolutions != null && camConfig.SupportedResolutions.Count > 0)
+            {
+                resList.AddRange(camConfig.SupportedResolutions);
+                Logger.LogInfo($"[CameraService #{Index}] 成功命中分辨率缓存: {string.Join(", ", resList)}");
+            }
+            else
+            {
+                // 无缓存（首次接入新设备）：极速定向探测主流分辨率，杜绝 4K/2K 超时与 DirectShow 卡顿
+                var candidateResolutions = new (int Width, int Height)[]
+                {
+                    (1920, 1080), // 1080p
+                    (1280, 720),  // 720p
+                    (640, 480),   // VGA
+                };
+
+                // 若默认分辨率有效且不在候选集中，插入首位优先验证
+                var testList = new List<(int Width, int Height)>();
+                if (defaultWidth > 0 && defaultHeight > 0)
+                {
+                    testList.Add(((int)defaultWidth, ((int)defaultHeight)));
+                }
+                foreach (var c in candidateResolutions)
+                {
+                    if (!testList.Any(t => t.Width == c.Width && t.Height == c.Height))
+                        testList.Add(c);
+                }
+
+                foreach (var (w, h) in testList)
+                {
+                    try
+                    {
+                        cap.Set(VideoCaptureProperties.FrameWidth, w);
+                        cap.Set(VideoCaptureProperties.FrameHeight, h);
+                        if (_preferredFormat == CaptureFormat.MJPG)
+                            cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                        else if (_preferredFormat == CaptureFormat.YUY2)
+                            cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+                        else
+                            cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
+
+                        double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
+                        double actualH = cap.Get(VideoCaptureProperties.FrameHeight);
+
+                        if (Math.Abs(actualW - w) < 10 && Math.Abs(actualH - h) < 10)
+                        {
+                            string resStr = $"{w}x{h}";
+                            if (!resList.Contains(resStr))
+                                resList.Add(resStr);
+                        }
+                    }
+                    catch { }
+                }
+
+                if (resList.Count == 0)
+                {
+                    int fallbackW = defaultWidth > 0 ? (int)defaultWidth : 1280;
+                    int fallbackH = defaultHeight > 0 ? (int)defaultHeight : 720;
+                    resList.Add($"{fallbackW}x{fallbackH}");
+                }
+
+                // 异步落盘缓存，保证下一次启动 0 毫秒即时载入
+                SaveCameraSetting(s => s.SupportedResolutions = new List<string>(resList));
+            }
+
+            // 一次性更新 UI 分辨率下拉列表，避免多次 Dispatcher 上下文切换
+            Application.Current?.Dispatcher.Invoke(() =>
+            {
+                SupportedResolutions.Clear();
+                SupportedRecordResolutions.Clear();
+                SupportedRecordResolutions.Add("与采集分辨率一致");
+                foreach (var r in resList)
+                {
+                    SupportedResolutions.Add(r);
+                    SupportedRecordResolutions.Add(r);
+                }
+            });
+
+            // 2. 确定初始运行分辨率
+            int targetWidth = 0;
+            int targetHeight = 0;
+            double targetFps = defaultFps > 0 ? defaultFps : 30;
+
             string savedRes = camConfig?.Resolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
+            if (string.IsNullOrEmpty(savedRes) && Width > 0 && Height > 0)
+            {
+                savedRes = $"{(int)Width}x{(int)Height}";
+            }
+
             bool appliedSavedRes = false;
             if (!string.IsNullOrEmpty(savedRes))
             {
                 var parts = savedRes.Split('x');
-                if (parts.Length == 2 && double.TryParse(parts[0], out double w) && double.TryParse(parts[1], out double h))
+                if (parts.Length == 2 && double.TryParse(parts[0], out double sw) && double.TryParse(parts[1], out double sh))
                 {
-                    string resStr = $"{(int)w}x{(int)h}";
-                    if (SupportedResolutions.Contains(resStr))
+                    string resStr = $"{(int)sw}x{(int)sh}";
+                    if (resList.Contains(resStr))
                     {
-                        Width = w;
-                        Height = h;
+                        targetWidth = (int)sw;
+                        targetHeight = (int)sh;
                         _selectedResolution = resStr;
                         appliedSavedRes = true;
-                        Logger.LogInfo($"[CameraService #{Index}] 启动时成功加载并应用已保存分辨率: {resStr}");
+                        Logger.LogInfo($"[CameraService #{Index}] 应用已保存/预置分辨率: {resStr}");
                     }
                 }
             }
 
             if (!appliedSavedRes)
             {
-                // 1. 优先选择 1280x720 (720p) 以节省 USB 总线带宽
-                // 2. 若无 720p，自动寻找与 720p 最接近的分辨率 (优先向下取)
-                if (SupportedResolutions.Contains("1280x720"))
+                if (resList.Contains("1280x720"))
                 {
-                    Width = 1280;
-                    Height = 720;
+                    targetWidth = 1280;
+                    targetHeight = 720;
                 }
                 else
                 {
                     var closest = FindClosestResolutionTo720p();
-                    Width = closest.Width;
-                    Height = closest.Height;
+                    targetWidth = closest.Width > 0 ? closest.Width : 1280;
+                    targetHeight = closest.Height > 0 ? closest.Height : 720;
                 }
-                _selectedResolution = $"{(int)Width}x{(int)Height}";
-                Logger.LogInfo($"[CameraService #{Index}] 未发现有效已保存分辨率，默认使用推荐/最接近 720p(优先向下) 的分辨率: {_selectedResolution}");
+                _selectedResolution = $"{targetWidth}x{targetHeight}";
+                Logger.LogInfo($"[CameraService #{Index}] 采用推荐/默认分辨率: {_selectedResolution}");
             }
+
+            WidthOrigin = targetWidth;
+            HeightOrigin = targetHeight;
+            FpsOrigin = targetFps;
+            Width = targetWidth;
+            Height = targetHeight;
+            Fps = targetFps;
 
             RaisePropertyChanged(nameof(SelectedResolution));
 
-            // 读取已保存的录像分辨率配置，如果在支持的列表中，则优先应用
+            // 读取已保存的录像分辨率配置
             string savedRecordRes = camConfig?.RecordResolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
             if (!string.IsNullOrEmpty(savedRecordRes) && SupportedRecordResolutions.Contains(savedRecordRes))
             {
@@ -1181,7 +1206,7 @@ namespace camera
             RaisePropertyChanged(nameof(IsStretchFill));
             RaisePropertyChanged(nameof(IsStretchUniformToFill));
 
-            // 将摄像头设置回最终确定的分辨率（避免保留探测循环最后一项的值）
+            // 将摄像头设置回最终确定的分辨率
             cap.Set(VideoCaptureProperties.FrameWidth, Width);
             cap.Set(VideoCaptureProperties.FrameHeight, Height);
             if (_preferredFormat == CaptureFormat.MJPG)
@@ -1213,52 +1238,59 @@ namespace camera
                 Logger.LogInfo($"正在打开摄像头索引 {index}...");
                 cap = new VideoCapture(index, VideoCaptureAPIs.DSHOW);
 
+                string configKey = GetConfigKey();
+                AppSettings.CameraSettings camConfig = null;
+                AppSettingsService.Instance.Current.Cameras.TryGetValue(configKey, out camConfig);
+
                 bool formatSet = false;
-                if (!_formatChecked || _preferredFormat == CaptureFormat.MJPG)
+                // 如果配置中缓存了该设备的最优格式，优先直接应用，消除试探
+                if (!string.IsNullOrEmpty(camConfig?.PreferredFormat) && Enum.TryParse<CaptureFormat>(camConfig.PreferredFormat, out var savedFormat))
+                {
+                    _preferredFormat = savedFormat;
+                    if (_preferredFormat == CaptureFormat.MJPG)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
+                    else if (_preferredFormat == CaptureFormat.YUY2)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
+                    else if (_preferredFormat == CaptureFormat.NV12)
+                        cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
+
+                    if (cap.IsOpened() && DecodeFourCC(cap.Get(VideoCaptureProperties.FourCC)) == _preferredFormat.ToString())
+                    {
+                        formatSet = true;
+                        Logger.LogInfo($"摄像头 {index} 快速命中缓存格式: {_preferredFormat}");
+                    }
+                }
+
+                if (!formatSet && (!_formatChecked || _preferredFormat == CaptureFormat.MJPG))
                 {
                     cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('M', 'J', 'P', 'G'));
-                    Thread.Sleep(50);
-                    if (cap.IsOpened())
+                    if (cap.IsOpened() && DecodeFourCC(cap.Get(VideoCaptureProperties.FourCC)) == "MJPG")
                     {
-                        double fc = cap.Get(VideoCaptureProperties.FourCC);
-                        if (DecodeFourCC(fc) == "MJPG")
-                        {
-                            formatSet = true;
-                            _preferredFormat = CaptureFormat.MJPG;
-                            Logger.LogInfo($"摄像头 {index} 成功协商并使用 MJPG 格式");
-                        }
+                        formatSet = true;
+                        _preferredFormat = CaptureFormat.MJPG;
+                        Logger.LogInfo($"摄像头 {index} 成功协商并使用 MJPG 格式");
                     }
                 }
 
                 if (!formatSet && (!_formatChecked || _preferredFormat == CaptureFormat.YUY2))
                 {
                     cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('Y', 'U', 'Y', '2'));
-                    Thread.Sleep(50);
-                    if (cap.IsOpened())
+                    if (cap.IsOpened() && DecodeFourCC(cap.Get(VideoCaptureProperties.FourCC)) == "YUY2")
                     {
-                        double fc = cap.Get(VideoCaptureProperties.FourCC);
-                        if (DecodeFourCC(fc) == "YUY2")
-                        {
-                            formatSet = true;
-                            _preferredFormat = CaptureFormat.YUY2;
-                            Logger.LogInfo($"摄像头 {index} 成功协商并使用 YUY2 格式");
-                        }
+                        formatSet = true;
+                        _preferredFormat = CaptureFormat.YUY2;
+                        Logger.LogInfo($"摄像头 {index} 成功协商并使用 YUY2 格式");
                     }
                 }
 
                 if (!formatSet && (!_formatChecked || _preferredFormat == CaptureFormat.NV12))
                 {
                     cap.Set(VideoCaptureProperties.FourCC, VideoWriter.FourCC('N', 'V', '1', '2'));
-                    Thread.Sleep(50);
-                    if (cap.IsOpened())
+                    if (cap.IsOpened() && DecodeFourCC(cap.Get(VideoCaptureProperties.FourCC)) == "NV12")
                     {
-                        double fc = cap.Get(VideoCaptureProperties.FourCC);
-                        if (DecodeFourCC(fc) == "NV12")
-                        {
-                            formatSet = true;
-                            _preferredFormat = CaptureFormat.NV12;
-                            Logger.LogInfo($"摄像头 {index} 成功协商并使用 NV12 格式");
-                        }
+                        formatSet = true;
+                        _preferredFormat = CaptureFormat.NV12;
+                        Logger.LogInfo($"摄像头 {index} 成功协商并使用 NV12 格式");
                     }
                 }
 
@@ -1278,6 +1310,7 @@ namespace camera
                     Logger.LogInfo($"摄像头 {index} 协商匹配格式失败，采用驱动当前/默认格式: {DecodeFourCC(cap.Get(VideoCaptureProperties.FourCC))}");
                 }
                 _formatChecked = true;
+                SaveCameraSetting(s => s.PreferredFormat = _preferredFormat.ToString());
 
                 this.Index = index;
                 this.Name = $"通道 {index}";
@@ -1291,6 +1324,7 @@ namespace camera
                     Height = 720;
                     _previewController.SetCameraFps(Fps);
                     _continuousReadFailCount = 6; // 直接显示警告帧
+                    _isFirstFrame = true;
                     RefreshFrame();
                     Infrastructure.DeviceLockManager.ReleaseDevice(DevicePath, index);
                     return true;
@@ -1301,6 +1335,7 @@ namespace camera
 
                 _previewController.SetCameraFps(Fps);
 
+                _isFirstFrame = true;
                 RefreshFrame();
                 return true;
             }
@@ -1958,6 +1993,7 @@ namespace camera
                     }
 
                     _previewController.SetCameraFps(Fps);
+                    _isFirstFrame = true;
                     RefreshFrame();
 
                     // 重新开启录像

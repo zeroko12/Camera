@@ -123,6 +123,8 @@ namespace camera
             public bool?   IsFlipHorizontal  { get; set; }
             public bool?   IsFlipVertical    { get; set; }
             public string? StretchMode       { get; set; }
+            public List<string>? SupportedResolutions { get; set; }
+            public string? PreferredFormat   { get; set; }
         }
 
         /// <summary>
