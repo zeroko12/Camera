@@ -14,6 +14,7 @@ namespace camera.Preview
         public int TargetFps { get; set; } = 15;
         public int MaxWidth { get; set; } = 640;
         public bool IsHighDefinition { get; set; } = false;
+        public bool UseGpuAcceleration { get; set; } = true;
 
         public event EventHandler<Mat> PreviewFrameReady;
 
@@ -53,10 +54,20 @@ namespace camera.Preview
                 int targetWidth = Math.Min(MaxWidth, frame.Width);
                 if (!IsHighDefinition && frame.Width > targetWidth)
                 {
-                    double ratio = (double)targetWidth / frame.Width;
-                    int newHeight = (int)(frame.Height * ratio);
-                    previewFrame = Infrastructure.MatPool.Rent(targetWidth, newHeight, frame.Type());
-                    Cv2.Resize(frame, previewFrame, new Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Linear);
+                    if (UseGpuAcceleration)
+                    {
+                        // 1. GPU 模式：免去 CPU Cv2.Resize 耗时计算，直接交由 WPF Direct3D 纹理硬件采样下采样
+                        previewFrame = Infrastructure.MatPool.Rent(frame.Width, frame.Height, frame.Type());
+                        frame.CopyTo(previewFrame);
+                    }
+                    else
+                    {
+                        // 1. CPU 模式：强制全部由 CPU 执行双线性插值下采样
+                        double ratio = (double)targetWidth / frame.Width;
+                        int newHeight = (int)(frame.Height * ratio);
+                        previewFrame = Infrastructure.MatPool.Rent(targetWidth, newHeight, frame.Type());
+                        Cv2.Resize(frame, previewFrame, new Size(targetWidth, newHeight), 0, 0, InterpolationFlags.Linear);
+                    }
                 }
                 else
                 {

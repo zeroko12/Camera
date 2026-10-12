@@ -576,6 +576,7 @@ namespace camera
                     {
                         _flipProcessor.FlipHorizontal = value;
                     }
+                    RaisePropertyChanged(nameof(RenderScaleX));
                     string key = GetConfigKey();
                     if (!string.IsNullOrEmpty(key))
                     {
@@ -599,6 +600,7 @@ namespace camera
                     {
                         _flipProcessor.FlipVertical = value;
                     }
+                    RaisePropertyChanged(nameof(RenderScaleY));
                     string key = GetConfigKey();
                     if (!string.IsNullOrEmpty(key))
                     {
@@ -609,6 +611,34 @@ namespace camera
                 }
             }
         }
+
+        private bool _useGpuAcceleration = true;
+        public bool UseGpuAcceleration
+        {
+            get => _useGpuAcceleration;
+            set
+            {
+                if (SetProperty(ref _useGpuAcceleration, value))
+                {
+                    if (_previewController != null)
+                        _previewController.UseGpuAcceleration = value;
+                    if (_contrastLuminanceProcessor != null)
+                        _contrastLuminanceProcessor.UseGpuAcceleration = value;
+                    if (_flipProcessor != null)
+                        _flipProcessor.UseGpuAcceleration = value;
+
+                    RaisePropertyChanged(nameof(RenderScaleX));
+                    RaisePropertyChanged(nameof(RenderScaleY));
+                }
+            }
+        }
+
+        /// <summary>
+        /// GPU 模式下当未处于录制状态时，翻转交由 UI 层的 Direct3D ScaleTransform 硬件变换完成呈现；
+        /// CPU 模式（仅使用 CPU）或录制中时，CPU 已在内存帧物理翻转，UI 维持 1.0 正常比例。
+        /// </summary>
+        public double RenderScaleX => (UseGpuAcceleration && IsFlipHorizontal && !isSave) ? -1.0 : 1.0;
+        public double RenderScaleY => (UseGpuAcceleration && IsFlipVertical && !isSave) ? -1.0 : 1.0;
 
         private Stretch _videoStretch = Stretch.Uniform;
         public Stretch VideoStretch
@@ -853,8 +883,8 @@ namespace camera
         {
             // 1. 初始化模块参数与流水线
             _claheProcessor = new ClaheProcessor { Enabled = IsGrayHomogenization, Order = 10 };
-            _contrastLuminanceProcessor = new ContrastLuminanceProcessor { Contrast = Contrast, Luminance = Luminance, Order = 20 };
-            _flipProcessor = new FlipProcessor { FlipHorizontal = IsFlipHorizontal, FlipVertical = IsFlipVertical, Order = 25 };
+            _contrastLuminanceProcessor = new ContrastLuminanceProcessor { Contrast = Contrast, Luminance = Luminance, UseGpuAcceleration = UseGpuAcceleration, Order = 20 };
+            _flipProcessor = new FlipProcessor { FlipHorizontal = IsFlipHorizontal, FlipVertical = IsFlipVertical, UseGpuAcceleration = UseGpuAcceleration, IsRecordingActive = isSave, Order = 25 };
             _timestampOverlayProcessor = new TimestampOverlayProcessor { Enabled = false, Order = 30 };
             _recordingProcessor = new RecordingProcessor { Enabled = true, Order = 90 };
 
@@ -872,7 +902,8 @@ namespace camera
                 TargetFps = PreviewFps,
                 MaxWidth = MaxPreviewWidth,
                 IsHighDefinition = IsHighDefinition,
-                IsEnabled = true
+                IsEnabled = true,
+                UseGpuAcceleration = UseGpuAcceleration
             };
 
             // 订阅预览帧回调(只写共享槽位,不调 BeginInvoke)
@@ -1784,6 +1815,13 @@ namespace camera
 
         private void OnIsSaveChanged()
         {
+            if (_flipProcessor != null)
+            {
+                _flipProcessor.IsRecordingActive = isSave;
+            }
+            RaisePropertyChanged(nameof(RenderScaleX));
+            RaisePropertyChanged(nameof(RenderScaleY));
+
             if (isSave)
             {
                 System.Threading.Tasks.Task.Run(() => StartSaving());

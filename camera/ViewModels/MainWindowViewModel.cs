@@ -211,7 +211,13 @@ namespace camera.ViewModels
                     AppSettingsService.Instance.SaveSync();
                     ConfigurationManager.SaveSetting("ForceCpuEncoding", value.ToString());
 
-                    Logger.LogInfo($"[VM] 编码模式切换: {(value ? "强制使用 CPU 软件编码" : "优先使用 GPU 硬件加速")}");
+                    // 全链路联动控制优化项 1 (预览下采样), 2 (图像增强与硬件变换), 3 (录像编码与回放解码)
+                    foreach (var cam in Cameras)
+                    {
+                        cam.UseGpuAcceleration = !value;
+                    }
+
+                    Logger.LogInfo($"[VM] 全局硬件加速模式切换: {(value ? "全部使用 CPU (已关闭 GPU 硬件加速: 1. CPU 预览双线性下采样; 2. CPU 内存矩阵翻转与图像变换; 3. CPU libx264 软编与 CPU 软件回放)" : "全链路启用 GPU 硬件加速 (1. GPU 纹理硬件下采样; 2. GPU Direct3D 硬件变换; 3. GPU 硬件编解码与硬件回放)")}");
 
                     if (isSave)
                     {
@@ -2018,6 +2024,7 @@ namespace camera.ViewModels
             cam.IsGrayHomogenization = IsGrayHomogenization;
             cam.PreviewFps = PreviewFps;
             cam.MaxPreviewWidth = MaxPreviewWidth;
+            cam.UseGpuAcceleration = !ForceCpuEncoding;
 
             string savedRes = camConfig?.Resolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
             if (!string.IsNullOrEmpty(savedRes))

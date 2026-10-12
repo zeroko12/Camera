@@ -502,6 +502,7 @@ namespace camera.Views
                 UpdateDwmDarkMode(vm.IsDarkTheme);
                 vm.PlaybackPositionRequest += Vm_PlaybackPositionRequest;
                 vm.PropertyChanged += Vm_PropertyChanged;
+                ApplyRenderAccelerationMode(vm.ForceCpuEncoding);
                 vm.TrayBalloonNotificationRequested += (title, message, isWarning) =>
                 {
                     Dispatcher.InvokeAsync(() =>
@@ -1223,6 +1224,37 @@ namespace camera.Views
             else if (e.PropertyName == nameof(MainWindowViewModel.ConsoleStatus))
             {
                 AnimateConsoleDrawer(vm.ConsoleStatus);
+            }
+            else if (e.PropertyName == nameof(MainWindowViewModel.ForceCpuEncoding))
+            {
+                ApplyRenderAccelerationMode(vm.ForceCpuEncoding);
+            }
+        }
+
+        /// <summary>
+        /// 根据全局 GPU 开关（“仅使用 CPU”）动态切换 WPF 渲染管线与回放硬件加速
+        /// </summary>
+        private void ApplyRenderAccelerationMode(bool forceCpu)
+        {
+            try
+            {
+                // 3. 回放端与 WPF 视图硬件加速：
+                // GPU 模式下启用 Direct3D 硬件加速与 D3D11VA/DXVA2 硬件解码呈现；
+                // CPU 模式（仅使用 CPU）下强制整个进程使用纯 CPU 软件栅格化与软件解码。
+                RenderOptions.ProcessRenderMode = forceCpu
+                    ? System.Windows.Interop.RenderMode.SoftwareOnly
+                    : System.Windows.Interop.RenderMode.Default;
+
+                if (PlaybackPlayer != null)
+                {
+                    RenderOptions.SetBitmapScalingMode(PlaybackPlayer, forceCpu ? BitmapScalingMode.LowQuality : BitmapScalingMode.Linear);
+                }
+
+                Logger.LogInfo($"[UI] 渲染与回放硬件加速已切换: {(forceCpu ? "强制纯 CPU 软件渲染与软解" : "启用 GPU Direct3D 硬件加速与硬解")}");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[UI] 切换渲染硬件加速模式失败", ex);
             }
         }
 

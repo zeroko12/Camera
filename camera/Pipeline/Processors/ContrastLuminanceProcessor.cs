@@ -11,6 +11,7 @@ namespace camera.Pipeline.Processors
 
         public double Contrast { get; set; } = 1.0;
         public double Luminance { get; set; } = 0.0;
+        public bool UseGpuAcceleration { get; set; } = true;
 
         public void Process(Mat frame, DateTime timestamp)
         {

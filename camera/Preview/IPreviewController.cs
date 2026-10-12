@@ -9,6 +9,7 @@ namespace camera.Preview
         int TargetFps { get; set; }
         int MaxWidth { get; set; }
         bool IsHighDefinition { get; set; }
+        bool UseGpuAcceleration { get; set; }
 
         event EventHandler<Mat> PreviewFrameReady;
         void UpdateFrame(Mat frame, DateTime timestamp);

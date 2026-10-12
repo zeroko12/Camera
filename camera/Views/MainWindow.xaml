@@ -265,6 +265,8 @@
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center"
                                             Stretch="{Binding VideoStretch, Mode=OneWay, FallbackValue=Uniform}"
+                                            RenderOptions.BitmapScalingMode="Linear"
+                                            RenderTransformOrigin="0.5,0.5"
                                             local:ImageMatHelper.SourceMat="{Binding Frame}"
                                             AllowDrop="True"
                                             Cursor="Hand"
@@ -272,6 +274,11 @@
                                             Drop="ImageBlock_Drop"
                                             MouseMove="ImageBlock_MouseMove"
                                             PreviewMouseLeftButtonDown="ImageBlock_PreviewMouseLeftButtonDown">
+                                            <Image.RenderTransform>
+                                                <ScaleTransform
+                                                    ScaleX="{Binding RenderScaleX, FallbackValue=1.0}"
+                                                    ScaleY="{Binding RenderScaleY, FallbackValue=1.0}" />
+                                            </Image.RenderTransform>
                                             <Image.ContextMenu>
                                                 <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <MenuItem
@@ -483,8 +490,15 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     Stretch="{Binding VideoStretch, Mode=OneWay, FallbackValue=Uniform}"
+                    RenderOptions.BitmapScalingMode="Linear"
+                    RenderTransformOrigin="0.5,0.5"
                     DataContext="{Binding SelectedCamera}"
                     local:ImageMatHelper.SourceMat="{Binding Frame}">
+                    <Image.RenderTransform>
+                        <ScaleTransform
+                            ScaleX="{Binding RenderScaleX, FallbackValue=1.0}"
+                            ScaleY="{Binding RenderScaleY, FallbackValue=1.0}" />
+                    </Image.RenderTransform>
                     <Image.ContextMenu>
                         <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                             <MenuItem
@@ -771,6 +785,7 @@
                             LoadedBehavior="Manual"
                             MediaEnded="PlaybackPlayer_MediaEnded"
                             MediaOpened="PlaybackPlayer_MediaOpened"
+                            RenderOptions.BitmapScalingMode="Linear"
                             UnloadedBehavior="Stop" />
                     </Border>
 
@@ -2004,18 +2019,18 @@
 
                                             <Separator Margin="0,0,0,5" />
 
-                                            <!--  编码硬件加速状态指示与强制CPU选项  -->
+                                            <!--  硬件加速状态指示与强制CPU选项  -->
                                             <TextBlock
                                                 Margin="0,0,0,3"
                                                 FontSize="11"
                                                 FontWeight="SemiBold"
-                                                Text="编码加速:" />
+                                                Text="硬件加速:" />
                                             <CheckBox
                                                 Margin="0,0,0,4"
-                                                Content="仅使用 CPU 编码"
+                                                Content="仅使用 CPU"
                                                 FontSize="11"
                                                 IsChecked="{Binding ForceCpuEncoding}"
-                                                ToolTip="默认优先使用 GPU 硬件加速(NVENC/QSV/AMF)；勾选后强制使用 CPU 软编(libx264)" />
+                                                ToolTip="默认全链路开启 GPU 硬件加速（GPU 纹理下采样预览、GPU 硬件变换、GPU 硬件录制编码、GPU 硬件回放解码）；勾选后全部强制使用 CPU 处理与软解软编" />
 
                                             <!--  GPU 硬件加速徽章  -->
                                             <Border
