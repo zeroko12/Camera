@@ -514,15 +514,18 @@ namespace camera
             }
         }
 
+        public bool IsRecording => _recorder?.IsRecording ?? false;
+
         public string ActiveCodec => _recorder?.ActiveCodec ?? "None";
 
         public bool IsCodecDowngraded
         {
             get
             {
-                if (_recorder == null || !isSave) return false;
+                if (_recorder == null || !isSave || !IsRecording) return false;
                 string codec = ActiveCodec.ToLower();
-                return codec.Contains("libx264") || codec.Contains("mpeg4") || codec == "none" || codec == "";
+                if (string.IsNullOrEmpty(codec) || codec == "none") return false;
+                return codec.Contains("libx264") || codec.Contains("mpeg4");
             }
         }
 
@@ -800,6 +803,7 @@ namespace camera
         {
             RaisePropertyChanged(nameof(ActiveCodec));
             RaisePropertyChanged(nameof(IsCodecDowngraded));
+            RaisePropertyChanged(nameof(IsRecording));
             RaisePropertyChanged(nameof(UsbSpeedDescription));
             RaisePropertyChanged(nameof(EstimatedMbPerSec));
         }
@@ -922,6 +926,20 @@ namespace camera
             };
             
             _recorder = new FFmpegVideoRecorder(_recordingOptions);
+            _recorder.RecordingStarted += (s, e) =>
+            {
+                Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    UpdateActiveCodecStatus();
+                }));
+            };
+            _recorder.RecordingStopped += (s, e) =>
+            {
+                Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    UpdateActiveCodecStatus();
+                }));
+            };
             _recordingProcessor.Recorder = _recorder;
         }
 

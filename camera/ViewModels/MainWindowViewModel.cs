@@ -773,7 +773,8 @@ namespace camera.ViewModels
                 UpdateDiskRecordingStatus();
             }
             else if (e.PropertyName == nameof(CameraService.ActiveCodec) ||
-                     e.PropertyName == nameof(CameraService.IsCodecDowngraded))
+                     e.PropertyName == nameof(CameraService.IsCodecDowngraded) ||
+                     e.PropertyName == nameof(CameraService.IsRecording))
             {
                 RaisePropertyChanged(nameof(IsGpuEncodingActive));
                 RaisePropertyChanged(nameof(IsCpuEncodingActive));
@@ -1398,9 +1399,22 @@ namespace camera.ViewModels
             }
         }
 
-        public bool IsGpuEncodingActive => SelectedConfigCamera != null && isSave && !SelectedConfigCamera.IsCodecDowngraded;
-        public bool IsCpuEncodingActive => SelectedConfigCamera != null && isSave && SelectedConfigCamera.IsCodecDowngraded;
-        public bool IsEncodingInactive => !isSave;
+        public bool IsGpuEncodingActive =>
+            SelectedConfigCamera != null && isSave &&
+            SelectedConfigCamera.IsRecording &&
+            !SelectedConfigCamera.IsCodecDowngraded &&
+            !string.IsNullOrEmpty(SelectedConfigCamera.ActiveCodec) &&
+            !SelectedConfigCamera.ActiveCodec.Equals("None", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsCpuEncodingActive =>
+            SelectedConfigCamera != null && isSave &&
+            SelectedConfigCamera.IsRecording &&
+            SelectedConfigCamera.IsCodecDowngraded;
+
+        public bool IsEncodingInactive =>
+            !isSave || SelectedConfigCamera == null || !SelectedConfigCamera.IsRecording ||
+            string.IsNullOrEmpty(SelectedConfigCamera.ActiveCodec) ||
+            SelectedConfigCamera.ActiveCodec.Equals("None", StringComparison.OrdinalIgnoreCase);
 
         #endregion
 
