@@ -410,6 +410,7 @@ namespace camera.Encoding
                     if (encoder.Initialize(inputWidth, inputHeight, recordWidth, recordHeight, fps, codec, quality, outputPath ?? "", customText, fontScale))
                     {
                         RegisterSession(codec);
+                        encoder.IsSessionRegistered = true;
                         return encoder;
                     }
                     else

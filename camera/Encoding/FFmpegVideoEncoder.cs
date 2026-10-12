@@ -49,6 +49,7 @@ namespace camera.Encoding
         private const long HasExitedCheckIntervalTicks = 200 * TimeSpan.TicksPerMillisecond;
 
         public bool IsInitialized => _ffmpegProcess != null && !GetHasExitedCached();
+        public bool IsSessionRegistered { get; set; }
         public int InputWidth { get; private set; }
         public int InputHeight { get; private set; }
         public int Width { get; private set; }
@@ -56,6 +57,8 @@ namespace camera.Encoding
         public double Fps { get; private set; }
         public string Codec { get; private set; } = "";
         public string OutputPath { get; private set; } = "";
+
+        private Mat _resizedBuffer;  // 尺寸不匹配时的容错缩放持久缓冲区
 
         /// <summary>
         /// 缓存版的 HasExited。最多每 200 ms 调一次 Process.HasExited 真实探活。
@@ -130,18 +133,16 @@ namespace camera.Encoding
                     vfFilter = $"scale={recordWidth}:{recordHeight}";
                 }
 
-                // 微软雅黑与 Arial 字体备份机制，确保不同语言的 Windows 环境下均不因字体缺失而崩溃
-                string fontPath = "C\\:/Windows/Fonts/msyh.ttc";
-                if (!File.Exists("C:\\Windows\\Fonts\\msyh.ttc"))
+                // 动态获取系统 Fonts 目录，消除 C 盘硬编码
+                string fontsDir = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+                string fontFile = Path.Combine(fontsDir, "msyh.ttc");
+                if (!File.Exists(fontFile))
                 {
-                    fontPath = "C\\:/Windows/Fonts/arial.ttf";
+                    fontFile = Path.Combine(fontsDir, "arial.ttf");
                 }
+                string fontPath = fontFile.Replace("\\", "/").Replace(":", "\\:");
 
-                string escapedText = "";
-                if (!string.IsNullOrEmpty(customText))
-                {
-                    escapedText = customText.Replace("'", "'\\''") + " ";
-                }
+                string escapedText = EscapeDrawText(customText);
 
                 // 计算水印字体大小比例（以 0.3 为基准，默认对应 24 像素的字体大小）
                 int fontSize = (int)Math.Round(24.0 * (fontScale / 0.3));
@@ -262,11 +263,25 @@ namespace camera.Encoding
         }
 
         /// <summary>
+        /// 转义 FFmpeg drawtext 滤镜中的保留特殊字符，防止参数被误认为滤镜选项而引起崩溃。
+        /// </summary>
+        private static string EscapeDrawText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            return text
+                .Replace("\\", "\\\\")
+                .Replace("'", "'\\''")
+                .Replace(":", "\\:")
+                .Replace(",", "\\,")
+                .Replace("%", "\\%") + " ";
+        }
+
+        /// <summary>
         /// 编码一帧视频。
         /// 
         /// 性能关键路径 — 每秒调用 10-30 次，必须零分配:
-        /// 1. BGR → YUV_I420 色彩空间转换（OpenCV，比 FFmpeg 内部转换更高效）
-        /// 2. 使用 ArrayPool 租借缓冲区（避免 GC 压力）
+        /// 1. 检查输入尺寸与 FFmpeg 期待尺寸，必要时执行容错缩放，杜绝管道字节错位与花屏
+        /// 2. BGR → YUV_I420 色彩空间转换
         /// 3. 管道写入 + 强制刷新
         /// </summary>
         public bool EncodeFrame(Mat frame, DateTime timestamp)
@@ -274,11 +289,24 @@ namespace camera.Encoding
             if (!IsInitialized || _ffmpegProcess == null || !_ffmpegProcess.StandardInput.BaseStream.CanWrite)
                 return false;
 
+            if (frame == null || frame.Empty())
+                return false;
+
             try
             {
+                Mat frameToEncode = frame;
+
+                // 容错机制：若输入帧尺寸与 FFmpeg 期待的规格不一致，进行安全等比/尺寸适配，杜绝管道字节错位与花屏
+                if (frame.Width != InputWidth || frame.Height != InputHeight)
+                {
+                    EnsureResizedBuffer(InputWidth, InputHeight);
+                    Cv2.Resize(frame, _resizedBuffer, new OpenCvSharp.Size(InputWidth, InputHeight));
+                    frameToEncode = _resizedBuffer;
+                }
+
                 // 持久 YUV 缓冲区：避免每帧 MatPool Rent/Return 开销
-                EnsureYuvBuffer(frame.Width, frame.Height);
-                Cv2.CvtColor(frame, _yuvBuffer, ColorConversionCodes.BGR2YUV_I420);
+                EnsureYuvBuffer(InputWidth, InputHeight);
+                Cv2.CvtColor(frameToEncode, _yuvBuffer, ColorConversionCodes.BGR2YUV_I420);
 
                 int frameSize = (int)_yuvBuffer.Total() * _yuvBuffer.ElemSize();
                 
@@ -296,6 +324,15 @@ namespace camera.Encoding
             {
                 Logger.LogWarning($"[FFmpegEncoder] 帧写入失败: {ex.Message}");
                 return false;
+            }
+        }
+
+        private void EnsureResizedBuffer(int w, int h)
+        {
+            if (_resizedBuffer == null || _resizedBuffer.Width != w || _resizedBuffer.Height != h)
+            {
+                _resizedBuffer?.Dispose();
+                _resizedBuffer = new Mat(h, w, MatType.CV_8UC3);
             }
         }
 
@@ -418,18 +455,24 @@ namespace camera.Encoding
                 _cts = null;
             }
 
-            // 2. 释放会话计数
-            if (!string.IsNullOrEmpty(Codec))
+            // 2. 释放会话计数（仅当之前成功注册过会话时才释放，防止失败回退路径误扣减它路会话配额）
+            if (IsSessionRegistered && !string.IsNullOrEmpty(Codec))
             {
                 VideoEncoderFactory.ReleaseSession(Codec);
-                Codec = "";
+                IsSessionRegistered = false;
             }
+            Codec = "";
 
-            // 3. YUV 缓冲(必须在 Process 之前)
+            // 3. YUV 与缩放缓冲释放
             if (_yuvBuffer != null)
             {
                 try { _yuvBuffer.Dispose(); } catch { }
                 _yuvBuffer = null;
+            }
+            if (_resizedBuffer != null)
+            {
+                try { _resizedBuffer.Dispose(); } catch { }
+                _resizedBuffer = null;
             }
 
             // 4. Process 严格顺序

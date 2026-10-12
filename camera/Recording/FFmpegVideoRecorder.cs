@@ -47,6 +47,7 @@ namespace camera.Recording
         // - MaxInitRetries: 防止无限重试（circuit breaker 模式）
         // ═══════════════════════════════════════════════════════════
         private int _initFailCount = 0;
+        private int _consecutiveEncodeFailures = 0;
         private DateTime _lastInitAttempt = DateTime.MinValue;
         private static readonly TimeSpan InitCooldown = TimeSpan.FromSeconds(10);
         private const int MaxInitRetries = 3;
@@ -86,6 +87,7 @@ namespace camera.Recording
 
                     // 重置自愈状态（新录制会话 = 新的重试窗口）
                     _initFailCount = 0;
+                    _consecutiveEncodeFailures = 0;
                     _lastInitAttempt = DateTime.MinValue;
 
                     _options.InputWidth = inputWidth;
@@ -212,11 +214,24 @@ namespace camera.Recording
                             bool success = _encoder.EncodeFrame(frame, timestamp);
                             if (!success)
                             {
-                                Logger.LogWarning($"[FFmpegRecorder] 帧编码失败（管道可能已断裂），销毁编码器并标记黑名单以触发自愈");
-                                VideoEncoderFactory.MarkAsFailed(_encoder.Codec);
-                                try { _encoder.Dispose(); } catch { }
-                                _encoder = null;
-                                break;
+                                _consecutiveEncodeFailures++;
+                                // 容错重试保护：仅当连续 3 帧写入失败或编码器进程已明确断开时，才判定编码器崩溃并触发自愈与黑名单
+                                if (_consecutiveEncodeFailures >= 3 || (_encoder != null && !_encoder.IsInitialized))
+                                {
+                                    Logger.LogWarning($"[FFmpegRecorder] 连续多次帧编码失败或编码管道断裂，销毁编码器以触发自愈");
+                                    if (_encoder != null && !string.IsNullOrEmpty(_encoder.Codec))
+                                    {
+                                        VideoEncoderFactory.MarkAsFailed(_encoder.Codec);
+                                    }
+                                    var brokenEncoder = _encoder;
+                                    _encoder = null;
+                                    System.Threading.Tasks.Task.Run(() => { try { brokenEncoder?.Dispose(); } catch { } });
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                _consecutiveEncodeFailures = 0;
                             }
                         }
                         _framesWritten += framesToEncode;
@@ -260,14 +275,27 @@ namespace camera.Recording
             {
                 if (_encoder != null)
                 {
-                    try { _encoder.Dispose(); } catch { }
+                    var oldEnc = _encoder;
                     _encoder = null;
+                    System.Threading.Tasks.Task.Run(() => { try { oldEnc.Dispose(); } catch { } });
                 }
 
                 string oldPath = _currentOutputPath;
                 if (!string.IsNullOrEmpty(oldPath))
                 {
                     StorageManager.Instance.UnregisterActiveFile(oldPath);
+                }
+
+                // 自适应纠偏：若传入帧尺寸与原配置不一致，自动校正为真实物理输入规格
+                if (frame != null && !frame.Empty() && frame.Width > 0 && frame.Height > 0)
+                {
+                    _options.InputWidth = frame.Width;
+                    _options.InputHeight = frame.Height;
+                    if (_options.Width <= 0 || _options.Height <= 0)
+                    {
+                        _options.Width = frame.Width;
+                        _options.Height = frame.Height;
+                    }
                 }
 
                 // 使用新路径重新拉起，避免损坏已有视频文件
@@ -279,6 +307,7 @@ namespace camera.Recording
                 if (_encoder != null && _encoder.IsInitialized)
                 {
                     _initFailCount = 0;
+                    _consecutiveEncodeFailures = 0;
                     _lastSegmentTime = DateTime.Now; // 重置分段计时，确保新文件获得完整分段时长
                     _framesWritten = 0;
                     Logger.LogInfo($"[FFmpegRecorder] 编码器自愈成功: {_currentOutputPath}");
@@ -325,39 +354,43 @@ namespace camera.Recording
             if (_encoder == null) return;
 
             Logger.LogInfo($"[FFmpegRecorder] 分段切换: 关闭 {_currentOutputPath}");
-            // ★ Fix P1-6: 显式 Dispose 一次,避免 RotateSegment + Dispose 双重 Flush 调用
-            // 原来的 _encoder.Flush() + _encoder.Dispose() 会触发两次 Cleanup,
-            // 每次都创建 _yuvBuffer/_cts Dispose 链。
             var oldEncoder = _encoder;
             _encoder = null;  // 先置 null,确保 RecordFrame 不再访问
-            try
+            string oldPath = _currentOutputPath;
+            int oldFrames = _framesWritten;
+
+            if (!string.IsNullOrEmpty(oldPath))
             {
-                oldEncoder.Dispose();  // Dispose 内部会调 Flush
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning($"[FFmpegRecorder] 旧编码器 Dispose 异常: {ex.Message}");
+                StorageManager.Instance.UnregisterActiveFile(oldPath);
             }
 
-            // 如果本分段没有写入任何有效帧，则自动清理删除该空视频文件
-            if (_framesWritten == 0 && !string.IsNullOrEmpty(_currentOutputPath) && File.Exists(_currentOutputPath))
+            // 核心修复: 在后台线程异步完成旧文件的 Flush 与 Dispose (最长可能耗时数秒)
+            // 绝不在采集线程与持锁状态下同步等待 WaitForExit，彻底消除每分钟的严重卡顿丢帧！
+            System.Threading.Tasks.Task.Run(() =>
             {
                 try
                 {
-                    File.Delete(_currentOutputPath);
-                    Logger.LogInfo($"[FFmpegRecorder] 自动清理无数据分段空文件: {_currentOutputPath}");
+                    oldEncoder.Dispose();
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogWarning($"[FFmpegRecorder] 无法清理删除空视频文件: {ex.Message}");
+                    Logger.LogWarning($"[FFmpegRecorder] 旧编码器后台 Dispose 异常: {ex.Message}");
                 }
-            }
 
-            string oldRotatedPath = _currentOutputPath;
-            if (!string.IsNullOrEmpty(oldRotatedPath))
-            {
-                StorageManager.Instance.UnregisterActiveFile(oldRotatedPath);
-            }
+                // 如果本分段没有写入任何有效帧，则自动清理删除该空视频文件
+                if (oldFrames == 0 && !string.IsNullOrEmpty(oldPath) && File.Exists(oldPath))
+                {
+                    try
+                    {
+                        File.Delete(oldPath);
+                        Logger.LogInfo($"[FFmpegRecorder] 自动清理无数据分段空文件: {oldPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"[FFmpegRecorder] 无法清理删除空视频文件: {ex.Message}");
+                    }
+                }
+            });
 
             string newPath = GenerateOutputPath();
             StorageManager.Instance.RegisterActiveFile(newPath);
@@ -366,6 +399,7 @@ namespace camera.Recording
                 _options.InputWidth, _options.InputHeight, _options.Width, _options.Height, _options.RecordFps, CurrentQuality, newPath, _ffmpegPath, _options.CustomText, _options.OverlayTextSize);
             _currentOutputPath = newPath;
             _framesWritten = 0;
+            _consecutiveEncodeFailures = 0;
         }
 
         /// <summary>
