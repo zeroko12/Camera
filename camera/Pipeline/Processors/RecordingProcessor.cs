@@ -16,7 +16,15 @@ namespace camera.Pipeline.Processors
         {
             if (Recorder != null && Recorder.IsRecording && !Recorder.IsPaused)
             {
-                Recorder.RecordFrame(frame, timestamp);
+                try
+                {
+                    Recorder.RecordFrame(frame, timestamp);
+                }
+                catch (Exception ex)
+                {
+                    // 录像写入异常绝对不向上传播到图像处理管线，确保后续预览控制器永远安全收到帧
+                    Logger.LogWarning($"[RecordingProcessor] 录像处理器写入异常: {ex.Message}");
+                }
             }
         }
     }

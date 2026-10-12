@@ -400,24 +400,29 @@ namespace camera.Encoding
             try
             {
                 int lineCount = 0;
-                using (var reader = _ffmpegProcess?.StandardError)
-                {
-                    if (reader == null) return;
-                    string line;
-                    while ((line = await reader.ReadLineAsync()) != null && !token.IsCancellationRequested)
-                    {
-                        if (!string.IsNullOrWhiteSpace(line))
-                        {
-                            bool isError = line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-                                           line.Contains("invalid", StringComparison.OrdinalIgnoreCase) ||
-                                           line.Contains("cannot", StringComparison.OrdinalIgnoreCase) ||
-                                           line.Contains("failed", StringComparison.OrdinalIgnoreCase);
+                var reader = _ffmpegProcess?.StandardError;
+                if (reader == null) return;
 
-                            if (isError || lineCount < 20)
-                            {
-                                Logger.LogInfo($"[FFmpeg] {line}");
-                                lineCount++;
-                            }
+                string line;
+                while ((line = await reader.ReadLineAsync()) != null)
+                {
+                    // 即使收到取消信号，也继续排空剩余日志直到进程退出，防止管道缓冲区填满导致 FFmpeg 进程挂起
+                    if (token.IsCancellationRequested)
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(line))
+                    {
+                        bool isError = line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                                       line.Contains("invalid", StringComparison.OrdinalIgnoreCase) ||
+                                       line.Contains("cannot", StringComparison.OrdinalIgnoreCase) ||
+                                       line.Contains("failed", StringComparison.OrdinalIgnoreCase);
+
+                        if (isError || lineCount < 20)
+                        {
+                            Logger.LogInfo($"[FFmpeg] {line}");
+                            lineCount++;
                         }
                     }
                 }

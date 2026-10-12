@@ -174,7 +174,14 @@ namespace camera.Recording
             // 快速路径：无锁检查（volatile 读），录制关闭/暂停时直接返回，避免 Monitor.Enter/Exit 开销
             if (!_isRecording || _isPaused) return;
 
-            lock (_lock)
+            // ═══ 核心防火墙: 采集与预览绝对不阻塞 ═══
+            // 最多等待 2ms，若录像器正处于重启、分段或进程创建状态，安全丢弃该录像帧，绝不卡死实时采集和预览！
+            if (!System.Threading.Monitor.TryEnter(_lock, 2))
+            {
+                return;
+            }
+
+            try
             {
                 if (!_isRecording || _isPaused) return;
 
@@ -199,16 +206,22 @@ namespace camera.Recording
                     int expectedFrames = (int)(elapsedSeconds * _options.RecordFps) + 1;
                     int framesToEncode = expectedFrames - _framesWritten;
 
+                    // 动态帧率调节与防倒流自适应保护
+                    if (framesToEncode < 0)
+                    {
+                        // 用户在运行期调低了录制帧率或时钟微调：立即平滑对齐当前帧基准，持续输出
+                        _framesWritten = expectedFrames;
+                        framesToEncode = 1;
+                    }
+                    else if (framesToEncode > _options.RecordFps * 2)
+                    {
+                        // 用户调高了录制帧率或发生时间跳变：限制单次追赶不超过 2 帧，杜绝管道拥塞卡死采集线程
+                        framesToEncode = 2;
+                        _framesWritten = expectedFrames - 2;
+                    }
+
                     if (framesToEncode > 0)
                     {
-                        // 容错处理：若发生系统休眠或时钟跳变导致帧数落后过多，进行安全限制，避免一次性写入过多重复帧卡死应用
-                        if (framesToEncode > _options.RecordFps * 5)
-                        {
-                            Logger.LogWarning($"[FFmpegRecorder] 检测到时间跳变或系统休眠，限制帧追赶: elapsed={elapsedSeconds}s, expected={expectedFrames}, written={_framesWritten}. 强制重置.");
-                            framesToEncode = 1;
-                            _framesWritten = expectedFrames - 1;
-                        }
-
                         for (int i = 0; i < framesToEncode; i++)
                         {
                             bool success = _encoder.EncodeFrame(frame, timestamp);
@@ -241,6 +254,10 @@ namespace camera.Recording
                 {
                     Logger.LogWarning($"[FFmpegRecorder] 录制单帧异常: {ex.Message}");
                 }
+            }
+            finally
+            {
+                System.Threading.Monitor.Exit(_lock);
             }
         }
 

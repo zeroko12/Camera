@@ -39,6 +39,7 @@ namespace camera
             ReadCommentHandling      = JsonCommentHandling.Skip,
             AllowTrailingCommas      = true,
             Encoder                  = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            NumberHandling           = JsonNumberHandling.AllowNamedFloatingPointLiterals,
             Converters               = { new JsonStringEnumConverter() },
         };
 

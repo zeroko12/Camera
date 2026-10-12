@@ -76,6 +76,10 @@ namespace camera
         #region 锁和时间统计
 
         private readonly object _lockObject = new();
+        private readonly object _savingStateLock = new();
+        private readonly object _restartSavingDebounceLock = new();
+        private CancellationTokenSource _restartSavingCts;
+        private DateTime _lastStartSavingAttempt = DateTime.MinValue;
         private readonly Stopwatch _fpsTimer = new();
         private volatile bool _isStartingSaving = false;
         private volatile bool _isFirstFrame = true;
@@ -136,7 +140,8 @@ namespace camera
 
                     if (isSave)
                     {
-                        System.Threading.Tasks.Task.Run(() => RestartSaving());
+                        // ★ 防抖重启：避免滑动 Slider 时并发产生大量 FFmpeg 进程创建/销毁与死锁
+                        ScheduleRestartSaving(600);
                     }
                 }
             }
@@ -390,20 +395,60 @@ namespace camera
                     }
                     if (isSave)
                     {
-                        System.Threading.Tasks.Task.Run(() => RestartSaving());
+                        ScheduleRestartSaving(600);
                     }
                 }
             }
         }
 
+        /// <summary>
+        /// 调度防抖录像重启（例如 600ms 内多次滑动帧率/修改文字只在最后一次稳定后重启一次）。
+        /// 杜绝用户拖动滑块时并发派发几十个 FFmpeg 进程创建/销毁风暴与锁争抢。
+        /// </summary>
+        public void ScheduleRestartSaving(int debounceMs = 600)
+        {
+            if (!isSave) return;
+
+            lock (_restartSavingDebounceLock)
+            {
+                try
+                {
+                    _restartSavingCts?.Cancel();
+                    _restartSavingCts?.Dispose();
+                }
+                catch { }
+
+                _restartSavingCts = new CancellationTokenSource();
+                var token = _restartSavingCts.Token;
+
+                Task.Delay(debounceMs, token).ContinueWith(t =>
+                {
+                    if (t.IsCanceled || token.IsCancellationRequested) return;
+                    RestartSaving();
+                }, TaskScheduler.Default);
+            }
+        }
+
         public void RestartSaving()
         {
-            lock (_lockObject)
+            if (!isSave) return;
+
+            // 专属录像状态锁，解耦全局相机硬件锁 _lockObject，彻底杜绝死锁与阻塞采集循环
+            lock (_savingStateLock)
             {
                 if (!isSave) return;
-                Logger.LogInfo($"[CameraService #{Index}] 正在重启录像以应用新的录像参数...");
-                StopSaving();
-                StartSaving();
+                Logger.LogInfo($"[CameraService #{Index}] 正在平滑重启录像以应用新的录像参数...");
+                try
+                {
+                    StopSaving();
+                    // 极短暂让步（30ms），让底层操作系统完成旧管道与编码会话清理
+                    Thread.Sleep(30);
+                    StartSaving();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[CameraService #{Index}] 平滑重启录像异常: {ex.Message}", ex);
+                }
             }
         }
 
@@ -508,7 +553,7 @@ namespace camera
 
                     if (isSave)
                     {
-                        System.Threading.Tasks.Task.Run(() => RestartSaving());
+                        ScheduleRestartSaving(600);
                     }
                 }
             }
@@ -1750,9 +1795,11 @@ namespace camera
                             RaisePropertyChanged(nameof(IsConnected));
                         }
 
-                        // 如果开启了录像且录像服务未就绪/未运行，在首次成功捕获正常画面帧后自动开启录像（增加 _isStartingSaving 防抖，防止多帧并发风暴）
-                        if (isSave && _recorder != null && !_recorder.IsRecording && !_isStartingSaving)
+                        // 如果开启了录像且录像服务未就绪/未运行，在首次成功捕获正常画面帧后自动开启录像（增加 3 秒冷却与前置标记，防止多帧并发风暴）
+                        if (isSave && _recorder != null && !_recorder.IsRecording && !_isStartingSaving && (pipelineNow - _lastStartSavingAttempt).TotalSeconds >= 3)
                         {
+                            _lastStartSavingAttempt = pipelineNow;
+                            _isStartingSaving = true;
                             System.Threading.Tasks.Task.Run(() => StartSaving());
                         }
 
@@ -1834,78 +1881,87 @@ namespace camera
 
         private void StartSaving()
         {
-            if (_isStartingSaving) return;
-            _isStartingSaving = true;
-
-            try
+            lock (_savingStateLock)
             {
+                if (!isSave) return;
                 if (_recorder == null) return;
                 if (_recorder.IsRecording) return;
+                _isStartingSaving = true;
 
-                if (cap == null || cap.IsDisposed || !cap.IsOpened() || !IsConnected)
+                try
                 {
-                    Logger.LogInfo($"[CameraService #{Index}] 摄像头 {Name} 尚未成功打开或当前处于离线状态，暂缓开启录像。");
-                    return;
-                }
-
-                if (!StorageManager.Instance.CanStartRecording(out string failureReason))
-                {
-                    Logger.LogWarning($"[CameraService #{Index}] 无法开启录像: {failureReason}");
-                    isSave = false;
-                    return;
-                }
-
-                // 解析录像分辨率与输入分辨率（安全保底）
-                int inputW = Width > 0 ? (int)Width : 1280;
-                int inputH = Height > 0 ? (int)Height : 720;
-                int recordW = inputW;
-                int recordH = inputH;
-
-                if (SelectedRecordResolution != "与采集分辨率一致")
-                {
-                    var parts = SelectedRecordResolution.Split('x');
-                    if (parts.Length == 2 && int.TryParse(parts[0], out int rw) && int.TryParse(parts[1], out int rh) && rw > 0 && rh > 0)
+                    if (cap == null || cap.IsDisposed || !cap.IsOpened() || !IsConnected)
                     {
-                        recordW = rw;
-                        recordH = rh;
+                        Logger.LogInfo($"[CameraService #{Index}] 摄像头 {Name} 尚未成功打开或当前处于离线状态，暂缓开启录像。");
+                        return;
                     }
+
+                    if (!StorageManager.Instance.CanStartRecording(out string failureReason))
+                    {
+                        Logger.LogWarning($"[CameraService #{Index}] 无法开启录像: {failureReason}");
+                        isSave = false;
+                        return;
+                    }
+
+                    // 解析录像分辨率与输入分辨率（安全保底）
+                    int inputW = Width > 0 ? (int)Width : 1280;
+                    int inputH = Height > 0 ? (int)Height : 720;
+                    int recordW = inputW;
+                    int recordH = inputH;
+
+                    if (SelectedRecordResolution != "与采集分辨率一致")
+                    {
+                        var parts = SelectedRecordResolution.Split('x');
+                        if (parts.Length == 2 && int.TryParse(parts[0], out int rw) && int.TryParse(parts[1], out int rh) && rw > 0 && rh > 0)
+                        {
+                            recordW = rw;
+                            recordH = rh;
+                        }
+                    }
+
+                    // 偶数保护 (YUV420p 色彩空间必须使用偶数分辨率，防止 FFmpeg 初始化报错)
+                    if (inputW % 2 != 0) inputW--;
+                    if (inputH % 2 != 0) inputH--;
+                    if (recordW % 2 != 0) recordW--;
+                    if (recordH % 2 != 0) recordH--;
+
+                    _recordingOptions.InputWidth = inputW;
+                    _recordingOptions.InputHeight = inputH;
+                    _recordingOptions.Width = recordW;
+                    _recordingOptions.Height = recordH;
+                    // ⚠️ 关键: 这里设置的是"管道帧率"（= RecordFps），而非相机原始帧率(Fps)。
+                    // 原因: RefreshFrame 中已按 RecordFps 对管道进行节流，
+                    //       录制器实际接收到的帧率 ≈ RecordFps，而非 Fps。
+                    _recordingOptions.Fps = Math.Max(1, RecordFps);
+                    _recordingOptions.RecordFps = RecordFps;
+                    _recordingOptions.SaveDirectory = saveDirectory;
+                    _recordingOptions.SegmentDuration = SaveInterval;
+                    _recordingOptions.CustomText = CustomOverlayText;
+                    _recordingOptions.OverlayTextSize = OverlayTextSize;
+         
+                    _recorder.StartRecording(null, inputW, inputH, recordW, recordH, RecordFps, Quality);
                 }
-
-                // 偶数保护 (YUV420p 色彩空间必须使用偶数分辨率，防止 FFmpeg 初始化报错)
-                if (inputW % 2 != 0) inputW--;
-                if (inputH % 2 != 0) inputH--;
-                if (recordW % 2 != 0) recordW--;
-                if (recordH % 2 != 0) recordH--;
-
-                _recordingOptions.InputWidth = inputW;
-                _recordingOptions.InputHeight = inputH;
-                _recordingOptions.Width = recordW;
-                _recordingOptions.Height = recordH;
-                // ⚠️ 关键: 这里设置的是"管道帧率"（= RecordFps），而非相机原始帧率(Fps)。
-                // 原因: RefreshFrame 中已按 RecordFps 对管道进行节流，
-                //       录制器实际接收到的帧率 ≈ RecordFps，而非 Fps。
-                _recordingOptions.Fps = Math.Max(1, RecordFps);
-                _recordingOptions.RecordFps = RecordFps;
-                _recordingOptions.SaveDirectory = saveDirectory;
-                _recordingOptions.SegmentDuration = SaveInterval;
-                _recordingOptions.CustomText = CustomOverlayText;
-                _recordingOptions.OverlayTextSize = OverlayTextSize;
-     
-                _recorder.StartRecording(null, inputW, inputH, recordW, recordH, RecordFps, Quality);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[CameraService #{Index}] 启动录像异常: {ex.Message}", ex);
-            }
-            finally
-            {
-                _isStartingSaving = false;
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[CameraService #{Index}] 启动录像异常: {ex.Message}", ex);
+                }
+                finally
+                {
+                    _isStartingSaving = false;
+                }
             }
         }
 
         private void StopSaving()
         {
-            _recorder?.StopRecording();
+            try
+            {
+                _recorder?.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[CameraService #{Index}] 停止录像异常: {ex.Message}");
+            }
         }
 
         // ═══════════════════════════════════════════════════════════
