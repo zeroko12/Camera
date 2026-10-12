@@ -358,6 +358,13 @@ namespace camera.ViewModels
             {
                 camera.PreviewFps = PreviewFps;
             }
+
+            // 同步调整 UI 共享帧拉取定时器的刷新频率，消除原先固定 100ms (10fps) 的刷新上限瓶颈
+            if (_sharedFrameTimer != null && PreviewFps > 0)
+            {
+                int intervalMs = Math.Max(16, (int)Math.Round(1000.0 / PreviewFps));
+                _sharedFrameTimer.Interval = TimeSpan.FromMilliseconds(intervalMs);
+            }
         }
 
         private int _RecordFps = 15;
@@ -1462,7 +1469,9 @@ namespace camera.ViewModels
             UpdateDiskRecordingStatus();
             UpdateActiveCodecStatus();
 
-            // 初始化共享帧拉取定时器(Background 优先级,与 WPF 渲染管线让开)
+            // 初始化共享帧拉取定时器(Background 优先级,与 WPF 渲染管线让开,与当前 PreviewFps 对齐)
+            int initialFps = PreviewFps > 0 ? PreviewFps : 10;
+            _sharedFrameIntervalMs = Math.Max(16, (int)Math.Round(1000.0 / initialFps));
             _sharedFrameTimer = new DispatcherTimer(DispatcherPriority.Background);
             _sharedFrameTimer.Interval = TimeSpan.FromMilliseconds(_sharedFrameIntervalMs);
             _sharedFrameTimer.Tick += SharedFrameTimer_Tick;

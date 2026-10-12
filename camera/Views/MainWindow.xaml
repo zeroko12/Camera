@@ -1644,7 +1644,7 @@
                                                 Text="{Binding DiskSpaceThresholdStatusText}"
                                                 TextWrapping="Wrap" />
 
-                                            <hc:ButtonGroup Margin="0,0,0,2" Orientation="Vertical">
+                                            <hc:ButtonGroup Margin="0,0,0,4" Orientation="Vertical">
                                                 <RadioButton
                                                     Height="24"
                                                     Content="空间不足覆盖旧文件"
@@ -1656,6 +1656,41 @@
                                                     FontSize="11"
                                                     IsChecked="{c:Binding !OverwriteOldFiles}" />
                                             </hc:ButtonGroup>
+
+                                            <!--  空间策略状态与录制预估看板 (就近直观查看)  -->
+                                            <Border
+                                                Margin="0,2,0,2"
+                                                Padding="7,5"
+                                                Background="#FAFAFA"
+                                                BorderBrush="#E0E0E0"
+                                                BorderThickness="1"
+                                                CornerRadius="4">
+                                                <StackPanel>
+                                                    <Grid Margin="0,0,0,2">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock
+                                                            FontSize="10"
+                                                            FontWeight="SemiBold"
+                                                            Foreground="#424242"
+                                                            Text="当前存储空间状态" />
+                                                        <TextBlock
+                                                            Grid.Column="1"
+                                                            FontSize="10"
+                                                            Foreground="Gray"
+                                                            Text="{Binding DiskSpaceThreshold,
+                                                                           StringFormat='保留阈值: {0} MB'}" />
+                                                    </Grid>
+                                                    <TextBlock
+                                                        FontSize="11"
+                                                        Foreground="{Binding DiskSpaceWarningColor}"
+                                                        LineHeight="16"
+                                                        Text="{Binding DiskSpaceWarningText}"
+                                                        TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
                                         </StackPanel>
                                     </Border>
                                 </Expander>
