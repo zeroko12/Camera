@@ -871,7 +871,7 @@
                                     Style="{StaticResource ButtonDefault.Small}"
                                     ToolTip="减速" />
                                 <TextBlock
-                                    Width="45"
+                                    Width="52"
                                     Margin="5,0"
                                     VerticalAlignment="Center"
                                     FontWeight="Bold"
@@ -885,7 +885,7 @@
                                     VerticalAlignment="Center"
                                     Command="{Binding SpeedUpCommand}"
                                     Content="+"
-                                    IsEnabled="{c:Binding 'PlaybackSpeed &lt; 32.0'}"
+                                    IsEnabled="{c:Binding 'PlaybackSpeed &lt; 64.0'}"
                                     Style="{StaticResource ButtonDefault.Small}"
                                     ToolTip="加速" />
 

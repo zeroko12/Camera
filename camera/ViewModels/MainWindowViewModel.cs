@@ -1299,6 +1299,7 @@ namespace camera.ViewModels
             else if (PlaybackSpeed < 8.0) PlaybackSpeed = 8.0;
             else if (PlaybackSpeed < 16.0) PlaybackSpeed = 16.0;
             else if (PlaybackSpeed < 32.0) PlaybackSpeed = 32.0;
+            else if (PlaybackSpeed < 64.0) PlaybackSpeed = 64.0;
         }
 
         private DelegateCommand _speedDownCommand;
@@ -1307,7 +1308,8 @@ namespace camera.ViewModels
 
         private void ExecuteSpeedDownCommand()
         {
-            if (PlaybackSpeed > 16.0) PlaybackSpeed = 16.0;
+            if (PlaybackSpeed > 32.0) PlaybackSpeed = 32.0;
+            else if (PlaybackSpeed > 16.0) PlaybackSpeed = 16.0;
             else if (PlaybackSpeed > 8.0) PlaybackSpeed = 8.0;
             else if (PlaybackSpeed > 4.0) PlaybackSpeed = 4.0;
             else if (PlaybackSpeed > 2.0) PlaybackSpeed = 2.0;

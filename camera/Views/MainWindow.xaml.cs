@@ -536,7 +536,7 @@ namespace camera.Views
             }
 
             _playbackTimelineTimer = new DispatcherTimer();
-            _playbackTimelineTimer.Interval = TimeSpan.FromMilliseconds(500);
+            _playbackTimelineTimer.Interval = TimeSpan.FromMilliseconds(200);
             _playbackTimelineTimer.Tick += PlaybackTimelineTimer_Tick;
 
             if (TimelineCanvas != null)
@@ -1244,6 +1244,14 @@ namespace camera.Views
                 RenderOptions.ProcessRenderMode = forceCpu
                     ? System.Windows.Interop.RenderMode.SoftwareOnly
                     : System.Windows.Interop.RenderMode.Default;
+
+                var hwndSource = PresentationSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+                if (hwndSource?.CompositionTarget != null)
+                {
+                    hwndSource.CompositionTarget.RenderMode = forceCpu
+                        ? System.Windows.Interop.RenderMode.SoftwareOnly
+                        : System.Windows.Interop.RenderMode.Default;
+                }
 
                 if (PlaybackPlayer != null)
                 {
