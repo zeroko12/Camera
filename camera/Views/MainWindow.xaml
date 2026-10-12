@@ -1599,39 +1599,26 @@
                                                 Margin="0,0,0,3"
                                                 FontSize="11"
                                                 FontWeight="SemiBold"
-                                                Text="空间保护阈值:" />
-                                            <Grid Margin="0,0,0,4">
+                                                Text="空间保护阈值 (MB):" />
+                                            <Grid Margin="0,0,0,3">
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock
-                                                    Margin="0,0,3,0"
-                                                    FontSize="11"
-                                                    Text="余量 &lt;"
-                                                    VerticalAlignment="Center" />
                                                 <hc:NumericUpDown
-                                                    Grid.Column="1"
-                                                    Margin="0,0,3,0"
                                                     Height="24"
+                                                    Margin="0,0,4,0"
                                                     infrastructure:InputBehavior.EnterCommand="{Binding ConfirmDiskThresholdCommand}"
                                                     infrastructure:InputBehavior.UpdateOnEnter="True"
                                                     Maximum="1024000"
                                                     Minimum="1"
                                                     Style="{StaticResource NumericUpDownPlus}"
+                                                    ToolTip="存储盘预留安全空间(MB)，低于此值触发覆盖或停止录像"
                                                     Value="{Binding DiskSpaceThresholdInput}" />
-                                                <TextBlock
-                                                    Grid.Column="2"
-                                                    Margin="0,0,4,0"
-                                                    FontSize="11"
-                                                    Text="MB"
-                                                    VerticalAlignment="Center" />
                                                 <Button
-                                                    Grid.Column="3"
+                                                    Grid.Column="1"
                                                     Height="24"
-                                                    Padding="6,0"
+                                                    Padding="8,0"
                                                     Command="{Binding ConfirmDiskThresholdCommand}"
                                                     Content="应用"
                                                     FontSize="11"
@@ -1659,30 +1646,29 @@
 
                                             <!--  空间策略状态与录制预估看板 (就近直观查看)  -->
                                             <Border
-                                                Margin="0,2,0,2"
+                                                Margin="0,3,0,2"
                                                 Padding="7,5"
-                                                Background="#FAFAFA"
-                                                BorderBrush="#E0E0E0"
                                                 BorderThickness="1"
                                                 CornerRadius="4">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="#FAFAFA" />
+                                                        <Setter Property="BorderBrush" Value="#E0E0E0" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsDarkTheme}" Value="True">
+                                                                <Setter Property="Background" Value="#252528" />
+                                                                <Setter Property="BorderBrush" Value="#3F3F46" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
                                                 <StackPanel>
-                                                    <Grid Margin="0,0,0,2">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <TextBlock
-                                                            FontSize="10"
-                                                            FontWeight="SemiBold"
-                                                            Foreground="#424242"
-                                                            Text="当前存储空间状态" />
-                                                        <TextBlock
-                                                            Grid.Column="1"
-                                                            FontSize="10"
-                                                            Foreground="Gray"
-                                                            Text="{Binding DiskSpaceThreshold,
-                                                                           StringFormat='保留阈值: {0} MB'}" />
-                                                    </Grid>
+                                                    <TextBlock
+                                                        Margin="0,0,0,3"
+                                                        FontSize="10"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="{DynamicResource PrimaryTextBrush}"
+                                                        Text="当前空间状态与预估" />
                                                     <TextBlock
                                                         FontSize="11"
                                                         Foreground="{Binding DiskSpaceWarningColor}"
@@ -2020,7 +2006,7 @@
                                     </Border>
                                 </Expander>
 
-                                <!--  4. 系统状态 (磁盘空间监控、编码硬件加速状态)  -->
+                                <!--  4. 系统状态 (编码硬件加速状态)  -->
                                 <Expander
                                     Margin="0,0,0,2"
                                     ExpandDirection="Down"
@@ -2032,29 +2018,6 @@
                                         BorderThickness="0,1,1,1"
                                         CornerRadius="0,4,4,0">
                                         <StackPanel Margin="6">
-                                            <!--  磁盘空间与预估时长  -->
-                                            <TextBlock
-                                                Margin="0,0,0,3"
-                                                FontSize="11"
-                                                FontWeight="SemiBold"
-                                                Text="空间预计录制:" />
-                                            <Border
-                                                Margin="0,0,0,6"
-                                                Padding="6,4"
-                                                Background="#FAFAFA"
-                                                BorderBrush="#E0E0E0"
-                                                BorderThickness="1"
-                                                CornerRadius="4">
-                                                <TextBlock
-                                                    FontSize="11"
-                                                    Foreground="{Binding DiskSpaceWarningColor}"
-                                                    LineHeight="16"
-                                                    Text="{Binding DiskSpaceWarningText}"
-                                                    TextWrapping="Wrap" />
-                                            </Border>
-
-                                            <Separator Margin="0,0,0,5" />
-
                                             <!--  硬件加速状态指示与强制CPU选项  -->
                                             <TextBlock
                                                 Margin="0,0,0,3"

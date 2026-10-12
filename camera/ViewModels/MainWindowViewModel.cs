@@ -125,7 +125,7 @@ namespace camera.ViewModels
         {
             if (_DiskSpaceThresholdInput != _DiskSpaceThreshold)
             {
-                DiskSpaceThresholdStatusText = $"待确认: {_DiskSpaceThresholdInput} MB (按回车或点确定)";
+                DiskSpaceThresholdStatusText = $"待确认: {_DiskSpaceThresholdInput} MB (按回车或点应用)";
                 DiskSpaceThresholdStatusColor = "#E65100"; // 橙色提示待确认
             }
             else
