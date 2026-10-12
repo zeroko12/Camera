@@ -1331,6 +1331,101 @@ namespace camera.Views
             UpdateConsoleButtonOpacity(animate: true);
         }
 
+        #region 点击空白处/屏幕中间自动收起控制抽屉 (方案 A)
+
+        private void MainContentGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            var vm = this.DataContext as MainWindowViewModel;
+            if (vm == null || !vm.ConsoleStatus) return;
+
+            var source = e.OriginalSource as DependencyObject;
+            if (source == null) return;
+
+            // 1. 如果点击在控制抽屉内部（各种控件、滑块、按钮、输入框、下拉框），保持抽屉打开
+            if (ConsoleDrawer != null && IsVisualDescendantOf(source, ConsoleDrawer))
+            {
+                return;
+            }
+
+            // 2. 如果点击在控制台折叠按钮或感应区上，由按钮本身的切换逻辑处理
+            if ((ConsoleToggleButton != null && IsVisualDescendantOf(source, ConsoleToggleButton)) ||
+                (ConsoleToggleHotZone != null && IsVisualDescendantOf(source, ConsoleToggleHotZone)))
+            {
+                return;
+            }
+
+            // 3. 如果点击在标题栏控件或独立弹窗/右键菜单上，忽略
+            if (TitleBar != null && IsVisualDescendantOf(source, TitleBar))
+            {
+                return;
+            }
+
+            // 4. 方案 A 核心逻辑：多路网格下区分「点击摄像头画面」与「点击背景空白区」
+            if (!vm.IsSingleCameraMode && !vm.IsPlaybackMode)
+            {
+                // 检查是否点在某个具体的摄像头画面/卡片上
+                var imageBlock = FindVisualAncestor<Image>(source);
+                var cam = imageBlock?.DataContext as CameraService;
+                if (cam != null)
+                {
+                    // 点中了具体摄像头画面：执行机位选中，但保持控制面板展开，方便用户继续在控制面板中查看和调节该摄像头的设置
+                    vm.SelectedConfigCamera = cam;
+                    return;
+                }
+            }
+
+            // 5. 点击了多路画面的背景网格空隙、边框黑边、空白区域，或单路放大/回放模式下的画面主体区域：
+            // 自动收起控制抽屉，回归沉浸式画面
+            vm.ConsoleStatus = false;
+        }
+
+        private static bool IsVisualDescendantOf(DependencyObject obj, DependencyObject ancestor)
+        {
+            if (obj == null || ancestor == null) return false;
+            DependencyObject current = obj;
+            while (current != null)
+            {
+                if (current == ancestor) return true;
+                if (current is Visual || current is System.Windows.Media.Media3D.Visual3D)
+                {
+                    current = VisualTreeHelper.GetParent(current);
+                }
+                else if (current is FrameworkContentElement fce)
+                {
+                    current = fce.Parent;
+                }
+                else
+                {
+                    current = LogicalTreeHelper.GetParent(current);
+                }
+            }
+            return false;
+        }
+
+        private static T FindVisualAncestor<T>(DependencyObject obj) where T : DependencyObject
+        {
+            DependencyObject current = obj;
+            while (current != null)
+            {
+                if (current is T match) return match;
+                if (current is Visual || current is System.Windows.Media.Media3D.Visual3D)
+                {
+                    current = VisualTreeHelper.GetParent(current);
+                }
+                else if (current is FrameworkContentElement fce)
+                {
+                    current = fce.Parent;
+                }
+                else
+                {
+                    current = LogicalTreeHelper.GetParent(current);
+                }
+            }
+            return null;
+        }
+
+        #endregion
+
         private void PlaybackPlayer_MediaOpened(object sender, RoutedEventArgs e)
         {
             var vm = this.DataContext as MainWindowViewModel;

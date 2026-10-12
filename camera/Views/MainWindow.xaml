@@ -159,6 +159,7 @@
         <Grid
             x:Name="MainContentGrid"
             Grid.Row="1"
+            PreviewMouseLeftButtonDown="MainContentGrid_PreviewMouseLeftButtonDown"
             MouseEnter="MainContentGrid_MouseEnter"
             MouseLeave="MainContentGrid_MouseLeave">
             <!-- <Image Source="{Binding Cam.Frame, Converter={StaticResource MatToImageSourceConverter}}" /> -->
