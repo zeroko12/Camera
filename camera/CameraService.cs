@@ -975,6 +975,19 @@ namespace camera
             return (bestW, bestH);
         }
 
+        private List<string> _hardwareResolutions;
+
+        /// <summary>
+        /// 注入 DirectShow 底层枚举阶段捕获的真实硬件分辨率能力集（含 4K/2K 等全部规格，0 毫秒耗时）
+        /// </summary>
+        public void SetHardwareResolutions(List<string> resolutions)
+        {
+            if (resolutions != null && resolutions.Count > 0)
+            {
+                _hardwareResolutions = new List<string>(resolutions);
+            }
+        }
+
         private void ShowVideoInfo()
         {
             double defaultFps = cap.Get(VideoCaptureProperties.Fps);
@@ -989,17 +1002,26 @@ namespace camera
 
             List<string> resList = new List<string>();
 
-            // 1. 优先读取已缓存的硬件支持分辨率列表
-            if (camConfig?.SupportedResolutions != null && camConfig.SupportedResolutions.Count > 0)
+            // 1. 优先读取 DirectShow 驱动原生探测到的全部硬件支持分辨率（含 4K、2K、1080p 等全部规格）
+            if (_hardwareResolutions != null && _hardwareResolutions.Count > 0)
+            {
+                resList.AddRange(_hardwareResolutions);
+                Logger.LogInfo($"[CameraService #{Index}] 成功载入 DirectShow 原生硬件分辨率能力 (共 {resList.Count} 档，含最高档: {resList[0]}): {string.Join(", ", resList)}");
+                SaveCameraSetting(s => s.SupportedResolutions = new List<string>(resList));
+            }
+            // 2. 其次读取持久化缓存
+            else if (camConfig?.SupportedResolutions != null && camConfig.SupportedResolutions.Count > 0)
             {
                 resList.AddRange(camConfig.SupportedResolutions);
-                Logger.LogInfo($"[CameraService #{Index}] 成功命中分辨率缓存: {string.Join(", ", resList)}");
+                Logger.LogInfo($"[CameraService #{Index}] 成功命中持久化分辨率缓存: {string.Join(", ", resList)}");
             }
             else
             {
-                // 无缓存（首次接入新设备）：极速定向探测主流分辨率，杜绝 4K/2K 超时与 DirectShow 卡顿
+                // 无原生探测与缓存保底：探测核心主流分辨率集（含 4K、2K、1080p、720p、480p）
                 var candidateResolutions = new (int Width, int Height)[]
                 {
+                    (3840, 2160), // 4K
+                    (2560, 1440), // 2K / QHD
                     (1920, 1080), // 1080p
                     (1280, 720),  // 720p
                     (640, 480),   // VGA

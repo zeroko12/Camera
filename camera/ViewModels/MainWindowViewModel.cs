@@ -896,6 +896,10 @@ namespace camera.ViewModels
                             var camera = new CameraService();
                             camera.DevicePath = device.DevicePath; // 绑定唯一硬件路径
                             camera.Name = device.Name; // 使用物理设备名称显示
+                            if (device.SupportedResolutions != null && device.SupportedResolutions.Count > 0)
+                            {
+                                camera.SetHardwareResolutions(device.SupportedResolutions);
+                            }
 
                             // 在启动硬件采集前预先应用已持久化的参数（分辨率、帧率、水印等），一步到位，杜绝二次重新打开
                             ApplySettingsToCamera(camera);
@@ -1807,6 +1811,10 @@ namespace camera.ViewModels
                         var newCam = new CameraService();
                         newCam.DevicePath = device.DevicePath;
                         newCam.Name = device.Name;
+                        if (device.SupportedResolutions != null && device.SupportedResolutions.Count > 0)
+                        {
+                            newCam.SetHardwareResolutions(device.SupportedResolutions);
+                        }
 
                         // 开启前预先应用已持久化的参数，一步到位
                         ApplySettingsToCamera(newCam);
