@@ -223,7 +223,7 @@ namespace camera.ViewModels
                     {
                         foreach (var cam in Cameras)
                         {
-                            System.Threading.Tasks.Task.Run(() => cam.RestartSaving());
+                            cam.ScheduleRestartSaving(300);
                         }
                     }
                     UpdateActiveCodecStatus();
