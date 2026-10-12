@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:System="clr-namespace:System;assembly=mscorlib"
     xmlns:c="clr-namespace:CalcBinding;assembly=CalcBinding"
+    xmlns:effects="clr-namespace:camera.Infrastructure.Effects"
     xmlns:hc="https://handyorg.github.io/handycontrol"
     xmlns:hk="clr-namespace:FastHotKeyForWPF;assembly=FastHotKeyForWPF"
     xmlns:i="http://schemas.microsoft.com/xaml/behaviors"
@@ -280,6 +281,11 @@
                                                     ScaleX="{Binding RenderScaleX, FallbackValue=1.0}"
                                                     ScaleY="{Binding RenderScaleY, FallbackValue=1.0}" />
                                             </Image.RenderTransform>
+                                            <Image.Effect>
+                                                <effects:ContrastBrightnessEffect
+                                                    Brightness="{Binding RenderBrightness, FallbackValue=0.0}"
+                                                    Contrast="{Binding RenderContrast, FallbackValue=1.0}" />
+                                            </Image.Effect>
                                             <Image.ContextMenu>
                                                 <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <MenuItem
@@ -500,6 +506,11 @@
                             ScaleX="{Binding RenderScaleX, FallbackValue=1.0}"
                             ScaleY="{Binding RenderScaleY, FallbackValue=1.0}" />
                     </Image.RenderTransform>
+                    <Image.Effect>
+                        <effects:ContrastBrightnessEffect
+                            Brightness="{Binding RenderBrightness, FallbackValue=0.0}"
+                            Contrast="{Binding RenderContrast, FallbackValue=1.0}" />
+                    </Image.Effect>
                     <Image.ContextMenu>
                         <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                             <MenuItem

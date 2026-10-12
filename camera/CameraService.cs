@@ -300,6 +300,7 @@ namespace camera
                 {
                     if (_contrastLuminanceProcessor != null)
                         _contrastLuminanceProcessor.Contrast = value;
+                    RaisePropertyChanged(nameof(RenderContrast));
                 }
             }
         }
@@ -314,6 +315,7 @@ namespace camera
                 {
                     if (_contrastLuminanceProcessor != null)
                         _contrastLuminanceProcessor.Luminance = value;
+                    RaisePropertyChanged(nameof(RenderBrightness));
                 }
             }
         }
@@ -674,6 +676,8 @@ namespace camera
 
                     RaisePropertyChanged(nameof(RenderScaleX));
                     RaisePropertyChanged(nameof(RenderScaleY));
+                    RaisePropertyChanged(nameof(RenderContrast));
+                    RaisePropertyChanged(nameof(RenderBrightness));
                 }
             }
         }
@@ -684,6 +688,18 @@ namespace camera
         /// </summary>
         public double RenderScaleX => (UseGpuAcceleration && IsFlipHorizontal && !isSave) ? -1.0 : 1.0;
         public double RenderScaleY => (UseGpuAcceleration && IsFlipVertical && !isSave) ? -1.0 : 1.0;
+
+        /// <summary>
+        /// GPU 模式下当未处于录制状态时，对比度完全交由 UI 层的 Direct3D HLSL 像素着色器硬件呈现（零 CPU 开销）；
+        /// CPU 模式（仅使用 CPU）或录制中时，CPU 已在图像管道处理，UI 呈现直通对比度 1.0。
+        /// </summary>
+        public double RenderContrast => (UseGpuAcceleration && !isSave) ? Contrast : 1.0;
+
+        /// <summary>
+        /// GPU 模式下当未处于录制状态时，亮度完全交由 UI 层的 Direct3D HLSL 像素着色器硬件呈现（零 CPU 开销）；
+        /// CPU 模式（仅使用 CPU）或录制中时，CPU 已在图像管道处理，UI 呈现直通亮度 0.0。
+        /// </summary>
+        public double RenderBrightness => (UseGpuAcceleration && !isSave) ? (Luminance / 255.0) : 0.0;
 
         private Stretch _videoStretch = Stretch.Uniform;
         public Stretch VideoStretch
@@ -928,7 +944,7 @@ namespace camera
         {
             // 1. 初始化模块参数与流水线
             _claheProcessor = new ClaheProcessor { Enabled = IsGrayHomogenization, Order = 10 };
-            _contrastLuminanceProcessor = new ContrastLuminanceProcessor { Contrast = Contrast, Luminance = Luminance, UseGpuAcceleration = UseGpuAcceleration, Order = 20 };
+            _contrastLuminanceProcessor = new ContrastLuminanceProcessor { Contrast = Contrast, Luminance = Luminance, UseGpuAcceleration = UseGpuAcceleration, IsRecordingActive = isSave, Order = 20 };
             _flipProcessor = new FlipProcessor { FlipHorizontal = IsFlipHorizontal, FlipVertical = IsFlipVertical, UseGpuAcceleration = UseGpuAcceleration, IsRecordingActive = isSave, Order = 25 };
             _timestampOverlayProcessor = new TimestampOverlayProcessor { Enabled = false, Order = 30 };
             _recordingProcessor = new RecordingProcessor { Enabled = true, Order = 90 };
@@ -1866,8 +1882,14 @@ namespace camera
             {
                 _flipProcessor.IsRecordingActive = isSave;
             }
+            if (_contrastLuminanceProcessor != null)
+            {
+                _contrastLuminanceProcessor.IsRecordingActive = isSave;
+            }
             RaisePropertyChanged(nameof(RenderScaleX));
             RaisePropertyChanged(nameof(RenderScaleY));
+            RaisePropertyChanged(nameof(RenderContrast));
+            RaisePropertyChanged(nameof(RenderBrightness));
 
             if (isSave)
             {
