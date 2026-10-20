@@ -1,17 +1,62 @@
-/.vs/
-/camera/.claude
-/MonitorLogs
-/check_memory_monitor.ps1
-/scratch/analyze_8day_run.py
-/scratch/analyze_big_drops.py
-/scratch/analyze_peaks.py
-/scratch/check_mat.ps1
-/scratch/inspect_peak_window.py
-/scratch/launch_and_monitor.ps1
-/scratch/quick_stats.py
-/scratch/verify_fixes.ps1
-/start_memory_monitor.ps1
-/stop_memory_monitor.ps1
-/camera/camera-mem-monitor-v2.ps1
-/camera/camera-mem-monitor-v2.ps1
-/scratch/launch_and_monitor.ps1
+# ===================================================================
+# 摄像头项目工程化 .gitignore 规范
+# 作用: 仅允许核心源代码、项目配置与工程资源入库，杜绝文档、脚本与临时文件污染
+# ===================================================================
+
+# ─── 1. 构建输出与编译产物 ───
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+*.pdb
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.sln.docstates
+
+# ─── 2. 二进制执行文件拦截（除 Git LFS 托管的核心 models 目录外）───
+*.exe
+!camera/models/ffmpeg.exe
+camera/models/ffmpeg_bac.exe
+*.dll
+*.so
+*.dylib
+
+# ─── 3. 拦截所有分析报告与 Markdown 文档 (避免 AI/分析报告误入源码库) ───
+*.md
+
+# ─── 4. 拦截所有临时脚本 (压测、监控、清理等运维脚本) ───
+*.ps1
+*.py
+*.sh
+*.bat
+*.cmd
+
+# ─── 5. 拦截测试草稿、诊断数据与文档图片目录 ───
+scratch/
+MonitorLogs/
+docs/
+test/
+
+# ─── 6. 拦截 AI 工具与开发环境私有目录 ───
+.claude/
+.gemini/
+.agents/
+.vs/
+.vscode/
+
+# ─── 7. 拦截大体积诊断转储与崩溃日志 ───
+dumpfile*
+*.dump
+*.dmp
+*.log
+*.tmp
+*.bak
+camera.csproj.Backup.tmp
+camera/camera.sln
+
+# ─── 8. 操作系统缓存 ───
+Thumbs.db
+Desktop.ini
+.DS_Store
