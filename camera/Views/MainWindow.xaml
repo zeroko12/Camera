@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:System="clr-namespace:System;assembly=mscorlib"
     xmlns:c="clr-namespace:CalcBinding;assembly=CalcBinding"
+    xmlns:converters="clr-namespace:camera.Converters"
     xmlns:effects="clr-namespace:camera.Infrastructure.Effects"
     xmlns:hc="https://handyorg.github.io/handycontrol"
     xmlns:hk="clr-namespace:FastHotKeyForWPF;assembly=FastHotKeyForWPF"
@@ -54,6 +55,7 @@
         <KeyBinding Key="Escape" Command="{Binding EscapeKeyCommand}" />
     </Window.InputBindings>
     <Window.Resources>
+        <converters:DateHasRecordingConverter x:Key="DateHasRecordingConverter" />
         <!-- 已删除 MatToImageSourceConverter 资源,见 ImageMatHelper.cs -->
         <Style x:Key="SlimScrollBarThumb" TargetType="{x:Type Thumb}">
             <Setter Property="OverridesDefaultStyle" Value="True" />
@@ -260,8 +262,96 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Margin="5" ClipToBounds="True">
-                                        <Border Background="#161616" CornerRadius="4" />
+                                    <Grid
+                                        Margin="5"
+                                        ClipToBounds="True"
+                                        Background="#161616"
+                                        AllowDrop="True"
+                                        Cursor="Hand"
+                                        DragOver="ImageBlock_DragOver"
+                                        Drop="ImageBlock_Drop"
+                                        MouseMove="ImageBlock_MouseMove"
+                                        PreviewMouseLeftButtonDown="ImageBlock_PreviewMouseLeftButtonDown">
+                                        <Grid.InputBindings>
+                                            <MouseBinding
+                                                Command="{Binding DataContext.ToggleMaximizeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                MouseAction="LeftDoubleClick" />
+                                        </Grid.InputBindings>
+                                        <Grid.ContextMenu>
+                                            <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                <MenuItem
+                                                    Header="开启/重连摄像头"
+                                                    Command="{Binding EnableCameraCommand}"
+                                                    IsEnabled="{Binding CanEnableCamera}">
+                                                    <MenuItem.Icon>
+                                                        <materialDesign:PackIcon Kind="PlayCircle" Foreground="#2ECC71" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem
+                                                    Header="关闭摄像头"
+                                                    Command="{Binding DisableCameraCommand}"
+                                                    IsEnabled="{Binding CanDisableCamera}">
+                                                    <MenuItem.Icon>
+                                                        <materialDesign:PackIcon Kind="StopCircle" Foreground="#E74C3C" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator />
+                                                <MenuItem
+                                                    Header="水平翻转"
+                                                    IsCheckable="True"
+                                                    IsChecked="{Binding IsFlipHorizontal, Mode=TwoWay}">
+                                                    <MenuItem.Icon>
+                                                        <materialDesign:PackIcon Kind="FlipHorizontal" Foreground="#3498DB" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem
+                                                    Header="垂直翻转"
+                                                    IsCheckable="True"
+                                                    IsChecked="{Binding IsFlipVertical, Mode=TwoWay}">
+                                                    <MenuItem.Icon>
+                                                        <materialDesign:PackIcon Kind="FlipVertical" Foreground="#3498DB" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator />
+                                                <MenuItem Header="画面比例">
+                                                    <MenuItem.Icon>
+                                                        <materialDesign:PackIcon Kind="AspectRatio" Foreground="#3498DB" />
+                                                    </MenuItem.Icon>
+                                                    <MenuItem
+                                                        Header="等比适应 (不变形)"
+                                                        IsCheckable="True"
+                                                        IsChecked="{Binding IsStretchUniform, Mode=OneWay}"
+                                                        Command="{Binding SetStretchCommand}"
+                                                        CommandParameter="Uniform">
+                                                        <MenuItem.Icon>
+                                                            <materialDesign:PackIcon Kind="FitToPageOutline" Foreground="#2ECC71" />
+                                                        </MenuItem.Icon>
+                                                    </MenuItem>
+                                                    <MenuItem
+                                                        Header="等比裁剪 (填满不变形)"
+                                                        IsCheckable="True"
+                                                        IsChecked="{Binding IsStretchUniformToFill, Mode=OneWay}"
+                                                        Command="{Binding SetStretchCommand}"
+                                                        CommandParameter="UniformToFill">
+                                                        <MenuItem.Icon>
+                                                            <materialDesign:PackIcon Kind="Crop" Foreground="#E67E22" />
+                                                        </MenuItem.Icon>
+                                                    </MenuItem>
+                                                    <MenuItem
+                                                        Header="拉伸铺满 (可能变形)"
+                                                        IsCheckable="True"
+                                                        IsChecked="{Binding IsStretchFill, Mode=OneWay}"
+                                                        Command="{Binding SetStretchCommand}"
+                                                        CommandParameter="Fill">
+                                                        <MenuItem.Icon>
+                                                            <materialDesign:PackIcon Kind="ArrowExpandAll" Foreground="#E74C3C" />
+                                                        </MenuItem.Icon>
+                                                    </MenuItem>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Grid.ContextMenu>
+                                        <Border Background="#161616" CornerRadius="4" IsHitTestVisible="False" />
                                         <Image
                                             Margin="0"
                                             HorizontalAlignment="Center"
@@ -269,13 +359,7 @@
                                             Stretch="{Binding VideoStretch, Mode=OneWay, FallbackValue=Uniform}"
                                             RenderOptions.BitmapScalingMode="Linear"
                                             RenderTransformOrigin="0.5,0.5"
-                                            local:ImageMatHelper.SourceMat="{Binding Frame}"
-                                            AllowDrop="True"
-                                            Cursor="Hand"
-                                            DragOver="ImageBlock_DragOver"
-                                            Drop="ImageBlock_Drop"
-                                            MouseMove="ImageBlock_MouseMove"
-                                            PreviewMouseLeftButtonDown="ImageBlock_PreviewMouseLeftButtonDown">
+                                            local:ImageMatHelper.SourceMat="{Binding Frame}">
                                             <Image.RenderTransform>
                                                 <ScaleTransform
                                                     ScaleX="{Binding RenderScaleX, FallbackValue=1.0}"
@@ -286,85 +370,6 @@
                                                     Brightness="{Binding RenderBrightness, FallbackValue=0.0}"
                                                     Contrast="{Binding RenderContrast, FallbackValue=1.0}" />
                                             </Image.Effect>
-                                            <Image.ContextMenu>
-                                                <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                    <MenuItem
-                                                        Header="开启摄像头"
-                                                        Command="{Binding EnableCameraCommand}"
-                                                        IsEnabled="{Binding IsManualDisabled}">
-                                                        <MenuItem.Icon>
-                                                            <materialDesign:PackIcon Kind="PlayCircle" Foreground="#2ECC71" />
-                                                        </MenuItem.Icon>
-                                                    </MenuItem>
-                                                    <MenuItem
-                                                        Header="关闭摄像头"
-                                                        Command="{Binding DisableCameraCommand}"
-                                                        IsEnabled="{Binding IsConnected}">
-                                                        <MenuItem.Icon>
-                                                            <materialDesign:PackIcon Kind="StopCircle" Foreground="#E74C3C" />
-                                                        </MenuItem.Icon>
-                                                    </MenuItem>
-                                                    <Separator />
-                                                    <MenuItem
-                                                        Header="水平翻转"
-                                                        IsCheckable="True"
-                                                        IsChecked="{Binding IsFlipHorizontal, Mode=TwoWay}">
-                                                        <MenuItem.Icon>
-                                                            <materialDesign:PackIcon Kind="FlipHorizontal" Foreground="#3498DB" />
-                                                        </MenuItem.Icon>
-                                                    </MenuItem>
-                                                    <MenuItem
-                                                        Header="垂直翻转"
-                                                        IsCheckable="True"
-                                                        IsChecked="{Binding IsFlipVertical, Mode=TwoWay}">
-                                                        <MenuItem.Icon>
-                                                            <materialDesign:PackIcon Kind="FlipVertical" Foreground="#3498DB" />
-                                                        </MenuItem.Icon>
-                                                    </MenuItem>
-                                                    <Separator />
-                                                    <MenuItem Header="画面比例">
-                                                        <MenuItem.Icon>
-                                                            <materialDesign:PackIcon Kind="AspectRatio" Foreground="#3498DB" />
-                                                        </MenuItem.Icon>
-                                                        <MenuItem
-                                                            Header="等比适应 (不变形)"
-                                                            IsCheckable="True"
-                                                            IsChecked="{Binding IsStretchUniform, Mode=OneWay}"
-                                                            Command="{Binding SetStretchCommand}"
-                                                            CommandParameter="Uniform">
-                                                            <MenuItem.Icon>
-                                                                <materialDesign:PackIcon Kind="FitToPageOutline" Foreground="#2ECC71" />
-                                                            </MenuItem.Icon>
-                                                        </MenuItem>
-                                                        <MenuItem
-                                                            Header="等比裁剪 (填满不变形)"
-                                                            IsCheckable="True"
-                                                            IsChecked="{Binding IsStretchUniformToFill, Mode=OneWay}"
-                                                            Command="{Binding SetStretchCommand}"
-                                                            CommandParameter="UniformToFill">
-                                                            <MenuItem.Icon>
-                                                                <materialDesign:PackIcon Kind="Crop" Foreground="#E67E22" />
-                                                            </MenuItem.Icon>
-                                                        </MenuItem>
-                                                        <MenuItem
-                                                            Header="拉伸铺满 (可能变形)"
-                                                            IsCheckable="True"
-                                                            IsChecked="{Binding IsStretchFill, Mode=OneWay}"
-                                                            Command="{Binding SetStretchCommand}"
-                                                            CommandParameter="Fill">
-                                                            <MenuItem.Icon>
-                                                                <materialDesign:PackIcon Kind="ArrowExpandAll" Foreground="#E74C3C" />
-                                                            </MenuItem.Icon>
-                                                        </MenuItem>
-                                                    </MenuItem>
-                                                </ContextMenu>
-                                            </Image.ContextMenu>
-                                            <Image.InputBindings>
-                                                <MouseBinding
-                                                    Command="{Binding DataContext.ToggleMaximizeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                    CommandParameter="{Binding}"
-                                                    MouseAction="LeftDoubleClick" />
-                                            </Image.InputBindings>
                                         </Image>
                                         <!--  零 CPU 损耗 UI 水印叠加  -->
                                         <StackPanel
@@ -492,31 +497,13 @@
                 </Grid.InputBindings>
 
                 <!--  放大画面填满整个网格区域  -->
-                <Image
-                    Margin="5"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Stretch="{Binding VideoStretch, Mode=OneWay, FallbackValue=Uniform}"
-                    RenderOptions.BitmapScalingMode="Linear"
-                    RenderTransformOrigin="0.5,0.5"
-                    DataContext="{Binding SelectedCamera}"
-                    local:ImageMatHelper.SourceMat="{Binding Frame}">
-                    <Image.RenderTransform>
-                        <ScaleTransform
-                            ScaleX="{Binding RenderScaleX, FallbackValue=1.0}"
-                            ScaleY="{Binding RenderScaleY, FallbackValue=1.0}" />
-                    </Image.RenderTransform>
-                    <Image.Effect>
-                        <effects:ContrastBrightnessEffect
-                            Brightness="{Binding RenderBrightness, FallbackValue=0.0}"
-                            Contrast="{Binding RenderContrast, FallbackValue=1.0}" />
-                    </Image.Effect>
-                    <Image.ContextMenu>
+                <Grid DataContext="{Binding SelectedCamera}" Background="Transparent">
+                    <Grid.ContextMenu>
                         <ContextMenu DataContext="{Binding Path=PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                             <MenuItem
-                                Header="开启摄像头"
+                                Header="开启/重连摄像头"
                                 Command="{Binding EnableCameraCommand}"
-                                IsEnabled="{Binding IsManualDisabled}">
+                                IsEnabled="{Binding CanEnableCamera}">
                                 <MenuItem.Icon>
                                     <materialDesign:PackIcon Kind="PlayCircle" Foreground="#2ECC71" />
                                 </MenuItem.Icon>
@@ -524,7 +511,7 @@
                             <MenuItem
                                 Header="关闭摄像头"
                                 Command="{Binding DisableCameraCommand}"
-                                IsEnabled="{Binding IsConnected}">
+                                IsEnabled="{Binding CanDisableCamera}">
                                 <MenuItem.Icon>
                                     <materialDesign:PackIcon Kind="StopCircle" Foreground="#E74C3C" />
                                 </MenuItem.Icon>
@@ -583,11 +570,27 @@
                                 </MenuItem>
                             </MenuItem>
                         </ContextMenu>
-                    </Image.ContextMenu>
-                    <Image.InputBindings>
-                        <MouseBinding Command="{Binding DataContext.BackToGridCommand, RelativeSource={RelativeSource AncestorType=Window}}" MouseAction="LeftDoubleClick" />
-                    </Image.InputBindings>
-                </Image>
+                    </Grid.ContextMenu>
+                    <Image
+                        Margin="5"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Stretch="{Binding VideoStretch, Mode=OneWay, FallbackValue=Uniform}"
+                        RenderOptions.BitmapScalingMode="Linear"
+                        RenderTransformOrigin="0.5,0.5"
+                        local:ImageMatHelper.SourceMat="{Binding Frame}">
+                        <Image.RenderTransform>
+                            <ScaleTransform
+                                ScaleX="{Binding RenderScaleX, FallbackValue=1.0}"
+                                ScaleY="{Binding RenderScaleY, FallbackValue=1.0}" />
+                        </Image.RenderTransform>
+                        <Image.Effect>
+                            <effects:ContrastBrightnessEffect
+                                Brightness="{Binding RenderBrightness, FallbackValue=0.0}"
+                                Contrast="{Binding RenderContrast, FallbackValue=1.0}" />
+                        </Image.Effect>
+                    </Image>
+                </Grid>
 
                 <!--  悬浮返回按钮，叠加在画面左上角 (避让顶部标题栏)  -->
                 <Button
@@ -667,23 +670,107 @@
                                 </StackPanel>
                             </Button>
 
-                            <!--  日期选择  -->
-                            <TextBlock
-                                Grid.Row="1"
-                                Margin="0,0,0,5"
-                                FontWeight="Bold"
-                                Foreground="{DynamicResource PrimaryTextBrush}"
-                                Text="选择回放日期" />
-                            <Viewbox
-                                Grid.Row="2"
-                                Margin="0,0,0,14"
-                                HorizontalAlignment="Center"
-                                Stretch="Uniform"
-                                MaxWidth="250">
-                                <Calendar
-                                    DisplayDateEnd="{x:Static System:DateTime.Today}"
-                                    SelectedDate="{Binding PlaybackSelectedDate, Mode=TwoWay}" />
-                            </Viewbox>
+                            <!--  日期选择标题与刷新按钮  -->
+                            <Grid Grid.Row="1" Margin="0,0,0,4">
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontWeight="Bold"
+                                    Foreground="{DynamicResource PrimaryTextBrush}"
+                                    Text="选择回放日期" />
+                                <Button
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Height="22"
+                                    Padding="6,0"
+                                    Command="{Binding RefreshRecordedDatesCommand}"
+                                    Style="{StaticResource ButtonDefault.Small}"
+                                    ToolTip="重新扫描录像日期">
+                                    <StackPanel Orientation="Horizontal">
+                                        <materialDesign:PackIcon
+                                            Width="12"
+                                            Height="12"
+                                            VerticalAlignment="Center"
+                                            Kind="Refresh" />
+                                        <TextBlock
+                                            Margin="3,0,0,0"
+                                            FontSize="10"
+                                            VerticalAlignment="Center"
+                                            Text="刷新" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <StackPanel Grid.Row="2" Margin="0,0,0,14">
+                                <!-- 图例说明 -->
+                                <StackPanel
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,0,0,6">
+                                    <Ellipse
+                                        Width="6"
+                                        Height="6"
+                                        VerticalAlignment="Center"
+                                        Fill="{DynamicResource PrimaryBrush}" />
+                                    <TextBlock
+                                        Margin="4,0,0,0"
+                                        VerticalAlignment="Center"
+                                        FontSize="11"
+                                        Foreground="{DynamicResource SecondaryTextBrush}"
+                                        Text="标记圆点表示当天有录像" />
+                                </StackPanel>
+                                <Viewbox
+                                    HorizontalAlignment="Center"
+                                    Stretch="Uniform"
+                                    MaxWidth="250">
+                                    <Calendar
+                                        DisplayDateEnd="{x:Static System:DateTime.Today}"
+                                        SelectedDate="{Binding PlaybackSelectedDate, Mode=TwoWay}">
+                                        <Calendar.CalendarDayButtonStyle>
+                                            <Style TargetType="CalendarDayButton">
+                                                <Setter Property="ToolTip">
+                                                    <Setter.Value>
+                                                        <MultiBinding Converter="{StaticResource DateHasRecordingConverter}" ConverterParameter="ToolTip">
+                                                            <Binding Path="DataContext" RelativeSource="{RelativeSource Self}" />
+                                                            <Binding Path="DataContext.RecordedDates" RelativeSource="{RelativeSource AncestorType=Calendar}" />
+                                                        </MultiBinding>
+                                                    </Setter.Value>
+                                                </Setter>
+                                                <Setter Property="FontWeight">
+                                                    <Setter.Value>
+                                                        <MultiBinding Converter="{StaticResource DateHasRecordingConverter}" ConverterParameter="FontWeight">
+                                                            <Binding Path="DataContext" RelativeSource="{RelativeSource Self}" />
+                                                            <Binding Path="DataContext.RecordedDates" RelativeSource="{RelativeSource AncestorType=Calendar}" />
+                                                        </MultiBinding>
+                                                    </Setter.Value>
+                                                </Setter>
+                                                <Setter Property="ContentTemplate">
+                                                    <Setter.Value>
+                                                        <DataTemplate>
+                                                            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                                    <TextBlock Text="{Binding}" HorizontalAlignment="Center" />
+                                                                    <Ellipse
+                                                                        Width="4"
+                                                                        Height="4"
+                                                                        Margin="0,1,0,0"
+                                                                        HorizontalAlignment="Center"
+                                                                        Fill="{DynamicResource PrimaryBrush}">
+                                                                        <Ellipse.Visibility>
+                                                                            <MultiBinding Converter="{StaticResource DateHasRecordingConverter}" ConverterParameter="Visibility">
+                                                                                <Binding Path="DataContext" RelativeSource="{RelativeSource AncestorType=CalendarDayButton}" />
+                                                                                <Binding Path="DataContext.RecordedDates" RelativeSource="{RelativeSource AncestorType=Calendar}" />
+                                                                            </MultiBinding>
+                                                                        </Ellipse.Visibility>
+                                                                    </Ellipse>
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </Calendar.CalendarDayButtonStyle>
+                                    </Calendar>
+                                </Viewbox>
+                            </StackPanel>
 
                             <!--  通道选择  -->
                             <TextBlock
@@ -1047,9 +1134,8 @@
                 Margin="10,0,0,10"
                 VerticalAlignment="Top"
                 Panel.ZIndex="1500"
-                Opacity="0.45"
-                MouseEnter="TitleBar_MouseEnter"
-                MouseLeave="TitleBar_MouseLeave"
+                Opacity="0"
+                IsHitTestVisible="False"
                 MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
                 <Grid.Style>
                     <Style TargetType="Grid">
@@ -1092,6 +1178,35 @@
               Height="30"
               Click="CloseButton_Click"
               Content="×" />-->
+
+                    <!-- 局域网推流快捷状态按钮 (默认关闭) -->
+                    <Button
+                        Width="25"
+                        Height="22"
+                        Margin="3,0,5,0"
+                        Padding="0"
+                        Command="{Binding ToggleStreamingCommand}"
+                        Style="{StaticResource ButtonDefault.Small}"
+                        ToolTip="{Binding StreamToolTipText}">
+                        <materialDesign:PackIcon
+                            Width="14"
+                            Height="14"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                            <materialDesign:PackIcon.Style>
+                                <Style TargetType="materialDesign:PackIcon">
+                                    <Setter Property="Kind" Value="Cast" />
+                                    <Setter Property="Foreground" Value="#9E9E9E" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsStreamingRunning}" Value="True">
+                                            <Setter Property="Kind" Value="CastConnected" />
+                                            <Setter Property="Foreground" Value="#4CAF50" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </materialDesign:PackIcon.Style>
+                        </materialDesign:PackIcon>
+                    </Button>
 
                     <Button
                         Width="25"
@@ -1262,7 +1377,7 @@
                                                                 <StackPanel
                                                                     Orientation="Horizontal"
                                                                     VerticalAlignment="Center"
-                                                                    Visibility="{c:Binding !IsManualDisabled,
+                                                                    Visibility="{c:Binding '!IsManualDisabled and IsConnected',
                                                                                            FalseToVisibility=Collapsed}">
                                                                     <Ellipse
                                                                         Width="7"
@@ -1275,6 +1390,25 @@
                                                                         FontWeight="SemiBold"
                                                                         Foreground="#2E7D32"
                                                                         Text="通道运行中"
+                                                                        VerticalAlignment="Center" />
+                                                                </StackPanel>
+                                                                <!-- 异常离线指示 -->
+                                                                <StackPanel
+                                                                    Orientation="Horizontal"
+                                                                    VerticalAlignment="Center"
+                                                                    Visibility="{c:Binding '!IsManualDisabled and !IsConnected',
+                                                                                           FalseToVisibility=Collapsed}">
+                                                                    <Ellipse
+                                                                        Width="7"
+                                                                        Height="7"
+                                                                        Margin="0,0,5,0"
+                                                                        VerticalAlignment="Center"
+                                                                        Fill="#E53935" />
+                                                                    <TextBlock
+                                                                        FontSize="11"
+                                                                        FontWeight="SemiBold"
+                                                                        Foreground="#C62828"
+                                                                        Text="通道离线/异常"
                                                                         VerticalAlignment="Center" />
                                                                 </StackPanel>
                                                                 <!-- 已停用指示 -->
@@ -1301,11 +1435,11 @@
                                                                         Height="22"
                                                                         Padding="8,0"
                                                                         Command="{Binding EnableCameraCommand}"
-                                                                        Content="开启"
+                                                                        Content="{Binding EnableButtonText}"
                                                                         FontSize="11"
                                                                         Style="{StaticResource ButtonPrimary.Small}"
-                                                                        ToolTip="重新开启此摄像头采集"
-                                                                        Visibility="{c:Binding IsManualDisabled,
+                                                                        ToolTip="开启或重新连接此摄像头"
+                                                                        Visibility="{c:Binding CanEnableCamera,
                                                                                                FalseToVisibility=Collapsed}" />
                                                                     <Button
                                                                         Height="22"
@@ -1315,7 +1449,7 @@
                                                                         FontSize="11"
                                                                         Style="{StaticResource ButtonDanger.Small}"
                                                                         ToolTip="临时停用此摄像头，释放系统资源"
-                                                                        Visibility="{c:Binding !IsManualDisabled,
+                                                                        Visibility="{c:Binding CanDisableCamera,
                                                                                                FalseToVisibility=Collapsed}" />
                                                                 </StackPanel>
                                                             </Grid>
@@ -2120,6 +2254,215 @@
                                                         Text="未开启录制" />
                                                 </StackPanel>
                                             </Border>
+                                        </StackPanel>
+                                    </Border>
+                                </Expander>
+
+                                <!--  5. 局域网推流 (局域网监控，默认关闭)  -->
+                                <Expander
+                                    Margin="0,0,0,2"
+                                    ExpandDirection="Down"
+                                    Header="局域网推流"
+                                    IsExpanded="True">
+                                    <Border
+                                        Background="{DynamicResource RegionBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="0,1,1,1"
+                                        CornerRadius="0,4,4,0">
+                                        <StackPanel Margin="6">
+                                            <!--  推流总开关与运行状态  -->
+                                            <Grid Margin="0,0,0,6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <!-- 状态指示灯与描述 -->
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Ellipse
+                                                        Width="7"
+                                                        Height="7"
+                                                        Margin="0,0,5,0"
+                                                        VerticalAlignment="Center">
+                                                        <Ellipse.Style>
+                                                            <Style TargetType="Ellipse">
+                                                                <Setter Property="Fill" Value="#9E9E9E" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsStreamingRunning}" Value="True">
+                                                                        <Setter Property="Fill" Value="#4CAF50" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Ellipse.Style>
+                                                    </Ellipse>
+                                                    <TextBlock
+                                                        FontSize="11"
+                                                        FontWeight="SemiBold"
+                                                        Text="{Binding StreamStatusText}"
+                                                        VerticalAlignment="Center">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="Gray" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsStreamingRunning}" Value="True">
+                                                                        <Setter Property="Foreground" Value="#2E7D32" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </StackPanel>
+
+                                                <!-- 开启/停止推流 Switch 开关 -->
+                                                <ToggleButton
+                                                    Grid.Column="1"
+                                                    Height="20"
+                                                    IsChecked="{Binding IsStreamingEnabled, Mode=TwoWay}"
+                                                    Style="{StaticResource ToggleButtonSwitch}"
+                                                    ToolTip="开启/关闭推流" />
+                                            </Grid>
+
+                                            <!--  局域网监控访问地址卡片 (运行中显示)  -->
+                                            <StackPanel Visibility="{c:Binding IsStreamingRunning, FalseToVisibility=Collapsed}" Margin="0,0,0,6">
+                                                <TextBlock
+                                                    Margin="0,0,0,3"
+                                                    FontSize="11"
+                                                    FontWeight="SemiBold"
+                                                    Text="推流地址:" />
+
+                                                <!-- 地址选择 -->
+                                                <ComboBox
+                                                    Margin="0,0,0,4"
+                                                    FontSize="11"
+                                                    ItemsSource="{Binding StreamUrls}"
+                                                    SelectedItem="{Binding SelectedStreamUrl, Mode=TwoWay}"
+                                                    Style="{StaticResource ComboBoxExtend}" />
+
+                                                <!-- 操作按钮组 -->
+                                                <Grid Margin="0,2,0,4">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="4" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Button
+                                                        Grid.Column="0"
+                                                        Height="22"
+                                                        Padding="4,0"
+                                                        FontSize="11"
+                                                        Command="{Binding CopyStreamUrlCommand}"
+                                                        Style="{StaticResource ButtonPrimary.Small}"
+                                                        ToolTip="复制地址">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <materialDesign:PackIcon Width="12" Height="12" Margin="0,0,3,0" VerticalAlignment="Center" Kind="ContentCopy" />
+                                                            <TextBlock Text="复制" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button
+                                                        Grid.Column="2"
+                                                        Height="22"
+                                                        Padding="4,0"
+                                                        FontSize="11"
+                                                        Command="{Binding OpenInBrowserCommand}"
+                                                        IsEnabled="{c:Binding '!IsRtspProtocol'}"
+                                                        Style="{StaticResource ButtonDefault.Small}"
+                                                        ToolTip="{c:Binding 'IsRtspProtocol ? \'RTSP需用VLC/NVR打开\' : \'浏览器打开\''}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <materialDesign:PackIcon Width="12" Height="12" Margin="0,0,3,0" VerticalAlignment="Center" Kind="OpenInBrowser" />
+                                                            <TextBlock Text="打开" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                </Grid>
+                                            </StackPanel>
+
+                                            <Separator Margin="0,2,0,6" />
+
+                                            <!--  协议配置 (可配置 HTTP / RTSP)  -->
+                                            <Grid Margin="0,0,0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    VerticalAlignment="Center"
+                                                    Text="协议:" />
+                                                <ComboBox
+                                                    Grid.Column="1"
+                                                    Height="22"
+                                                    FontSize="11"
+                                                    SelectedValuePath="Tag"
+                                                    SelectedValue="{Binding StreamProtocol, Mode=TwoWay}"
+                                                    Style="{StaticResource ComboBoxExtend}">
+                                                    <ComboBoxItem Content="HTTP (网页)" Tag="HTTP" />
+                                                    <ComboBoxItem Content="RTSP (监控/NVR)" Tag="RTSP" />
+                                                </ComboBox>
+                                            </Grid>
+
+                                            <!--  端口配置  -->
+                                            <Grid Margin="0,0,0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    VerticalAlignment="Center"
+                                                    Text="端口:" />
+                                                <TextBox
+                                                    Grid.Column="1"
+                                                    Height="22"
+                                                    FontSize="11"
+                                                    VerticalContentAlignment="Center"
+                                                    Text="{Binding StreamPort, UpdateSourceTrigger=LostFocus}" />
+                                            </Grid>
+
+                                            <!--  帧率配置  -->
+                                            <Grid Margin="0,0,0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    VerticalAlignment="Center"
+                                                    Text="帧率:" />
+                                                <ComboBox
+                                                    Grid.Column="1"
+                                                    Height="22"
+                                                    FontSize="11"
+                                                    SelectedValuePath="Tag"
+                                                    SelectedValue="{Binding StreamFps, Mode=TwoWay}"
+                                                    Style="{StaticResource ComboBoxExtend}">
+                                                    <ComboBoxItem Content="5 FPS" Tag="5" />
+                                                    <ComboBoxItem Content="10 FPS" Tag="10" />
+                                                    <ComboBoxItem Content="15 FPS" Tag="15" />
+                                                    <ComboBoxItem Content="20 FPS" Tag="20" />
+                                                    <ComboBoxItem Content="30 FPS" Tag="30" />
+                                                </ComboBox>
+                                            </Grid>
+
+                                            <!--  画质配置  -->
+                                            <Grid Margin="0,0,0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    VerticalAlignment="Center"
+                                                    Text="画质:" />
+                                                <ComboBox
+                                                    Grid.Column="1"
+                                                    Height="22"
+                                                    FontSize="11"
+                                                    SelectedValuePath="Tag"
+                                                    SelectedValue="{Binding StreamQuality, Mode=TwoWay}"
+                                                    Style="{StaticResource ComboBoxExtend}">
+                                                    <ComboBoxItem Content="流畅 (50%)" Tag="50" />
+                                                    <ComboBoxItem Content="清晰 (70%)" Tag="70" />
+                                                    <ComboBoxItem Content="高清 (85%)" Tag="85" />
+                                                </ComboBox>
+                                            </Grid>
                                         </StackPanel>
                                     </Border>
                                 </Expander>

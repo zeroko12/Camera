@@ -70,6 +70,7 @@ namespace camera
         private FlipProcessor _flipProcessor;
         private TimestampOverlayProcessor _timestampOverlayProcessor;
         private RecordingProcessor _recordingProcessor;
+        private StreamingProcessor _streamingProcessor;
 
         #endregion
 
@@ -240,7 +241,16 @@ namespace camera
         public int Index
         {
             get => _Index;
-            set => SetProperty(ref _Index, value);
+            set
+            {
+                if (SetProperty(ref _Index, value))
+                {
+                    if (_streamingProcessor != null)
+                    {
+                        _streamingProcessor.CameraIndex = value;
+                    }
+                }
+            }
         }
 
         public static string GetConfigKey(string devicePath, int index)
@@ -751,6 +761,9 @@ namespace camera
         }
 
         public bool IsConnected => !_isManualDisabled && _continuousReadFailCount <= 5;
+        public bool CanEnableCamera => _isManualDisabled || !IsConnected;
+        public bool CanDisableCamera => !_isManualDisabled && IsConnected;
+        public string EnableButtonText => _isManualDisabled ? "开启" : "重连";
 
         public DelegateCommand EnableCameraCommand { get; private set; }
         public DelegateCommand DisableCameraCommand { get; private set; }
@@ -772,6 +785,8 @@ namespace camera
                     System.Threading.Tasks.Task.Run(() => ChangeCameraInfo());
 
                     RaisePropertyChanged(nameof(IsConnected));
+                    RaisePropertyChanged(nameof(CanEnableCamera));
+                    RaisePropertyChanged(nameof(CanDisableCamera));
                     EnableCameraCommand?.RaiseCanExecuteChanged();
                     DisableCameraCommand?.RaiseCanExecuteChanged();
                 }
@@ -836,6 +851,8 @@ namespace camera
                     PushWarningFrame("通道已关闭\n(右键可重新开启)");
 
                     RaisePropertyChanged(nameof(IsConnected));
+                    RaisePropertyChanged(nameof(CanEnableCamera));
+                    RaisePropertyChanged(nameof(CanDisableCamera));
                     EnableCameraCommand?.RaiseCanExecuteChanged();
                     DisableCameraCommand?.RaiseCanExecuteChanged();
                 }
@@ -906,8 +923,6 @@ namespace camera
         public delegate void FrameChangedEventHandler(Mat frame);
         public event FrameChangedEventHandler FrameChanged;
 
-        public event EventHandler<string> DiskSpaceLow;
-
         #endregion
 
         #region 摄像头采集格式
@@ -931,13 +946,7 @@ namespace camera
                     VideoStretch = s;
                 }
             });
-            StorageManager.Instance.StorageWarning += OnStorageWarningForward;
             InitializeModules();
-        }
-
-        private void OnStorageWarningForward(object sender, string message)
-        {
-            DiskSpaceLow?.Invoke(this, message);
         }
 
         private void InitializeModules()
@@ -948,6 +957,7 @@ namespace camera
             _flipProcessor = new FlipProcessor { FlipHorizontal = IsFlipHorizontal, FlipVertical = IsFlipVertical, UseGpuAcceleration = UseGpuAcceleration, IsRecordingActive = isSave, Order = 25 };
             _timestampOverlayProcessor = new TimestampOverlayProcessor { Enabled = false, Order = 30 };
             _recordingProcessor = new RecordingProcessor { Enabled = true, Order = 90 };
+            _streamingProcessor = new StreamingProcessor { CameraIndex = Index, Enabled = true, Order = 95 };
 
             _pipeline = FramePipelineBuilder.Create()
                 .AddProcessor(_claheProcessor)
@@ -955,6 +965,7 @@ namespace camera
                 .AddProcessor(_flipProcessor)
                 .AddProcessor(_timestampOverlayProcessor)
                 .AddProcessor(_recordingProcessor)
+                .AddProcessor(_streamingProcessor)
                 .Build();
 
             // 2. 初始化预览控制器
@@ -1534,8 +1545,17 @@ namespace camera
 
                 if (cap.IsOpened())
                 {
+                    bool wasConnected = IsConnected;
                     _continuousReadFailCount = 0;
                     _lastPipelineProcessTime = DateTime.MinValue; // 重连成功，重置节流时间
+                    if (!wasConnected)
+                    {
+                        RaisePropertyChanged(nameof(IsConnected));
+                        RaisePropertyChanged(nameof(CanEnableCamera));
+                        RaisePropertyChanged(nameof(CanDisableCamera));
+                        EnableCameraCommand?.RaiseCanExecuteChanged();
+                        DisableCameraCommand?.RaiseCanExecuteChanged();
+                    }
                     
                     double actualW = cap.Get(VideoCaptureProperties.FrameWidth);
                     double actualH = cap.Get(VideoCaptureProperties.FrameHeight);
@@ -1728,6 +1748,10 @@ namespace camera
                     if (wasConnectedInFail != (_continuousReadFailCount <= 5))
                     {
                         RaisePropertyChanged(nameof(IsConnected));
+                        RaisePropertyChanged(nameof(CanEnableCamera));
+                        RaisePropertyChanged(nameof(CanDisableCamera));
+                        EnableCameraCommand?.RaiseCanExecuteChanged();
+                        DisableCameraCommand?.RaiseCanExecuteChanged();
                     }
 
                     if (_continuousReadFailCount > 5)
@@ -1809,6 +1833,10 @@ namespace camera
                         if (wasConnectedInSuccess != (_continuousReadFailCount <= 5))
                         {
                             RaisePropertyChanged(nameof(IsConnected));
+                            RaisePropertyChanged(nameof(CanEnableCamera));
+                            RaisePropertyChanged(nameof(CanDisableCamera));
+                            EnableCameraCommand?.RaiseCanExecuteChanged();
+                            DisableCameraCommand?.RaiseCanExecuteChanged();
                         }
 
                         // 如果开启了录像且录像服务未就绪/未运行，在首次成功捕获正常画面帧后自动开启录像（增加 3 秒冷却与前置标记，防止多帧并发风暴）
@@ -2111,6 +2139,10 @@ namespace camera
                         if (!wasConnected)
                         {
                             RaisePropertyChanged(nameof(IsConnected));
+                            RaisePropertyChanged(nameof(CanEnableCamera));
+                            RaisePropertyChanged(nameof(CanDisableCamera));
+                            EnableCameraCommand?.RaiseCanExecuteChanged();
+                            DisableCameraCommand?.RaiseCanExecuteChanged();
                         }
                     }
 
@@ -2192,7 +2224,6 @@ namespace camera
             {
                 try
                 {
-                    StorageManager.Instance.StorageWarning -= OnStorageWarningForward;
                     lock (_lockObject)
                     {
                         _isCapturing = false;

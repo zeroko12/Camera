@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,6 +16,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using camera.Recording;
 using camera.Encoding;
+using camera.Streaming;
 
 namespace camera.ViewModels
 {
@@ -83,6 +85,7 @@ namespace camera.ViewModels
 
         void OnSaveModeChanged()
         {
+            _hasReportedStorageCritical = false;
             StorageManager.Instance.OverwriteOldFiles = OverwriteOldFiles;
             AppSettingsService.Instance.Update(s => s.OverwriteOldFiles = OverwriteOldFiles);
             foreach (var camera in Cameras)
@@ -141,6 +144,7 @@ namespace camera.ViewModels
 
         private void ExecuteConfirmDiskThresholdCommand()
         {
+            _hasReportedStorageCritical = false;
             DiskSpaceThreshold = DiskSpaceThresholdInput;
             StorageManager.Instance.DiskSpaceThresholdMb = DiskSpaceThreshold;
             
@@ -479,6 +483,232 @@ namespace camera.ViewModels
             set { SetProperty(ref _MaxFps, value); }
         }
 
+        #region 局域网推流 (LAN Streaming)
+
+        private bool _isStreamingEnabled = false;
+        public bool IsStreamingEnabled
+        {
+            get => _isStreamingEnabled;
+            set
+            {
+                if (SetProperty(ref _isStreamingEnabled, value))
+                {
+                    if (value)
+                    {
+                        StartStreaming();
+                    }
+                    else
+                    {
+                        StopStreaming();
+                    }
+                    RaisePropertyChanged(nameof(IsStreamingRunning));
+                    RaisePropertyChanged(nameof(StreamStatusText));
+                }
+            }
+        }
+
+        public bool IsStreamingRunning => LanStreamManager.Instance.IsRunning;
+
+        private string _streamProtocol = "HTTP";
+        public string StreamProtocol
+        {
+            get => _streamProtocol;
+            set
+            {
+                if (SetProperty(ref _streamProtocol, value))
+                {
+                    bool isRtsp = string.Equals(value, "RTSP", StringComparison.OrdinalIgnoreCase);
+                    var proto = isRtsp ? camera.Streaming.StreamProtocol.Rtsp : camera.Streaming.StreamProtocol.Http;
+
+                    if (isRtsp && _streamPort == 8080)
+                    {
+                        _streamPort = 8554;
+                        RaisePropertyChanged(nameof(StreamPort));
+                    }
+                    else if (!isRtsp && _streamPort == 8554)
+                    {
+                        _streamPort = 8080;
+                        RaisePropertyChanged(nameof(StreamPort));
+                    }
+
+                    LanStreamManager.Instance.Configure(proto, _streamPort, _streamFps, _streamQuality);
+                    RefreshStreamUrls();
+                    RaisePropertyChanged(nameof(IsRtspProtocol));
+                    RaisePropertyChanged(nameof(StreamToolTipText));
+                }
+            }
+        }
+
+        public bool IsRtspProtocol => string.Equals(StreamProtocol, "RTSP", StringComparison.OrdinalIgnoreCase);
+
+        private int _streamPort = 8080;
+        public int StreamPort
+        {
+            get => _streamPort;
+            set
+            {
+                if (SetProperty(ref _streamPort, value))
+                {
+                    var proto = IsRtspProtocol ? camera.Streaming.StreamProtocol.Rtsp : camera.Streaming.StreamProtocol.Http;
+                    LanStreamManager.Instance.Configure(proto, _streamPort, _streamFps, _streamQuality);
+                    RefreshStreamUrls();
+                }
+            }
+        }
+
+        private int _streamFps = 15;
+        public int StreamFps
+        {
+            get => _streamFps;
+            set
+            {
+                if (SetProperty(ref _streamFps, value))
+                {
+                    var proto = IsRtspProtocol ? camera.Streaming.StreamProtocol.Rtsp : camera.Streaming.StreamProtocol.Http;
+                    LanStreamManager.Instance.Configure(proto, _streamPort, _streamFps, _streamQuality);
+                }
+            }
+        }
+
+        private int _streamQuality = 70;
+        public int StreamQuality
+        {
+            get => _streamQuality;
+            set
+            {
+                if (SetProperty(ref _streamQuality, value))
+                {
+                    var proto = IsRtspProtocol ? camera.Streaming.StreamProtocol.Rtsp : camera.Streaming.StreamProtocol.Http;
+                    LanStreamManager.Instance.Configure(proto, _streamPort, _streamFps, _streamQuality);
+                }
+            }
+        }
+
+        public int StreamClientCount => LanStreamManager.Instance.ClientCount;
+
+        public string StreamStatusText
+        {
+            get
+            {
+                if (!IsStreamingRunning) return "已停止";
+                int count = StreamClientCount;
+                return count > 0 ? $"推流中 ({count}在线)" : "推流中";
+            }
+        }
+
+        public string StreamToolTipText =>
+            IsStreamingRunning
+                ? $"推流中: {SelectedStreamUrl}"
+                : "点击开启推流";
+
+        private string _selectedStreamUrl = "";
+        public string SelectedStreamUrl
+        {
+            get => _selectedStreamUrl;
+            set => SetProperty(ref _selectedStreamUrl, value);
+        }
+
+        private ObservableCollection<string> _streamUrls = new();
+        public ObservableCollection<string> StreamUrls
+        {
+            get => _streamUrls;
+            set => SetProperty(ref _streamUrls, value);
+        }
+
+        private DelegateCommand _toggleStreamingCommand;
+        public DelegateCommand ToggleStreamingCommand =>
+            _toggleStreamingCommand ??= new DelegateCommand(() => IsStreamingEnabled = !IsStreamingEnabled);
+
+        private DelegateCommand _copyStreamUrlCommand;
+        public DelegateCommand CopyStreamUrlCommand =>
+            _copyStreamUrlCommand ??= new DelegateCommand(ExecuteCopyStreamUrl);
+
+        private DelegateCommand _openInBrowserCommand;
+        public DelegateCommand OpenInBrowserCommand =>
+            _openInBrowserCommand ??= new DelegateCommand(ExecuteOpenInBrowser);
+
+        private DelegateCommand _refreshStreamNetworkCommand;
+        public DelegateCommand RefreshStreamNetworkCommand =>
+            _refreshStreamNetworkCommand ??= new DelegateCommand(RefreshStreamUrls);
+
+        private void ExecuteCopyStreamUrl()
+        {
+            try
+            {
+                string url = !string.IsNullOrWhiteSpace(SelectedStreamUrl)
+                    ? SelectedStreamUrl
+                    : LanStreamManager.Instance.GetPrimaryStreamUrl();
+
+                if (!string.IsNullOrEmpty(url))
+                {
+                    System.Windows.Clipboard.SetText(url);
+                    TrayBalloonNotificationRequested?.Invoke("已复制地址", url, false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[VM-Stream] 复制推流网址异常: {ex.Message}");
+            }
+        }
+
+        private void ExecuteOpenInBrowser()
+        {
+            try
+            {
+                string url = !string.IsNullOrWhiteSpace(SelectedStreamUrl)
+                    ? SelectedStreamUrl
+                    : LanStreamManager.Instance.GetPrimaryStreamUrl();
+
+                if (!string.IsNullOrEmpty(url))
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = url,
+                        UseShellExecute = true
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[VM-Stream] 打开浏览器异常: {ex.Message}");
+            }
+        }
+
+        private void StartStreaming()
+        {
+            var proto = IsRtspProtocol ? camera.Streaming.StreamProtocol.Rtsp : camera.Streaming.StreamProtocol.Http;
+            LanStreamManager.Instance.Configure(proto, _streamPort, _streamFps, _streamQuality);
+            bool ok = LanStreamManager.Instance.Start();
+            if (ok)
+            {
+                RefreshStreamUrls();
+                TrayBalloonNotificationRequested?.Invoke("推流已开启", SelectedStreamUrl, false);
+            }
+            else
+            {
+                _isStreamingEnabled = false;
+                RaisePropertyChanged(nameof(IsStreamingEnabled));
+                TriggerAlert("推流失败", $"端口 {_streamPort} 被占用", true);
+            }
+        }
+
+        private void StopStreaming()
+        {
+            LanStreamManager.Instance.Stop();
+        }
+
+        public void RefreshStreamUrls()
+        {
+            var urls = LanStreamManager.Instance.GetStreamUrls();
+            StreamUrls.Clear();
+            foreach (var u in urls) StreamUrls.Add(u);
+            SelectedStreamUrl = LanStreamManager.Instance.GetPrimaryStreamUrl();
+            RaisePropertyChanged(nameof(SelectedStreamUrl));
+            RaisePropertyChanged(nameof(StreamUrls));
+        }
+
+        #endregion
+
         //摄像头集合
         private ObservableCollection<CameraService> _Cameras = new();
         private bool _isInitializing = false;
@@ -710,6 +940,7 @@ namespace camera.ViewModels
                 {
                     HasActiveAlert = false;
                     AlertMessage = string.Empty;
+                    _hasReportedStorageCritical = false;
                 }
             });
         }
@@ -747,6 +978,53 @@ namespace camera.ViewModels
             // 订阅存储管理器非模态告警与状态更新
             StorageManager.Instance.StorageWarning += OnStorageWarningTriggered;
             StorageManager.Instance.StorageStatusUpdated += (s, e) => UpdateDiskRecordingStatus();
+
+            // 注册局域网推流信息提供者与状态监听
+            LanStreamManager.Instance.RegisterProvider(
+                () => SystemTitle,
+                () =>
+                {
+                    var list = new List<CameraInfo>();
+                    if (Cameras != null)
+                    {
+                        foreach (var cam in Cameras)
+                        {
+                            if (cam != null)
+                            {
+                                double age = LanStreamManager.Instance.GetLastFrameAgeMs(cam.Index);
+                                list.Add(new CameraInfo
+                                {
+                                    Index = cam.Index,
+                                    Name = cam.Name,
+                                    IsConnected = cam.IsConnected,
+                                    Width = (int)cam.Width,
+                                    Height = (int)cam.Height,
+                                    Fps = cam.Fps,
+                                    LastFrameAgeMs = age
+                                });
+                            }
+                        }
+                    }
+                    return list;
+                });
+
+            LanStreamManager.Instance.StatusChanged += (s, e) =>
+            {
+                Application.Current?.Dispatcher.InvokeAsync(() =>
+                {
+                    RaisePropertyChanged(nameof(IsStreamingRunning));
+                    RaisePropertyChanged(nameof(StreamStatusText));
+                });
+            };
+
+            LanStreamManager.Instance.ClientCountChanged += (s, e) =>
+            {
+                Application.Current?.Dispatcher.InvokeAsync(() =>
+                {
+                    RaisePropertyChanged(nameof(StreamClientCount));
+                    RaisePropertyChanged(nameof(StreamStatusText));
+                });
+            };
 
             Cameras.CollectionChanged += (s, e) =>
             {
@@ -837,6 +1115,10 @@ namespace camera.ViewModels
                 nameof(MaxFps),
                 nameof(ForceCpuEncoding),
                 nameof(IsDarkTheme),
+                nameof(StreamProtocol),
+                nameof(StreamPort),
+                nameof(StreamFps),
+                nameof(StreamQuality),
                 // MinWindowWidth/MinWindowHeight 属于 MainWindow,在 MainWindow 自己处理
             };
 
@@ -865,6 +1147,10 @@ namespace camera.ViewModels
                 s.MaxFps = MaxFps;
                 s.ForceCpuEncoding = ForceCpuEncoding;
                 s.IsDarkTheme = IsDarkTheme;
+                s.StreamProtocol = StreamProtocol;
+                s.StreamPort = StreamPort;
+                s.StreamFps = StreamFps;
+                s.StreamQuality = StreamQuality;
             });
         }
 
@@ -936,7 +1222,6 @@ namespace camera.ViewModels
                                     }
 
                                     Cameras.Add(camera);
-                                    camera.DiskSpaceLow += Camera_DiskSpaceLow;
 
                                     Logger.LogInfo($"✓ 摄像头 #{device.Index} ({device.Name}) 加载成功 (当前在线: {camera.IsConnected})");
                                 });
@@ -998,6 +1283,8 @@ namespace camera.ViewModels
             });
         }
 
+        private bool _hasReportedStorageCritical = false;
+
         private void OnStorageWarningTriggered(object? sender, string message)
         {
             Application.Current?.Dispatcher.InvokeAsync(() =>
@@ -1010,17 +1297,38 @@ namespace camera.ViewModels
                     if (!OverwriteOldFiles)
                     {
                         isSave = false;
+                        if (!_hasReportedStorageCritical)
+                        {
+                            _hasReportedStorageCritical = true;
+                            TriggerAlert("磁盘空间严重告警", $"⚠️ 磁盘余量低于安全阈值({DiskSpaceThreshold} MB)，已自动停止录像以保护数据！", true);
+                        }
                     }
-                    TriggerAlert("磁盘空间严重告警", $"⚠️ 磁盘余量低于安全阈值({DiskSpaceThreshold} MB)，已自动停止录像以保护数据！", true);
+                    else
+                    {
+                        // 开启循环覆盖模式：仅当磁盘逼近绝对极限(<150MB)且无旧文件可删时才强制停录，其余情况绝不虚报“已停止录像”
+                        if (StorageManager.Instance.AvailableStorageMb < 150)
+                        {
+                            isSave = false;
+                            if (!_hasReportedStorageCritical)
+                            {
+                                _hasReportedStorageCritical = true;
+                                TriggerAlert("磁盘空间极度匮乏", $"⚠️ 磁盘剩余空间仅剩 {StorageManager.Instance.AvailableStorageMb} MB，已无更多历史文件可删，为防止写满崩溃已紧急停止录像！", true);
+                            }
+                        }
+                        else
+                        {
+                            // 空间处于低水位但仍在安全范围内，正在后台自动清理覆盖，切勿虚假弹窗
+                            DiskSpaceWarningText = $"⚠️ 磁盘余量低于保留值({StorageManager.Instance.AvailableStorageMb}MB < {DiskSpaceThreshold}MB)，正在循环覆盖旧视频...";
+                            DiskSpaceWarningColor = "#E65100";
+                        }
+                    }
+                }
+                else
+                {
+                    _hasReportedStorageCritical = false;
                 }
             });
         }
-
-        private void Camera_DiskSpaceLow(object? sender, string message)
-        {
-            OnStorageWarningTriggered(sender, message);
-        }
-
 
         private DelegateCommand _Set;
         public DelegateCommand Set =>
@@ -1094,7 +1402,20 @@ namespace camera.ViewModels
             {
                 PlaybackSelectedCamera = Cameras[0];
             }
-            LoadPlaybackFiles();
+            else
+            {
+                RefreshRecordedDates();
+            }
+
+            // 若当前选中日期无录像，但存在有录像的日期，优先定位到最近一次有录像的日期
+            if (RecordedDates.Count > 0 && !RecordedDates.Contains(PlaybackSelectedDate.Date))
+            {
+                PlaybackSelectedDate = RecordedDates.Max();
+            }
+            else
+            {
+                LoadPlaybackFiles();
+            }
         }
 
         private DelegateCommand _backToMonitoringCommand;
@@ -1174,7 +1495,83 @@ namespace camera.ViewModels
             {
                 if (SetProperty(ref _playbackSelectedCamera, value))
                 {
+                    RefreshRecordedDates();
                     LoadPlaybackFiles();
+                }
+            }
+        }
+
+        private HashSet<DateTime> _recordedDates = new();
+        /// <summary>
+        /// 当前通道包含录像文件的日期集合（供回放日历界面渲染指示标记）
+        /// </summary>
+        public HashSet<DateTime> RecordedDates
+        {
+            get => _recordedDates;
+            private set => SetProperty(ref _recordedDates, value);
+        }
+
+        private DelegateCommand _refreshRecordedDatesCommand;
+        public DelegateCommand RefreshRecordedDatesCommand =>
+            _refreshRecordedDatesCommand ?? (_refreshRecordedDatesCommand = new DelegateCommand(RefreshRecordedDates));
+
+        /// <summary>
+        /// 扫描当前选中通道（或所有通道）包含有效录像的日期
+        /// </summary>
+        public void RefreshRecordedDates()
+        {
+            var dates = new HashSet<DateTime>();
+            try
+            {
+                string saveDir = PlaybackSelectedCamera != null && !string.IsNullOrWhiteSpace(PlaybackSelectedCamera.saveDirectory)
+                    ? PlaybackSelectedCamera.saveDirectory
+                    : StorageManager.Instance.SaveDirectory;
+
+                string fullSaveDir = string.IsNullOrWhiteSpace(saveDir)
+                    ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SavedVideos")
+                    : (Path.IsPathRooted(saveDir) ? saveDir : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, saveDir));
+
+                if (PlaybackSelectedCamera != null)
+                {
+                    string camDir = Path.Combine(fullSaveDir, PlaybackSelectedCamera.Index.ToString());
+                    ScanDateDirectories(camDir, dates);
+                }
+                else
+                {
+                    if (Directory.Exists(fullSaveDir))
+                    {
+                        foreach (var camDir in Directory.GetDirectories(fullSaveDir))
+                        {
+                            ScanDateDirectories(camDir, dates);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Playback] 扫描有录像日期异常: {ex.Message}");
+            }
+
+            RecordedDates = dates;
+        }
+
+        private void ScanDateDirectories(string cameraDir, HashSet<DateTime> dates)
+        {
+            if (!Directory.Exists(cameraDir)) return;
+            foreach (var dir in Directory.GetDirectories(cameraDir))
+            {
+                string dirName = Path.GetFileName(dir);
+                if (dirName.Length == 8 &&
+                    DateTime.TryParseExact(dirName, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+                {
+                    try
+                    {
+                        if (Directory.EnumerateFiles(dir, "*.mp4").Any())
+                        {
+                            dates.Add(dt.Date);
+                        }
+                    }
+                    catch { }
                 }
             }
         }
@@ -1623,6 +2020,10 @@ namespace camera.ViewModels
                 double thresholdMb = DiskSpaceThreshold;
                 double thresholdGb = thresholdMb / 1024.0;
                 double usableMb = Math.Max(0.0, availableMB - thresholdMb);
+                if (availableMB > thresholdMb || (OverwriteOldFiles && availableMB >= 150))
+                {
+                    _hasReportedStorageCritical = false;
+                }
 
                 if (isSave && activeSavingCamerasCount > 0 && totalMbPerSec > 0)
                 {
@@ -1631,6 +2032,10 @@ namespace camera.ViewModels
                         // 策略：停止录像
                         if (availableMB <= thresholdMb)
                         {
+                            if (isSave)
+                            {
+                                isSave = false;
+                            }
                             DiskSpaceWarningText = $"⚠️ 磁盘剩余: {availableGB:F1} GB ({drive})\n已达到阈值: {thresholdGb:F1} GB\n空间不足已停止录像";
                             DiskSpaceWarningColor = "#C62828";
                         }
@@ -1644,7 +2049,16 @@ namespace camera.ViewModels
                     else
                     {
                         // 策略：覆盖旧文件
-                        if (availableMB <= thresholdMb)
+                        if (availableMB < 150)
+                        {
+                            if (isSave)
+                            {
+                                isSave = false;
+                            }
+                            DiskSpaceWarningText = $"⚠️ 磁盘严重耗尽: {availableMB} MB ({drive})\n已无历史视频可删，紧急停止录像";
+                            DiskSpaceWarningColor = "#C62828";
+                        }
+                        else if (availableMB <= thresholdMb)
                         {
                             DiskSpaceWarningText = $"磁盘剩余: {availableGB:F1} GB ({drive})\n低水位阈值: {thresholdGb:F1} GB\n循环覆盖旧文件中\n(持续录制)";
                             DiskSpaceWarningColor = "#E65100";
@@ -1863,7 +2277,6 @@ namespace camera.ViewModels
                                 }
 
                                 Cameras.Add(newCam);
-                                newCam.DiskSpaceLow += Camera_DiskSpaceLow;
 
                                 if (SelectedConfigCamera == null)
                                 {
@@ -1894,7 +2307,7 @@ namespace camera.ViewModels
 
 
         #region 配置相关
-        private string _SystemTitle = "季华恒一离子注入机监控";
+        private string _SystemTitle = "监控";
         public string SystemTitle
         {
             get { return _SystemTitle; }
@@ -1939,6 +2352,14 @@ namespace camera.ViewModels
             VideoEncoderFactory.ForceCpuEncoding = ForceCpuEncoding;
             IsDarkTheme = appSettings.IsDarkTheme;
             ApplyTheme(IsDarkTheme);
+
+            // 局域网推流设置 (按用户需求: 默认关闭)
+            StreamProtocol = string.IsNullOrWhiteSpace(appSettings.StreamProtocol) ? "HTTP" : appSettings.StreamProtocol;
+            StreamPort = appSettings.StreamPort;
+            StreamFps = appSettings.StreamFps;
+            StreamQuality = appSettings.StreamQuality;
+            RefreshStreamUrls();
+            IsStreamingEnabled = false;
 
             // 初始化存储管理器
             StorageManager.Instance.SaveDirectory = appSettings.SaveDirectory;
@@ -2117,6 +2538,10 @@ namespace camera.ViewModels
                 s.OverlayTextSize = this.OverlayTextSize;
                 s.ForceCpuEncoding = this.ForceCpuEncoding;
                 s.IsDarkTheme = this.IsDarkTheme;
+                s.StreamProtocol = this.StreamProtocol;
+                s.StreamPort = this.StreamPort;
+                s.StreamFps = this.StreamFps;
+                s.StreamQuality = this.StreamQuality;
                 s.CameraOrder = Cameras.Select(c => c.GetConfigKey()).Where(k => !string.IsNullOrEmpty(k)).ToList();
 
                 foreach (var cam in Cameras)
@@ -2202,6 +2627,8 @@ namespace camera.ViewModels
                 // lambda 闭包 this 阻止 VM 被回收
                 this.PropertyChanged -= OnPersistentPropertyChanged;
 
+                try { LanStreamManager.Instance.Stop(); } catch { }
+
                 try
                 {
                     if (_cameraWatchdogTimer != null)
@@ -2240,7 +2667,6 @@ namespace camera.ViewModels
                         {
                             if (camera != null)
                             {
-                                camera.DiskSpaceLow -= Camera_DiskSpaceLow;
                                 var camToDispose = camera;
                                 disposeTasks.Add(System.Threading.Tasks.Task.Run(() =>
                                 {

@@ -205,6 +205,8 @@ namespace camera.Views
             if (_isRealExit || !this.IsLoaded)
             {
                 _isRealExit = true;
+                _mouseWatchTimer?.Stop();
+                _mouseWatchTimer = null;
                 if (_notifyIcon != null)
                 {
                     _notifyIcon.Visible = false;
@@ -575,14 +577,171 @@ namespace camera.Views
 
 
         #endregion
+        #region 菜单栏 (标题栏) 随鼠标进出程序与静止闲置自动显隐逻辑
+
+        private bool _isTitleBarVisible = false;
+        private DispatcherTimer _mouseWatchTimer;
+        private DateTime _lastMouseMoveTime = DateTime.Now;
+        private readonly TimeSpan _mouseIdleTimeout = TimeSpan.FromSeconds(3.0);
+
         private void InitializeTitleBar()
         {
-            // 设置标题栏初始状态为可见（使标题栏及窗口轮廓清晰可见）
-            TitleBar.Opacity = 1.0;
+            _mouseWatchTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+            _mouseWatchTimer.Tick += MouseWatchTimer_Tick;
+
+            // 监听整个应用程序窗口的鼠标进入、离开、移动与点击事件
+            this.MouseEnter += MainWindow_MouseEnter;
+            this.MouseLeave += MainWindow_MouseLeave;
+            this.MouseMove += MainWindow_MouseMove;
+            this.PreviewMouseDown += MainWindow_PreviewMouseDown;
+
+            // 初始化根据鼠标当前是否在窗口范围内决定是否展现
+            if (this.IsMouseOver)
+            {
+                _lastMouseMoveTime = DateTime.Now;
+                ShowTitleBar(animate: false);
+            }
+            else
+            {
+                HideTitleBar(animate: false);
+            }
         }
 
-        private bool isMouseOverTitleBar = false;
-        private bool IsMouseOverContentGrid = false;
+        private void MainWindow_MouseEnter(object sender, MouseEventArgs e)
+        {
+            _lastMouseMoveTime = DateTime.Now;
+            ShowTitleBar(animate: true);
+        }
+
+        private void MainWindow_MouseLeave(object sender, MouseEventArgs e)
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                // 如果鼠标确实已经离开程序窗口范围，并且未处于鼠标拖拽捕获中，彻底隐藏菜单栏
+                if (!this.IsMouseOver && Mouse.Captured == null)
+                {
+                    HideTitleBar(animate: true);
+                }
+            }, DispatcherPriority.Input);
+        }
+
+        private void MainWindow_MouseMove(object sender, MouseEventArgs e)
+        {
+            _lastMouseMoveTime = DateTime.Now;
+            if (!_isTitleBarVisible)
+            {
+                ShowTitleBar(animate: true);
+            }
+        }
+
+        private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            _lastMouseMoveTime = DateTime.Now;
+            if (!_isTitleBarVisible)
+            {
+                ShowTitleBar(animate: true);
+            }
+        }
+
+        private void MouseWatchTimer_Tick(object sender, EventArgs e)
+        {
+            if (!_isTitleBarVisible)
+            {
+                _mouseWatchTimer?.Stop();
+                return;
+            }
+
+            // 1. 当鼠标移出程序窗口且没有按住拖拽时，立即彻底隐藏
+            if (!this.IsMouseOver && Mouse.Captured == null)
+            {
+                HideTitleBar(animate: true);
+                return;
+            }
+
+            // 2. 如果鼠标当前直接停留在标题栏/菜单栏本身上方，或处于拖拽/弹窗交互中，保持显示并刷新活跃时间
+            if ((TitleBar != null && TitleBar.IsMouseOver) || Mouse.Captured != null)
+            {
+                _lastMouseMoveTime = DateTime.Now;
+                return;
+            }
+
+            // 3. 鼠标在程序窗口内，但长期（达到或超过3秒）未移动鼠标，自动平滑隐藏标题栏
+            if (DateTime.Now - _lastMouseMoveTime >= _mouseIdleTimeout)
+            {
+                HideTitleBar(animate: true);
+            }
+        }
+
+        private void ShowTitleBar(bool animate = true)
+        {
+            if (TitleBar == null) return;
+            _isTitleBarVisible = true;
+            TitleBar.IsHitTestVisible = true;
+
+            if (animate)
+            {
+                var anim = new DoubleAnimation(TitleBar.Opacity, 1.0, TimeSpan.FromSeconds(0.18))
+                {
+                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+                };
+                TitleBar.BeginAnimation(UIElement.OpacityProperty, anim);
+            }
+            else
+            {
+                TitleBar.BeginAnimation(UIElement.OpacityProperty, null);
+                TitleBar.Opacity = 1.0;
+            }
+
+            if (WindowResizeGrip != null)
+            {
+                WindowResizeGrip.BeginAnimation(UIElement.OpacityProperty, null);
+                WindowResizeGrip.Opacity = 0.6;
+            }
+
+            _mouseWatchTimer?.Start();
+        }
+
+        private void HideTitleBar(bool animate = true)
+        {
+            if (TitleBar == null) return;
+            _isTitleBarVisible = false;
+
+            if (animate)
+            {
+                var anim = new DoubleAnimation(TitleBar.Opacity, 0.0, TimeSpan.FromSeconds(0.25))
+                {
+                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn }
+                };
+                anim.Completed += (s, e) =>
+                {
+                    if (!_isTitleBarVisible && TitleBar != null)
+                    {
+                        TitleBar.IsHitTestVisible = false;
+                    }
+                };
+                TitleBar.BeginAnimation(UIElement.OpacityProperty, anim);
+            }
+            else
+            {
+                TitleBar.BeginAnimation(UIElement.OpacityProperty, null);
+                TitleBar.Opacity = 0.0;
+                TitleBar.IsHitTestVisible = false;
+            }
+
+            if (WindowResizeGrip != null)
+            {
+                WindowResizeGrip.BeginAnimation(UIElement.OpacityProperty, null);
+                WindowResizeGrip.Opacity = 0.0;
+            }
+
+            _mouseWatchTimer?.Stop();
+        }
+
+        #endregion
+
         public bool isHotKeyPressed { get; private set; } = false;
 
         #region 拖拽修改窗口大小相关 (8向自由缩放/变形，杜绝锁定宽高比)
@@ -812,14 +971,18 @@ namespace camera.Views
 
         private void MainContentGrid_MouseEnter(object sender, MouseEventArgs e)
         {
-            IsMouseOverContentGrid = true;
-            WindowResizeGrip.Opacity = 1.0;
+            if (_isTitleBarVisible && WindowResizeGrip != null)
+            {
+                WindowResizeGrip.Opacity = 0.8;
+            }
         }
 
         private void MainContentGrid_MouseLeave(object sender, MouseEventArgs e)
         {
-            IsMouseOverContentGrid = false;
-            WindowResizeGrip.Opacity = 0.4;
+            if (!_isTitleBarVisible && WindowResizeGrip != null)
+            {
+                WindowResizeGrip.Opacity = 0.0;
+            }
         }
 
         #region 控制台展开按钮感应悬停与自动隐藏逻辑
@@ -903,15 +1066,7 @@ namespace camera.Views
 
         #endregion
 
-        private void ShowTitleBar()
-        {
-            TitleBar.BeginAnimation(OpacityProperty, new DoubleAnimation(TitleBar.Opacity, 1.0, TimeSpan.FromSeconds(0.2)));
-        }
 
-        private void HideTitleBar()
-        {
-            TitleBar.BeginAnimation(OpacityProperty, new DoubleAnimation(TitleBar.Opacity, 0.45, TimeSpan.FromSeconds(0.3)));
-        }
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
         {
@@ -1050,21 +1205,7 @@ namespace camera.Views
             this.Close();
         }
 
-        private void TitleBar_MouseEnter(object sender, MouseEventArgs e)
-        {
-            isMouseOverTitleBar = true;
-            //ShowTitleBar();
-            //Debug.WriteLine("鼠标进入标题栏");
-            ShowTitleBar();
-        }
 
-        private void TitleBar_MouseLeave(object sender, MouseEventArgs e)
-        {
-            isMouseOverTitleBar = false;
-            //HideTitleBarIfNeeded();
-            //Debug.WriteLine("鼠标离开标题栏");
-            HideTitleBar();
-        }
 
         /// <summary>
         /// 置顶按钮绑定命令

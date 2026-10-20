@@ -80,6 +80,10 @@ namespace camera
                     var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOpts);
                     if (loaded != null)
                     {
+                        string resolvedTitle = !string.IsNullOrWhiteSpace(loaded.SystemTitle)
+                            ? loaded.SystemTitle
+                            : (!string.IsNullOrWhiteSpace(loaded.Title) ? loaded.Title : AppSettings.DefaultSystemTitle);
+
                         _current = new AppSettings
                         {
                             IsInitialized = true,
@@ -88,8 +92,8 @@ namespace camera
                             // 复制所有字段
                             IsSave = loaded.IsSave,
                             Opacity = loaded.Opacity,
-                            Title = loaded.Title,
-                            SystemTitle = loaded.SystemTitle,
+                            Title = resolvedTitle,
+                            SystemTitle = resolvedTitle,
                             OverwriteOldFiles = loaded.OverwriteOldFiles,
                             DiskSpaceThreshold = loaded.DiskSpaceThreshold,
                             SaveDirectory = string.IsNullOrWhiteSpace(loaded.SaveDirectory) ? AppSettings.DefaultSaveDirectory : loaded.SaveDirectory,
@@ -119,6 +123,11 @@ namespace camera
                             UseV3Architecture = loaded.UseV3Architecture,
                             ForceCpuEncoding = loaded.ForceCpuEncoding,
                             IsDarkTheme = loaded.IsDarkTheme,
+                            IsStreamingEnabled = loaded.IsStreamingEnabled,
+                            StreamProtocol = string.IsNullOrWhiteSpace(loaded.StreamProtocol) ? AppSettings.DefaultStreamProtocol : loaded.StreamProtocol,
+                            StreamPort = loaded.StreamPort > 0 ? loaded.StreamPort : AppSettings.DefaultStreamPort,
+                            StreamFps = loaded.StreamFps > 0 ? loaded.StreamFps : AppSettings.DefaultStreamFps,
+                            StreamQuality = loaded.StreamQuality > 0 ? loaded.StreamQuality : AppSettings.DefaultStreamQuality,
                             Cameras = loaded.Cameras ?? new(StringComparer.OrdinalIgnoreCase),
                             CameraOrder = loaded.CameraOrder ?? new(),
                         };
@@ -313,12 +322,14 @@ namespace camera
                 }
             }
 
+            string legacyTitle = Sp("SystemTitle", Sp("Title", AppSettings.DefaultSystemTitle));
+
             return new AppSettings
             {
                 IsSave               = Bp("isSave", AppSettings.DefaultIsSave),
                 Opacity              = Dp("Opacity", AppSettings.DefaultOpacity),
-                Title                = Sp("Title", AppSettings.DefaultTitle),
-                SystemTitle          = Sp("SystemTitle", AppSettings.DefaultSystemTitle),
+                Title                = legacyTitle,
+                SystemTitle          = legacyTitle,
                 OverwriteOldFiles    = Bp("OverwriteOldFiles", AppSettings.DefaultOverwriteOldFiles),
                 DiskSpaceThreshold   = Ip("DiskSpaceThreshold", AppSettings.DefaultDiskSpaceThresholdMb),
                 SaveDirectory        = Sp("SaveDirectory", AppSettings.DefaultSaveDirectory),

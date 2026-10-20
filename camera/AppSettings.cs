@@ -22,7 +22,7 @@ namespace camera
         public const bool    DefaultIsSave                = true;
         public const double  DefaultOpacity               = 1.0;
         public const string  DefaultTitle                 = "监控";
-        public const string  DefaultSystemTitle           = "季华恒一离子注入机监控";
+        public const string  DefaultSystemTitle           = "监控";
         public const bool    DefaultOverwriteOldFiles     = true;
         public const int     DefaultDiskSpaceThresholdMb  = 10240;  // 与 App.config 一致
         public const string  DefaultSaveDirectory         = "SavedVideos";
@@ -58,6 +58,13 @@ namespace camera
         public const int     DefaultMaxQsvSessions         = 0;
         public const bool    DefaultUseV3Architecture      = true;
         public const bool    DefaultForceCpuEncoding       = false;
+
+        // ────────────────── 局域网推流默认值 (默认关闭) ──────────────────
+        public const bool    DefaultIsStreamingEnabled     = false;
+        public const string  DefaultStreamProtocol         = "HTTP";
+        public const int     DefaultStreamPort             = 8080;
+        public const int     DefaultStreamFps              = 15;
+        public const int     DefaultStreamQuality          = 70;
 
         // ────────────────── 运行时状态(不持久化)──────────────────
         public bool         IsInitialized   { get; set; }
@@ -102,6 +109,13 @@ namespace camera
         public int          MaxQsvSessions      { get; set; } = DefaultMaxQsvSessions;
         public bool         UseV3Architecture   { get; set; } = DefaultUseV3Architecture;
         public bool         ForceCpuEncoding    { get; set; } = DefaultForceCpuEncoding;
+
+        // ────────────────── 局域网推流设置 ──────────────────
+        public bool         IsStreamingEnabled  { get; set; } = DefaultIsStreamingEnabled;
+        public string       StreamProtocol      { get; set; } = DefaultStreamProtocol;
+        public int          StreamPort          { get; set; } = DefaultStreamPort;
+        public int          StreamFps           { get; set; } = DefaultStreamFps;
+        public int          StreamQuality       { get; set; } = DefaultStreamQuality;
 
         // ────────────────── 摄像头特定覆盖 ──────────────────
         // key = camera 的稳定配置 key(由 CameraService.GetConfigKey 生成)
