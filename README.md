@@ -56,6 +56,19 @@
 
 ---
 
+## 📦 预编译成品下载 (开箱即用)
+
+可直接在 **[GitHub Releases 页面](https://github.com/zeroko12/Camera/releases)** 获取最新编译好的 Windows 成品包，无需配置开发环境：
+
+| 版本包 | 文件名 | 特性说明 |
+| :--- | :--- | :--- |
+| **🚀 独立便携版 (推荐)** | `Camera-Monitor-win-x64-Standalone.zip` | 内嵌 .NET 8 运行时与完整 Native 依赖，**开箱即用免安装**，解压即可运行 `camera.exe` |
+| **⚡ 框架依赖版** | `Camera-Monitor-win-x64-FrameworkDependent.zip` | 体积较小，运行前需系统已安装 [.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/8.0) |
+
+> 💡 提示：在 GitHub 仓库顶部的 **Actions** 页面中，点击任意一次运行记录，在底部的 **Artifacts** 列表亦可下载每次提交构建的最新压缩包。
+
+---
+
 ## 🚀 快速上手
 
 ### 环境要求
