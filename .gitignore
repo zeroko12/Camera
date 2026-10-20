@@ -23,8 +23,9 @@ camera/models/ffmpeg_bac.exe
 *.so
 *.dylib
 
-# ─── 3. 拦截所有分析报告与 Markdown 文档 (避免 AI/分析报告误入源码库) ───
+# ─── 3. 拦截所有分析报告与 Markdown 文档 (避免 AI/分析报告误入源码库，仅放行工程主页 README.md) ───
 *.md
+!README.md
 
 # ─── 4. 拦截所有临时脚本 (压测、监控、清理等运维脚本) ───
 *.ps1
