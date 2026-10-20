@@ -1,0 +1,107 @@
+name: Build and Package Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Package Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code with Git LFS
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 1
+
+      - name: Checkout LFS Objects
+        run: git lfs checkout
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore NuGet Packages
+        run: dotnet restore camera/camera.csproj
+
+      # ─── 1. 构建独立免运行库便携成品 (Self-Contained Portable) ───
+      - name: Publish Self-Contained Release (win-x64)
+        shell: pwsh
+        run: |
+          Write-Host "Building Self-Contained Portable Package..."
+          dotnet publish camera/camera.csproj -c Release -r win-x64 --self-contained true -o ./publish-standalone
+          
+          # 混淆程序集后置处理
+          if (Test-Path ./publish-standalone/Obfuscar/camera.dll) {
+              Copy-Item ./publish-standalone/Obfuscar/camera.dll ./publish-standalone/camera.dll -Force
+              Remove-Item ./publish-standalone/Obfuscar -Recurse -Force
+          }
+          Remove-Item ./publish-standalone/Obfuscar.xml -Force -ErrorAction SilentlyContinue
+          Remove-Item ./publish-standalone/Mapping.txt -Force -ErrorAction SilentlyContinue
+
+          # 校验主程序与关键组件
+          if (-not (Test-Path ./publish-standalone/camera.exe)) {
+              Write-Error "camera.exe not found in publish-standalone directory!"
+              exit 1
+          }
+
+          # 压缩为绿色独立版 Zip
+          Compress-Archive -Path ./publish-standalone/* -DestinationPath Camera-Monitor-win-x64-Standalone.zip -Force
+          Write-Host "Camera-Monitor-win-x64-Standalone.zip created successfully."
+
+      # ─── 2. 构建轻量框架依赖版 (Framework-Dependent) ───
+      - name: Publish Framework-Dependent Release (win-x64)
+        shell: pwsh
+        run: |
+          Write-Host "Building Framework-Dependent Package..."
+          dotnet publish camera/camera.csproj -c Release -r win-x64 --self-contained false -o ./publish-framework
+          
+          if (Test-Path ./publish-framework/Obfuscar/camera.dll) {
+              Copy-Item ./publish-framework/Obfuscar/camera.dll ./publish-framework/camera.dll -Force
+              Remove-Item ./publish-framework/Obfuscar -Recurse -Force
+          }
+          Remove-Item ./publish-framework/Obfuscar.xml -Force -ErrorAction SilentlyContinue
+          Remove-Item ./publish-framework/Mapping.txt -Force -ErrorAction SilentlyContinue
+
+          Compress-Archive -Path ./publish-framework/* -DestinationPath Camera-Monitor-win-x64-FrameworkDependent.zip -Force
+          Write-Host "Camera-Monitor-win-x64-FrameworkDependent.zip created successfully."
+
+      # ─── 3. 上传 CI 构建产物至 GitHub Actions Artifacts ───
+      - name: Upload Standalone Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Camera-Monitor-win-x64-Standalone
+          path: Camera-Monitor-win-x64-Standalone.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Framework-Dependent Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Camera-Monitor-win-x64-FrameworkDependent
+          path: Camera-Monitor-win-x64-FrameworkDependent.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      # ─── 4. 发布 Tag 时自动创建 GitHub Release ───
+      - name: Create GitHub Release (On Tag Push)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Camera-Monitor-win-x64-Standalone.zip
+            Camera-Monitor-win-x64-FrameworkDependent.zip
+          generate_release_notes: true
