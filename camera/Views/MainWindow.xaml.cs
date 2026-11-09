@@ -217,7 +217,7 @@ namespace camera.Views
             }
 
             // 读取保存的退出行为
-            string exitBehavior = ConfigurationManager.GetSetting("ExitBehavior") ?? "Prompt";
+            string exitBehavior = AppSettingsService.Instance.Current.ExitBehavior ?? "Prompt";
 
             if (exitBehavior == "MinimizeToTray")
             {
@@ -246,7 +246,7 @@ namespace camera.Views
                 {
                     if (dialog.RememberChoice)
                     {
-                        ConfigurationManager.SaveSetting("ExitBehavior", "MinimizeToTray");
+                        AppSettingsService.Instance.Update(s => s.ExitBehavior = "MinimizeToTray");
                     }
                     e.Cancel = true;
                     this.Hide();
@@ -255,7 +255,7 @@ namespace camera.Views
                 {
                     if (dialog.RememberChoice)
                     {
-                        ConfigurationManager.SaveSetting("ExitBehavior", "Exit");
+                        AppSettingsService.Instance.Update(s => s.ExitBehavior = "Exit");
                     }
                     _isRealExit = true;
                     if (_notifyIcon != null)
@@ -1216,7 +1216,6 @@ namespace camera.Views
         {
             this.Topmost = topMostButton.IsChecked == true;
             AppSettingsService.Instance.Update(s => s.Topmost = this.Topmost);
-            ConfigurationManager.SaveSetting("Topmost", this.Topmost.ToString());
         }
 
         private void LoadSettings()
@@ -1259,15 +1258,6 @@ namespace camera.Views
                 s.MinWindowHeight = this.MinWindowHeight;
             });
             AppSettingsService.Instance.SaveSync();
-
-            ConfigurationManager.SaveSetting("CanClickThrough", CanClickThrough.ToString());
-            ConfigurationManager.SaveSetting("Topmost", this.Topmost.ToString());
-            ConfigurationManager.SaveSetting("WindowWidth", widthToSave.ToString());
-            ConfigurationManager.SaveSetting("WindowHeight", heightToSave.ToString());
-            ConfigurationManager.SaveSetting("WindowLeft", this.Left.ToString());
-            ConfigurationManager.SaveSetting("WindowTop", this.Top.ToString());
-            ConfigurationManager.SaveSetting("MinWindowWidth", this.MinWindowWidth.ToString());
-            ConfigurationManager.SaveSetting("MinWindowHeight", this.MinWindowHeight.ToString());
         }
 
         #region 内置回放与 24h 时间轴绘制逻辑

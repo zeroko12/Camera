@@ -136,7 +136,6 @@ namespace camera
                     if (Index >= 0)
                     {
                         SaveCameraSetting(s => s.RecordFps = clamped);
-                        ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_RecordFps", clamped.ToString());
                     }
 
                     if (isSave)
@@ -403,7 +402,6 @@ namespace camera
                     if (Index >= 0)
                     {
                         SaveCameraSetting(s => s.RecordResolution = value);
-                        ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_RecordResolution", value);
                     }
                     if (isSave)
                     {
@@ -560,7 +558,6 @@ namespace camera
                     if (Index >= 0)
                     {
                         SaveCameraSetting(s => s.CustomText = value);
-                        ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_CustomText", value ?? "");
                     }
 
                     if (isSave)
@@ -611,7 +608,6 @@ namespace camera
                     if (Index >= 0)
                     {
                         SaveCameraSetting(s => s.IsManualDisabled = value);
-                        ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_IsManualDisabled", value.ToString());
                     }
 
                     RaisePropertyChanged(nameof(IsConnected));
@@ -638,7 +634,6 @@ namespace camera
                     if (!string.IsNullOrEmpty(key))
                     {
                         SaveCameraSetting(s => s.IsFlipHorizontal = value);
-                        ConfigurationManager.SaveSetting($"Camera_{key}_IsFlipHorizontal", value.ToString());
                     }
                     Logger.LogInfo($"[CameraService #{Index}] 设置水平翻转: {value}");
                 }
@@ -662,7 +657,6 @@ namespace camera
                     if (!string.IsNullOrEmpty(key))
                     {
                         SaveCameraSetting(s => s.IsFlipVertical = value);
-                        ConfigurationManager.SaveSetting($"Camera_{key}_IsFlipVertical", value.ToString());
                     }
                     Logger.LogInfo($"[CameraService #{Index}] 设置垂直翻转: {value}");
                 }
@@ -723,7 +717,6 @@ namespace camera
                     if (!string.IsNullOrEmpty(key))
                     {
                         SaveCameraSetting(s => s.StretchMode = value.ToString());
-                        ConfigurationManager.SaveSetting($"Camera_{key}_StretchMode", value.ToString());
                     }
                     RaisePropertyChanged(nameof(IsStretchUniform));
                     RaisePropertyChanged(nameof(IsStretchFill));
@@ -1215,7 +1208,7 @@ namespace camera
             int targetHeight = 0;
             double targetFps = defaultFps > 0 ? defaultFps : 30;
 
-            string savedRes = camConfig?.Resolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
+            string savedRes = camConfig?.Resolution;
             if (string.IsNullOrEmpty(savedRes) && Width > 0 && Height > 0)
             {
                 savedRes = $"{(int)Width}x{(int)Height}";
@@ -1266,7 +1259,7 @@ namespace camera
             RaisePropertyChanged(nameof(SelectedResolution));
 
             // 读取已保存的录像分辨率配置
-            string savedRecordRes = camConfig?.RecordResolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
+            string savedRecordRes = camConfig?.RecordResolution;
             if (!string.IsNullOrEmpty(savedRecordRes) && SupportedRecordResolutions.Contains(savedRecordRes))
             {
                 _selectedRecordResolution = savedRecordRes;
@@ -1282,52 +1275,29 @@ namespace camera
             {
                 RecordFps = camConfig.RecordFps.Value;
             }
-            else
-            {
-                string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
-                if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
-                {
-                    RecordFps = rfps;
-                }
-            }
 
             // 读取已保存的水印文字配置
-            string savedCustomText = camConfig?.CustomText ?? ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText");
+            string savedCustomText = camConfig?.CustomText;
             if (!string.IsNullOrEmpty(savedCustomText))
             {
                 CustomOverlayText = savedCustomText;
             }
 
             // 读取已保存的停用状态
-            bool? savedDisabled = camConfig?.IsManualDisabled;
-            if (!savedDisabled.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsManualDisabled"), out bool dis))
-            {
-                savedDisabled = dis;
-            }
-            if (savedDisabled == true)
+            if (camConfig?.IsManualDisabled == true)
             {
                 _isManualDisabled = true;
             }
 
             // 读取已保存的翻转配置
-            bool? savedFlipH = camConfig?.IsFlipHorizontal;
-            if (!savedFlipH.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsFlipHorizontal"), out bool sfh))
-            {
-                savedFlipH = sfh;
-            }
-            if (savedFlipH == true)
+            if (camConfig?.IsFlipHorizontal == true)
             {
                 _isFlipHorizontal = true;
                 if (_flipProcessor != null) _flipProcessor.FlipHorizontal = true;
                 RaisePropertyChanged(nameof(IsFlipHorizontal));
             }
 
-            bool? savedFlipV = camConfig?.IsFlipVertical;
-            if (!savedFlipV.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsFlipVertical"), out bool sfv))
-            {
-                savedFlipV = sfv;
-            }
-            if (savedFlipV == true)
+            if (camConfig?.IsFlipVertical == true)
             {
                 _isFlipVertical = true;
                 if (_flipProcessor != null) _flipProcessor.FlipVertical = true;
@@ -1335,7 +1305,7 @@ namespace camera
             }
 
             // 读取已保存的画面比例拉伸设置（默认保持比例 Uniform）
-            string savedStretch = camConfig?.StretchMode ?? ConfigurationManager.GetSetting($"Camera_{configKey}_StretchMode");
+            string savedStretch = camConfig?.StretchMode;
             if (!string.IsNullOrEmpty(savedStretch) && Enum.TryParse<Stretch>(savedStretch, true, out var st))
             {
                 _videoStretch = st;
@@ -2170,7 +2140,6 @@ namespace camera
                         if (Index >= 0)
                         {
                             SaveCameraSetting(s => s.Resolution = actualResStr);
-                            ConfigurationManager.SaveSetting($"Camera_{GetConfigKey()}_Resolution", actualResStr);
                         }
 
                         if (_selectedResolution != actualResStr)

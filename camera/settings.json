@@ -1,0 +1,82 @@
+{
+  "IsInitialized": true,
+  "LoadSource": "JSON",
+  "IsSave": true,
+  "Opacity": 1.0,
+  "Title": "离子注入机监控",
+  "SystemTitle": "离子注入机监控",
+  "OverwriteOldFiles": true,
+  "DiskSpaceThreshold": 300240,
+  "SaveDirectory": "SavedVideos",
+  "Quality": 20,
+  "SaveInterval": 1,
+  "MaxPreviewWidth": 640,
+  "PreviewFps": 15,
+  "RecordFps": 15,
+  "Contrast": 1.0,
+  "Luminance": 0.0,
+  "IsGrayHomogenization": false,
+  "OverlayTextSize": 0.3,
+  "MaxFps": 30,
+  "IsDarkTheme": true,
+  "WindowWidth": 811.0,
+  "WindowHeight": 240.0,
+  "WindowLeft": 368.0,
+  "WindowTop": 524.0,
+  "MinWindowWidth": 450.0,
+  "MinWindowHeight": 240.0,
+  "AspectRatio": 1.3333333333333333,
+  "CanClickThrough": false,
+  "Topmost": true,
+  "ExitBehavior": "Prompt",
+  "MaxNvencSessions": 2,
+  "MaxAmfSessions": 3,
+  "MaxQsvSessions": 0,
+  "UseV3Architecture": true,
+  "ForceCpuEncoding": false,
+  "IsStreamingEnabled": false,
+  "StreamProtocol": "HTTP",
+  "StreamPort": 8080,
+  "StreamFps": 15,
+  "StreamQuality": 70,
+  "Cameras": {
+    "Dev_5A65726E": {
+      "Resolution": "1280x720",
+      "IsManualDisabled": false,
+      "IsFlipVertical": true,
+      "SupportedResolutions": [
+        "1920x1080",
+        "1440x1080",
+        "1280x960",
+        "1280x720",
+        "1024x768",
+        "1024x576",
+        "800x600",
+        "640x480",
+        "640x360",
+        "320x240"
+      ],
+      "PreferredFormat": "MJPG"
+    },
+    "Dev_78B3771A": {
+      "SupportedResolutions": [
+        "1920x1080",
+        "1440x1080",
+        "1280x960",
+        "1280x720",
+        "1024x768",
+        "1024x576",
+        "800x600",
+        "640x480",
+        "640x360",
+        "320x240"
+      ],
+      "PreferredFormat": "MJPG"
+    }
+  },
+  "CameraOrder": [
+    "Dev_5A65726E",
+    "Dev_78B3771A"
+  ]
+}
+

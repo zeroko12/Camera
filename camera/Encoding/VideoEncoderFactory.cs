@@ -90,19 +90,6 @@ namespace camera.Encoding
                     if (appSettings.MaxQsvSessions > 0) _maxQsvSessions = appSettings.MaxQsvSessions;
                 }
 
-                var config = System.Configuration.ConfigurationManager.AppSettings;
-                if (bool.TryParse(config["ForceCpuEncoding"], out bool forceCpu))
-                {
-                    _forceCpuEncoding = forceCpu;
-                }
-                if (int.TryParse(config["MaxNvencSessions"], out int nvenc) && nvenc > 0)
-                    _maxNvencSessions = nvenc;
-                if (int.TryParse(config["MaxAmfSessions"], out int amf) && amf > 0)
-                    _maxAmfSessions = amf;
-                // qsv=0 时保留自动检测结果；正数则强制覆盖
-                if (int.TryParse(config["MaxQsvSessions"], out int qsv) && qsv > 0)
-                    _maxQsvSessions = qsv;
-
                 if (_forceCpuEncoding)
                 {
                     Logger.LogInfo("[EncoderFactory] 已启用 ForceCpuEncoding=true，将强制使用 CPU 软件编码 (libx264)");

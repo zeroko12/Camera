@@ -54,24 +54,53 @@ namespace camera
 
         private AppSettingsService()
         {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var dir = Path.Combine(appData, "CameraMonitor");
-            Directory.CreateDirectory(dir);
-            FilePath = Path.Combine(dir, "settings.json");
-
+            FilePath = DetermineFilePath();
             _autoSaveTimer = new System.Threading.Timer(_ => FlushPendingSave(),
                 null, Timeout.Infinite, Timeout.Infinite);
 
-            Logger.LogInfo($"[Settings] 配置文件路径: {FilePath}");
+            Logger.LogInfo($"[Settings] 单一配置文件路径: {FilePath}");
             _current = Load();
         }
 
+        private static string DetermineFilePath()
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var localPath = Path.Combine(baseDir, "settings.json");
+
+            try
+            {
+                if (File.Exists(localPath))
+                {
+                    // 测试现有文件写权限
+                    using (var fs = new FileStream(localPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                    {
+                    }
+                    return localPath;
+                }
+
+                // 文件不存在，测试目录可写性
+                var testFile = Path.Combine(baseDir, $".write_test_{Guid.NewGuid():N}.tmp");
+                File.WriteAllText(testFile, "test");
+                File.Delete(testFile);
+                return localPath;
+            }
+            catch (Exception ex)
+            {
+                // 如果安装在受限目录导致不可写，安全回退到用户 APPDATA
+                var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                var dir = Path.Combine(appData, "CameraMonitor");
+                Directory.CreateDirectory(dir);
+                var fallbackPath = Path.Combine(dir, "settings.json");
+                Logger.LogWarning($"[Settings] 程序目录不可写 ({ex.Message})，安全回退至用户目录: {fallbackPath}");
+                return fallbackPath;
+            }
+        }
+
         /// <summary>
-        /// 加载设置。优先级:JSON 文件 > App.config 迁移 > 默认值。
+        /// 加载设置。单一配置源: settings.json > 默认值。
         /// </summary>
         public AppSettings Load()
         {
-            // 1. 优先尝试 JSON 文件
             if (File.Exists(FilePath))
             {
                 try
@@ -95,28 +124,28 @@ namespace camera
                             Title = resolvedTitle,
                             SystemTitle = resolvedTitle,
                             OverwriteOldFiles = loaded.OverwriteOldFiles,
-                            DiskSpaceThreshold = loaded.DiskSpaceThreshold,
+                            DiskSpaceThreshold = loaded.DiskSpaceThreshold > 0 ? loaded.DiskSpaceThreshold : AppSettings.DefaultDiskSpaceThresholdMb,
                             SaveDirectory = string.IsNullOrWhiteSpace(loaded.SaveDirectory) ? AppSettings.DefaultSaveDirectory : loaded.SaveDirectory,
-                            Quality = loaded.Quality,
-                            SaveInterval = loaded.SaveInterval,
-                            MaxPreviewWidth = loaded.MaxPreviewWidth,
-                            PreviewFps = loaded.PreviewFps,
-                            RecordFps = loaded.RecordFps,
+                            Quality = loaded.Quality > 0 ? loaded.Quality : AppSettings.DefaultQuality,
+                            SaveInterval = loaded.SaveInterval > 0 ? loaded.SaveInterval : AppSettings.DefaultSaveIntervalMin,
+                            MaxPreviewWidth = loaded.MaxPreviewWidth > 0 ? loaded.MaxPreviewWidth : AppSettings.DefaultMaxPreviewWidth,
+                            PreviewFps = loaded.PreviewFps > 0 ? loaded.PreviewFps : AppSettings.DefaultPreviewFps,
+                            RecordFps = loaded.RecordFps > 0 ? loaded.RecordFps : AppSettings.DefaultRecordFps,
                             Contrast = loaded.Contrast,
                             Luminance = loaded.Luminance,
                             IsGrayHomogenization = loaded.IsGrayHomogenization,
-                            OverlayTextSize = loaded.OverlayTextSize,
-                            MaxFps = loaded.MaxFps,
-                            WindowWidth = loaded.WindowWidth,
-                            WindowHeight = loaded.WindowHeight,
+                            OverlayTextSize = loaded.OverlayTextSize > 0 ? loaded.OverlayTextSize : AppSettings.DefaultOverlayTextSize,
+                            MaxFps = loaded.MaxFps > 0 ? loaded.MaxFps : AppSettings.DefaultMaxFps,
+                            WindowWidth = loaded.WindowWidth > 0 ? loaded.WindowWidth : AppSettings.DefaultWindowWidth,
+                            WindowHeight = loaded.WindowHeight > 0 ? loaded.WindowHeight : AppSettings.DefaultWindowHeight,
                             WindowLeft = loaded.WindowLeft,
                             WindowTop = loaded.WindowTop,
-                            MinWindowWidth = loaded.MinWindowWidth,
-                            MinWindowHeight = loaded.MinWindowHeight,
-                            AspectRatio = loaded.AspectRatio,
+                            MinWindowWidth = loaded.MinWindowWidth > 0 ? loaded.MinWindowWidth : AppSettings.DefaultMinWindowWidth,
+                            MinWindowHeight = loaded.MinWindowHeight > 0 ? loaded.MinWindowHeight : AppSettings.DefaultMinWindowHeight,
+                            AspectRatio = loaded.AspectRatio > 0 ? loaded.AspectRatio : AppSettings.DefaultAspectRatio,
                             CanClickThrough = loaded.CanClickThrough,
                             Topmost = loaded.Topmost,
-                            ExitBehavior = loaded.ExitBehavior,
+                            ExitBehavior = string.IsNullOrWhiteSpace(loaded.ExitBehavior) ? AppSettings.DefaultExitBehavior : loaded.ExitBehavior,
                             MaxNvencSessions = loaded.MaxNvencSessions,
                             MaxAmfSessions = loaded.MaxAmfSessions,
                             MaxQsvSessions = loaded.MaxQsvSessions,
@@ -131,74 +160,20 @@ namespace camera
                             Cameras = loaded.Cameras ?? new(StringComparer.OrdinalIgnoreCase),
                             CameraOrder = loaded.CameraOrder ?? new(),
                         };
-                        Logger.LogInfo($"[Settings] 从 JSON 加载成功 ({FilePath})");
+                        Logger.LogInfo($"[Settings] 从单一配置源加载成功 ({FilePath})");
                         return _current;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError($"[Settings] JSON 加载失败,回退到默认: {ex.Message}", ex);
+                    Logger.LogError($"[Settings] JSON 加载失败: {ex.Message}", ex);
                 }
             }
 
-            // 2. fallback: 从旧 App.config 迁移
-            try
-            {
-                var migrated = MigrateFromLegacyConfig();
-                _current = new AppSettings
-                {
-                    IsInitialized = true,
-                    LoadSource    = "App.config",
-                    LoadedAt      = DateTime.UtcNow,
-                    IsSave = migrated.IsSave,
-                    Opacity = migrated.Opacity,
-                    Title = migrated.Title,
-                    SystemTitle = migrated.SystemTitle,
-                    OverwriteOldFiles = migrated.OverwriteOldFiles,
-                    DiskSpaceThreshold = migrated.DiskSpaceThreshold,
-                    SaveDirectory = migrated.SaveDirectory,
-                    Quality = migrated.Quality,
-                    SaveInterval = migrated.SaveInterval,
-                    MaxPreviewWidth = migrated.MaxPreviewWidth,
-                    PreviewFps = migrated.PreviewFps,
-                    RecordFps = migrated.RecordFps,
-                    Contrast = migrated.Contrast,
-                    Luminance = migrated.Luminance,
-                    IsGrayHomogenization = migrated.IsGrayHomogenization,
-                    OverlayTextSize = migrated.OverlayTextSize,
-                    MaxFps = migrated.MaxFps,
-                    WindowWidth = migrated.WindowWidth,
-                    WindowHeight = migrated.WindowHeight,
-                    WindowLeft = migrated.WindowLeft,
-                    WindowTop = migrated.WindowTop,
-                    MinWindowWidth = migrated.MinWindowWidth,
-                    MinWindowHeight = migrated.MinWindowHeight,
-                    AspectRatio = migrated.AspectRatio,
-                    CanClickThrough = migrated.CanClickThrough,
-                    Topmost = migrated.Topmost,
-                    ExitBehavior = migrated.ExitBehavior,
-                    MaxNvencSessions = migrated.MaxNvencSessions,
-                    MaxAmfSessions = migrated.MaxAmfSessions,
-                    MaxQsvSessions = migrated.MaxQsvSessions,
-                    UseV3Architecture = migrated.UseV3Architecture,
-                    ForceCpuEncoding = migrated.ForceCpuEncoding,
-                    IsDarkTheme = migrated.IsDarkTheme,
-                    Cameras = migrated.Cameras ?? new(StringComparer.OrdinalIgnoreCase),
-                    CameraOrder = migrated.CameraOrder ?? new(),
-                };
-                Logger.LogInfo("[Settings] 从 App.config 迁移配置");
-                // 立即落盘,迁移完成
-                SaveSync(_current);
-                return _current;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[Settings] App.config 迁移失败,使用默认: {ex.Message}", ex);
-            }
-
-            // 3. 兜底:全部默认
+            // 兜底: 全部默认值，并立即落盘生成初始配置文件
             _current = AppSettings.CreateDefault();
-            Logger.LogWarning("[Settings] 使用默认配置(JSON 与 App.config 都不存在)");
+            Logger.LogWarning($"[Settings] 配置文件不存在或加载失败，使用默认配置并生成初始文件 → {FilePath}");
+            SaveSync(_current);
             return _current;
         }
 
@@ -273,94 +248,6 @@ namespace camera
         {
             mutator(_current);
             RequestSave();
-        }
-
-        /// <summary>
-        /// 从 System.Configuration.ConfigurationManager 迁移所有已知 key。
-        /// </summary>
-        private AppSettings MigrateFromLegacyConfig()
-        {
-            var legacy = System.Configuration.ConfigurationManager.AppSettings;
-            string Get(string k) => legacy[k];
-
-            int Ip(string k, int d) => int.TryParse(Get(k), out var v) ? v : d;
-            bool Bp(string k, bool d) => bool.TryParse(Get(k), out var v) ? v : d;
-            double Dp(string k, double d) => double.TryParse(Get(k), out var v) ? v : d;
-            string Sp(string k, string d) => string.IsNullOrEmpty(Get(k)) ? d : Get(k);
-
-            var cameras = new Dictionary<string, AppSettings.CameraSettings>(StringComparer.OrdinalIgnoreCase);
-            foreach (string key in legacy.AllKeys)
-            {
-                if (string.IsNullOrEmpty(key)) continue;
-                if (key.StartsWith("Camera_", StringComparison.OrdinalIgnoreCase))
-                {
-                    int lastUnder = key.LastIndexOf('_');
-                    if (lastUnder > 7)
-                    {
-                        string configKey = key.Substring(7, lastUnder - 7);
-                        string prop = key.Substring(lastUnder + 1);
-
-                        if (!cameras.TryGetValue(configKey, out var camSetting))
-                        {
-                            camSetting = new AppSettings.CameraSettings();
-                            cameras[configKey] = camSetting;
-                        }
-
-                        string val = legacy[key];
-                        switch (prop.ToLowerInvariant())
-                        {
-                            case "customtext": camSetting.CustomText = val; break;
-                            case "resolution": camSetting.Resolution = val; break;
-                            case "recordresolution": camSetting.RecordResolution = val; break;
-                            case "recordfps": if (int.TryParse(val, out int rfps)) camSetting.RecordFps = rfps; break;
-                            case "ismanualdisabled": if (bool.TryParse(val, out bool dis)) camSetting.IsManualDisabled = dis; break;
-                            case "isfliphorizontal": if (bool.TryParse(val, out bool fh)) camSetting.IsFlipHorizontal = fh; break;
-                            case "isflipvertical": if (bool.TryParse(val, out bool fv)) camSetting.IsFlipVertical = fv; break;
-                            case "stretchmode": camSetting.StretchMode = val; break;
-                        }
-                    }
-                }
-            }
-
-            string legacyTitle = Sp("SystemTitle", Sp("Title", AppSettings.DefaultSystemTitle));
-
-            return new AppSettings
-            {
-                IsSave               = Bp("isSave", AppSettings.DefaultIsSave),
-                Opacity              = Dp("Opacity", AppSettings.DefaultOpacity),
-                Title                = legacyTitle,
-                SystemTitle          = legacyTitle,
-                OverwriteOldFiles    = Bp("OverwriteOldFiles", AppSettings.DefaultOverwriteOldFiles),
-                DiskSpaceThreshold   = Ip("DiskSpaceThreshold", AppSettings.DefaultDiskSpaceThresholdMb),
-                SaveDirectory        = Sp("SaveDirectory", AppSettings.DefaultSaveDirectory),
-                Quality              = Ip("Quality", AppSettings.DefaultQuality),
-                SaveInterval         = Ip("SaveInterval", AppSettings.DefaultSaveIntervalMin),
-                MaxPreviewWidth      = Ip("MaxPreviewWidth", AppSettings.DefaultMaxPreviewWidth),
-                PreviewFps           = Ip("PreviewFps", AppSettings.DefaultPreviewFps),
-                RecordFps            = Ip("RecordFps", AppSettings.DefaultRecordFps),
-                Contrast             = Dp("Contrast", AppSettings.DefaultContrast),
-                Luminance            = Dp("Luminance", AppSettings.DefaultLuminance),
-                IsGrayHomogenization = Bp("IsGrayHomogenization", AppSettings.DefaultIsGrayHomogenization),
-                OverlayTextSize      = Dp("OverlayTextSize", AppSettings.DefaultOverlayTextSize),
-                MaxFps               = Ip("MaxFps", AppSettings.DefaultMaxFps),
-                WindowWidth          = Dp("WindowWidth", AppSettings.DefaultWindowWidth),
-                WindowHeight         = Dp("WindowHeight", AppSettings.DefaultWindowHeight),
-                WindowLeft           = Dp("WindowLeft", AppSettings.DefaultWindowLeft),
-                WindowTop            = Dp("WindowTop", AppSettings.DefaultWindowTop),
-                MinWindowWidth       = Dp("MinWindowWidth", AppSettings.DefaultMinWindowWidth),
-                MinWindowHeight      = Dp("MinWindowHeight", AppSettings.DefaultMinWindowHeight),
-                AspectRatio          = Dp("AspectRatio", AppSettings.DefaultAspectRatio),
-                CanClickThrough      = Bp("CanClickThrough", AppSettings.DefaultCanClickThrough),
-                Topmost              = Bp("Topmost", AppSettings.DefaultTopmost),
-                ExitBehavior         = Sp("ExitBehavior", AppSettings.DefaultExitBehavior),
-                MaxNvencSessions     = Ip("MaxNvencSessions", AppSettings.DefaultMaxNvencSessions),
-                MaxAmfSessions       = Ip("MaxAmfSessions", AppSettings.DefaultMaxAmfSessions),
-                MaxQsvSessions       = Ip("MaxQsvSessions", AppSettings.DefaultMaxQsvSessions),
-                UseV3Architecture    = Bp("UseV3Architecture", AppSettings.DefaultUseV3Architecture),
-                ForceCpuEncoding     = Bp("ForceCpuEncoding", AppSettings.DefaultForceCpuEncoding),
-                IsDarkTheme          = Bp("IsDarkTheme", AppSettings.DefaultIsDarkTheme),
-                Cameras              = cameras,
-            };
         }
     }
 }

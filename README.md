@@ -97,7 +97,8 @@ dotnet run --project camera/camera.csproj -c Release
 
 ## ⚙️ 配置文件说明
 
-程序优先加载 `%APPDATA%\CameraMonitor\settings.json`，未初始化时自动同步 `camera/App.config`。
+程序采用单一配置源机制，优先加载并保存至程序同级目录的 `settings.json`（若在系统受保护目录无写入权限则安全回退至 `%APPDATA%\CameraMonitor\settings.json`）。
+修改程序同级目录的 `settings.json` 保存后重新打开程序即可生效。
 
 主要可配置项如下：
 * `SystemTitle` / `Title`：监控程序主窗口与标题栏标题。

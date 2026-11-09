@@ -148,10 +148,9 @@ namespace camera.ViewModels
             DiskSpaceThreshold = DiskSpaceThresholdInput;
             StorageManager.Instance.DiskSpaceThresholdMb = DiskSpaceThreshold;
             
-            // 立即保存至 JSON 与 App.config 双重持久化
+            // 立即保存至单一配置源 settings.json
             AppSettingsService.Instance.Update(s => s.DiskSpaceThreshold = DiskSpaceThreshold);
             AppSettingsService.Instance.SaveSync();
-            ConfigurationManager.SaveSetting("DiskSpaceThreshold", DiskSpaceThreshold.ToString());
 
             UpdateDiskSpaceThresholdStatus();
             UpdateDiskRecordingStatus();
@@ -213,7 +212,6 @@ namespace camera.ViewModels
                     }
                     AppSettingsService.Instance.Update(s => s.ForceCpuEncoding = value);
                     AppSettingsService.Instance.SaveSync();
-                    ConfigurationManager.SaveSetting("ForceCpuEncoding", value.ToString());
 
                     // 全链路联动控制优化项 1 (预览下采样), 2 (图像增强与硬件变换), 3 (录像编码与回放解码)
                     foreach (var cam in Cameras)
@@ -819,7 +817,6 @@ namespace camera.ViewModels
                 {
                     ApplyTheme(value);
                     AppSettingsService.Instance.Update(s => s.IsDarkTheme = value);
-                    ConfigurationManager.SaveSetting("IsDarkTheme", value.ToString());
                 }
             }
         }
@@ -2442,9 +2439,7 @@ namespace camera.ViewModels
             AppSettings.CameraSettings camConfig = null;
             AppSettingsService.Instance.Current.Cameras.TryGetValue(configKey, out camConfig);
 
-            cam.CustomOverlayText = camConfig?.CustomText 
-                ?? ConfigurationManager.GetSetting($"Camera_{configKey}_CustomText") 
-                ?? cam.Name;
+            cam.CustomOverlayText = camConfig?.CustomText ?? cam.Name;
             cam.OverlayTextSize = OverlayTextSize;
             cam.isSave = isSave;
             cam.OverwriteOldFiles = OverwriteOldFiles;
@@ -2458,12 +2453,12 @@ namespace camera.ViewModels
             cam.MaxPreviewWidth = MaxPreviewWidth;
             cam.UseGpuAcceleration = !ForceCpuEncoding;
 
-            string savedRes = camConfig?.Resolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_Resolution");
+            string savedRes = camConfig?.Resolution;
             if (!string.IsNullOrEmpty(savedRes))
             {
                 cam.SelectedResolution = savedRes;
             }
-            string savedRecordRes = camConfig?.RecordResolution ?? ConfigurationManager.GetSetting($"Camera_{configKey}_RecordResolution");
+            string savedRecordRes = camConfig?.RecordResolution;
             if (!string.IsNullOrEmpty(savedRecordRes))
             {
                 cam.SelectedRecordResolution = savedRecordRes;
@@ -2472,40 +2467,22 @@ namespace camera.ViewModels
             {
                 cam.RecordFps = camConfig.RecordFps.Value;
             }
-            else
-            {
-                string savedRecordFps = ConfigurationManager.GetSetting($"Camera_{configKey}_RecordFps");
-                if (!string.IsNullOrEmpty(savedRecordFps) && int.TryParse(savedRecordFps, out int rfps))
-                {
-                    cam.RecordFps = rfps;
-                }
-            }
             if (camConfig?.IsManualDisabled == true)
             {
                 cam.IsManualDisabled = true;
             }
 
-            bool? savedFlipH = camConfig?.IsFlipHorizontal;
-            if (!savedFlipH.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsFlipHorizontal"), out bool sfh))
-            {
-                savedFlipH = sfh;
-            }
-            if (savedFlipH == true)
+            if (camConfig?.IsFlipHorizontal == true)
             {
                 cam.IsFlipHorizontal = true;
             }
 
-            bool? savedFlipV = camConfig?.IsFlipVertical;
-            if (!savedFlipV.HasValue && bool.TryParse(ConfigurationManager.GetSetting($"Camera_{configKey}_IsFlipVertical"), out bool sfv))
-            {
-                savedFlipV = sfv;
-            }
-            if (savedFlipV == true)
+            if (camConfig?.IsFlipVertical == true)
             {
                 cam.IsFlipVertical = true;
             }
 
-            string savedStretch = camConfig?.StretchMode ?? ConfigurationManager.GetSetting($"Camera_{configKey}_StretchMode");
+            string savedStretch = camConfig?.StretchMode;
             if (!string.IsNullOrEmpty(savedStretch) && Enum.TryParse<System.Windows.Media.Stretch>(savedStretch, true, out var st))
             {
                 cam.VideoStretch = st;
@@ -2566,38 +2543,6 @@ namespace camera.ViewModels
                 }
             });
             AppSettingsService.Instance.SaveSync();
-
-            ConfigurationManager.SaveSetting("isSave", isSave.ToString());
-            ConfigurationManager.SaveSetting("Opacity", Opacity.ToString());
-            ConfigurationManager.SaveSetting("Title", Title);
-            ConfigurationManager.SaveSetting("SystemTitle", SystemTitle);
-            ConfigurationManager.SaveSetting("OverwriteOldFiles", OverwriteOldFiles.ToString());
-            ConfigurationManager.SaveSetting("DiskSpaceThreshold", this.DiskSpaceThreshold.ToString());
-            ConfigurationManager.SaveSetting("SaveDirectory", StorageManager.Instance.SaveDirectory);
-            ConfigurationManager.SaveSetting("Quality", this.Quality.ToString());
-            ConfigurationManager.SaveSetting("SaveInterval", this.SaveInterval.ToString());
-            ConfigurationManager.SaveSetting("MaxPreviewWidth", this.MaxPreviewWidth.ToString());
-            ConfigurationManager.SaveSetting("PreviewFps", this.PreviewFps.ToString());
-            ConfigurationManager.SaveSetting("RecordFps", this.RecordFps.ToString());
-            ConfigurationManager.SaveSetting("Contrast", this.Contrast.ToString());
-            ConfigurationManager.SaveSetting("Luminance", this.Luminance.ToString());
-            ConfigurationManager.SaveSetting("IsGrayHomogenization", this.IsGrayHomogenization.ToString());
-            ConfigurationManager.SaveSetting("OverlayTextSize", this.OverlayTextSize.ToString());
-            ConfigurationManager.SaveSetting("ForceCpuEncoding", this.ForceCpuEncoding.ToString());
-            ConfigurationManager.SaveSetting("IsDarkTheme", this.IsDarkTheme.ToString());
-
-            foreach (var cam in Cameras)
-            {
-                 string configKey = cam.GetConfigKey();
-                 ConfigurationManager.SaveSetting($"Camera_{configKey}_CustomText", cam.CustomOverlayText ?? "");
-                 ConfigurationManager.SaveSetting($"Camera_{configKey}_Resolution", cam.SelectedResolution ?? "");
-                 ConfigurationManager.SaveSetting($"Camera_{configKey}_RecordResolution", cam.SelectedRecordResolution ?? "与采集分辨率一致");
-                 ConfigurationManager.SaveSetting($"Camera_{configKey}_RecordFps", cam.RecordFps.ToString());
-                 ConfigurationManager.SaveSetting($"Camera_{configKey}_IsManualDisabled", cam.IsManualDisabled.ToString());
-                 ConfigurationManager.SaveSetting($"Camera_{configKey}_IsFlipHorizontal", cam.IsFlipHorizontal.ToString());
-                 ConfigurationManager.SaveSetting($"Camera_{configKey}_IsFlipVertical", cam.IsFlipVertical.ToString());
-                 ConfigurationManager.SaveSetting($"Camera_{configKey}_StretchMode", cam.VideoStretch.ToString());
-            }
         }
 
         #endregion
