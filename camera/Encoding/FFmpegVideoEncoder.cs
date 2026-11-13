@@ -125,7 +125,7 @@ namespace camera.Encoding
             try
             {
                 string encoderArgs = GetEncoderArguments(codec, quality);
-                
+
                 // 构建缩放与水印滤镜参数
                 string vfFilter = "";
                 if (inputWidth != recordWidth || inputHeight != recordHeight)
@@ -149,7 +149,7 @@ namespace camera.Encoding
                 if (fontSize < 8) fontSize = 8;
 
                 string drawTextFilter = $"drawtext=fontfile='{fontPath}':text='{escapedText}%{{localtime}}':x=20:y=h-40:fontsize={fontSize}:fontcolor=white";
-                
+
                 if (string.IsNullOrEmpty(vfFilter))
                 {
                     vfFilter = drawTextFilter;
@@ -177,9 +177,10 @@ namespace camera.Encoding
                     {
                         Directory.CreateDirectory(directory);
                     }
-                    // -movflags +faststart: 将 moov atom 移到文件开头，支持渐进式加载和在线播放
                     // -an: 无音频流（纯视频录制）
-                    fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {inputWidth}x{inputHeight} -r {fps} -i - {encoderArgs} {vfArgs} -pix_fmt yuv420p -g {gopSize} -movflags +faststart -an \"{outputPath}\"";
+                    // 优化：移除 -movflags +faststart。本地录像无需流式快速加载，
+                    // 移除后避免了 FFmpeg 在分段收尾时重新读取并从头重写整文件的二次 I/O 尖峰，大幅降低机械硬盘寻道压力
+                    fullArgs = $"-y -hide_banner -f rawvideo -pix_fmt yuv420p -s {inputWidth}x{inputHeight} -r {fps} -i - {encoderArgs} {vfArgs} -pix_fmt yuv420p -g {gopSize} -an \"{outputPath}\"";
                 }
 
                 _ffmpegProcess = new Process
@@ -309,7 +310,7 @@ namespace camera.Encoding
                 Cv2.CvtColor(frameToEncode, _yuvBuffer, ColorConversionCodes.BGR2YUV_I420);
 
                 int frameSize = (int)_yuvBuffer.Total() * _yuvBuffer.ElemSize();
-                
+
                 // 优化：利用 ReadOnlySpan 直接包装 native 指针，实现完全零拷贝写入，消除托管堆拷贝开销
                 unsafe
                 {

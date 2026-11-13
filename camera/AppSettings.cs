@@ -26,8 +26,8 @@ namespace camera
         public const bool    DefaultOverwriteOldFiles     = true;
         public const int     DefaultDiskSpaceThresholdMb  = 10240;  // 与 App.config 一致
         public const string  DefaultSaveDirectory         = "SavedVideos";
-        public const int     DefaultQuality               = 20;
-        public const int     DefaultSaveIntervalMin       = 1;
+        public const int     DefaultQuality               = 26;
+        public const int     DefaultSaveIntervalMin       = 5;
         public const int     DefaultMaxPreviewWidth       = 640;
         public const int     DefaultPreviewFps            = 15;
         public const int     DefaultRecordFps             = 15;
